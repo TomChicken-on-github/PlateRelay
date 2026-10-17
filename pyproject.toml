@@ -1,0 +1,35 @@
+[project]
+name = "platerelay"
+version = "0.1.0"
+description = "PlateRelay: Shared 3D Print Fleet Infrastructure for LAN Hackathons & Makerspaces"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "httpx>=0.27.0",
+    "websockets>=13.0",
+    "paho-mqtt>=2.1.0",
+    "pyyaml>=6.0.2",
+    "sqlalchemy>=2.0.30",
+    "asyncpg>=0.29.0",
+    "aiosqlite>=0.20.0",
+    "pyjwt>=2.8.0",
+    "bcrypt>=4.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["panel*", "daemon*"]
