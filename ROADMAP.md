@@ -9,7 +9,7 @@
 
 | 里程碑 | 核心主题 | 架构边界 | 生产级准入标准 (Definition of Done) | 当前状态 |
 | :--- | :--- | :--- | :--- | :--- |
-| **Milestone 1** | **多机台只读监控大屏** | Panel (FastAPI + Naive UI 前端) ↔ Daemon (HAL 仿真 + 真实X2D被动挂载) | 双端独立常驻进程拉起，通过认证 WS 管道实现 1s 遥测推流，前端大屏动态呈现高仿真动效，断网自动标记 OFFLINE，重连秒级自愈。 | **进行中 (In Progress)** |
+| **Milestone 1** | **多机台只读监控大屏** | Panel (FastAPI + Vue 3 前端) ↔ Daemon (HAL 仿真 + 真实X2D被动挂载) | 双端独立常驻进程拉起，通过认证 WS 管道实现 1s 遥测推流，前端大屏动态呈现高仿真动效，断网自动标记 OFFLINE，重连秒级自愈。 | **进行中 (In Progress)** |
 | **Milestone 2** | **3MF 切片解析与拆盘微内核** | Panel Backend (`modules/jobs/unpacker.py`) | 内存安全解包 `.gcode.3mf`，提取元数据，自动拆分子盘工单与料槽预估，真实 3MF 文件测试覆盖。 | 待开始 |
 | **Milestone 3** | **去队伍化账户与动态并发排单** | Panel Backend (`identity`, `jobs` 状态机) | 自然人 JWT 鉴权、动态并发限额锁（节点 A 判定）、FIFO 待排队列及审核流转。 | 待开始 |
 | **Milestone 4** | **拓竹硬件协议驱动与双状态机** | Daemon (`hal/bambu_mqtt.py`, `hal/bambu_ftps.py`) | 真实/模拟拓竹机床 MQTT TLS 8883 与 FTPS 990 握手、派单原子回滚、清台打卡防线、SD 卡自愈清理。 | 待开始 |
@@ -27,14 +27,13 @@
   - 生产静态资产挂载：直接挂载 `panel/backend/dist` 编译产物，具备 SPA 路由 Fallback 兜底。
 - **`panel/frontend/`**：
   - 独立 Vue 3 + Tailwind CSS + TypeScript 工程。
-  - UI 深度参考 **Komari / Naive UI 卡片样式**：
-    - 机型徽章、高信息密度排版、状态呼吸指示灯（PRINTING 蓝绿呼吸、IDLE 翠绿、CLEARING 琥珀橙、OFFLINE 灰雾）。
-    - 喷头与热床实时双温仪表盘（含设定目标温与动态波形/微动效）。
-    - 进度条平滑过度（平滑插值，避免跳帧）、实时层高（`Layer X / Y`）、预估剩余时长。
-    - AMS 4 槽位料盘可视化色块（支持十六进制真彩渲染、料盘材质标签与正在供料高亮环）。
-    - 真实 X2D 机台被动挂载卡片（优雅呈现 `OFFLINE·等待开启局域网模式`，贴心显示指引提示）。
-    - 顶部导航栏统计胶囊（总机台、打印中、就绪空闲、离线台数、网络心跳延迟）。
-  - 具备指数退避自动重连的生产级 WebSocket Client。
+  - 当前界面按 [Figma 完整 Dashboard 画板 `7:356`](https://www.figma.com/design/AAcikiA6Rj7N9WMtki3Ttd/PlateRelay-Desktop?node-id=7-356) 复制，暂不沿用旧版大屏的布局约束：
+    - 原始画板 1680×1096，200px 侧栏、三张指标卡、三列五张设备卡片；按可用视口宽度整体等比适配，不重新排列卡片。
+    - 五张卡片分别保留打印、断料、AMS 阻断、待清台和离线的原稿内容与不同高度；包含原始摄像头示例图、AMS 圆弧、波浪进度条、底部告警与离线模糊遮罩。
+    - Figma 原始图像、SVG 和所需字体本地托管，字体授权文本一并保留；不使用设计截图替代 DOM，不在运行时请求临时 Figma 资源地址。
+    - 当前为设计稿内容展示：指标、设备名、发起人、画面和时间均来自原稿，不连接模拟 Daemon，也不宣称其为实时机群数据。
+    - 设备搜索、视图筛选和原稿导航可本地操作；“申请打印”按原稿 `70:581` 展示，不增加设计中不存在的表单。
+  - 后端遥测接口与 Daemon 保留原有契约；上一版为卡片新增的可选遥测字段已撤销。本地构建后由 FastAPI 在 `http://127.0.0.1:8000` 托管。
 
 ### 2. 节点端架构 (Daemon)
 - **`daemon/`**：

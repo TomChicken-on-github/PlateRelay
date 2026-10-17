@@ -1,296 +1,131 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import type { Printer, FleetSnapshotMessage, FleetUpdateMessage } from './types';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import PrinterCard from './components/PrinterCard.vue';
+import brandIcon from './assets/dashboard/1ef04.svg';
+import navigationIcon from './assets/dashboard/76b4e.svg';
+import notificationIcon from './assets/dashboard/dc112.svg';
+import searchIcon from './assets/dashboard/386ce.svg';
+import queueIcon from './assets/dashboard/be719.svg';
+import printerIcon from './assets/dashboard/44e7c.svg';
+import clearingIcon from './assets/dashboard/45be8.svg';
+import selectedIcon from './assets/dashboard/103f4.svg';
 
-const printers = ref<Printer[]>([]);
-const isConnected = ref(false);
-const latencyMs = ref<number | null>(null);
-const reconnectAttempts = ref(0);
-const searchQuery = ref('');
-const selectedStateFilter = ref<string>('ALL');
-
-let ws: WebSocket | null = null;
-let pingInterval: number | null = null;
-let reconnectTimer: number | null = null;
-let pingStartTime = 0;
-
-// Fleet Summary Computed Stats
-const totalCount = computed(() => printers.value.length);
-const printingCount = computed(() => printers.value.filter(p => p.state === 'PRINTING').length);
-const idleCount = computed(() => printers.value.filter(p => p.state === 'IDLE').length);
-const clearingCount = computed(() => printers.value.filter(p => p.state === 'CLEARING_REQUIRED').length);
-const offlineCount = computed(() => printers.value.filter(p => p.state === 'OFFLINE').length);
-
-// Filtered & Sorted Printers
-const filteredPrinters = computed(() => {
-  return printers.value.filter(p => {
-    // State Filter
-    if (selectedStateFilter.value !== 'ALL' && p.state !== selectedStateFilter.value) {
-      return false;
-    }
-    // Search Filter
-    if (searchQuery.value.trim()) {
-      const q = searchQuery.value.toLowerCase().trim();
-      const matchName = p.name.toLowerCase().includes(q);
-      const matchModel = p.model.toLowerCase().includes(q);
-      const matchSerial = p.serial_number.toLowerCase().includes(q);
-      return matchName || matchModel || matchSerial;
-    }
-    return true;
-  });
-});
-
-function connectWebSocket() {
-  if (ws) {
-    try { ws.close(); } catch {}
-    ws = null;
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-  const wsUrl = `${protocol}//${host}/api/v1/ws/dashboard`;
-
-  try {
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      isConnected.value = true;
-      reconnectAttempts.value = 0;
-      startHeartbeat();
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'FLEET_SNAPSHOT') {
-          printers.value = (data as FleetSnapshotMessage).printers;
-        } else if (data.type === 'FLEET_UPDATE') {
-          printers.value = (data as FleetUpdateMessage).printers;
-        } else if (data.type === 'PONG') {
-          if (pingStartTime > 0) {
-            latencyMs.value = Math.max(1, Math.round(performance.now() - pingStartTime));
-          }
-        }
-      } catch (err) {
-        console.error('Failed to parse incoming WebSocket message:', err);
-      }
-    };
-
-    ws.onclose = () => {
-      isConnected.value = false;
-      stopHeartbeat();
-      scheduleReconnect();
-    };
-
-    ws.onerror = (err) => {
-      console.warn('Dashboard WebSocket encounter:', err);
-      try { ws?.close(); } catch {}
-    };
-  } catch (e) {
-    scheduleReconnect();
-  }
+const scale = ref(1);
+const page = ref<'overview' | 'print'>('overview');
+const query = ref('');
+const filter = ref<'focus' | 'all' | 'attention'>('focus');
+const artboardHeight = computed(() => page.value === 'overview' ? 1096 : 1080);
+const deviceNames = {
+  printing: 'X1C-01',
+  error: 'P1SC-05',
+  blocked: 'X2D-01',
+  clearing: 'P2S-04',
+  offline: 'P2S-03',
+};
+function isVisible(variant: keyof typeof deviceNames) {
+  return (filter.value !== 'attention' || variant !== 'printing')
+    && deviceNames[variant].toLowerCase().includes(query.value.trim().toLowerCase());
 }
-
-function startHeartbeat() {
-  stopHeartbeat();
-  pingInterval = window.setInterval(() => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      pingStartTime = performance.now();
-      ws.send(JSON.stringify({ type: 'PING' }));
-    }
-  }, 5000);
+let resizeObserver: ResizeObserver | null = null;
+let fitFrame = 0;
+function fitArtboard() {
+  scale.value = document.documentElement.clientWidth / 1680;
 }
-
-function stopHeartbeat() {
-  if (pingInterval !== null) {
-    clearInterval(pingInterval);
-    pingInterval = null;
-  }
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer !== null) return;
-  reconnectAttempts.value++;
-  // Exponential backoff capped at 5s
-  const delay = Math.min(5000, 1000 * Math.pow(1.5, Math.min(reconnectAttempts.value, 6)));
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null;
-    connectWebSocket();
-  }, delay);
-}
-
 onMounted(() => {
-  connectWebSocket();
+  fitArtboard();
+  resizeObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(fitFrame);
+    fitFrame = requestAnimationFrame(fitArtboard);
+  });
+  resizeObserver.observe(document.documentElement);
 });
-
 onUnmounted(() => {
-  stopHeartbeat();
-  if (reconnectTimer !== null) clearTimeout(reconnectTimer);
-  if (ws) {
-    try { ws.close(); } catch {}
-    ws = null;
-  }
+  resizeObserver?.disconnect();
+  cancelAnimationFrame(fitFrame);
 });
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col">
-    <!-- Top Header Navigation -->
-    <header class="sticky top-0 z-30 bg-[#12161f]/95 backdrop-blur border-b border-[#242b38] px-6 py-3.5 shadow-md">
-      <div class="max-w-[1700px] mx-auto flex flex-wrap items-center justify-between gap-4">
-        <!-- Logo & Branding -->
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white shadow-lg shadow-emerald-900/30">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
+  <div class="dashboard-viewport" :style="{ height: `${artboardHeight * scale}px` }">
+    <div class="dashboard-artboard" :style="{ height: `${artboardHeight}px`, transform: `scale(${scale})` }" :data-node-id="page === 'overview' ? '7:356' : '70:581'">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand" data-node-id="7:358">
+          <img :src="brandIcon" alt="" width="35" height="32" />
+          <p class="brand-name">PlateRelay</p>
+          <p class="brand-caption">打印机管理中枢</p>
+        </div>
+        <nav class="navigation">
+          <button class="nav-entry" :class="{ 'is-active': page === 'overview' }" :aria-current="page === 'overview' ? 'page' : undefined" @click="page = 'overview'">
+            <span class="nav-state-layer"><img :src="navigationIcon" alt="" width="20" height="20" /><span>概览</span></span>
+          </button>
+          <button class="nav-entry" :class="{ 'is-active': page === 'print' }" :aria-current="page === 'print' ? 'page' : undefined" @click="page = 'print'">
+            <span class="nav-state-layer"><img :src="navigationIcon" alt="" width="20" height="20" /><span>申请打印</span></span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="workspace-header" data-node-id="7:371">
+          <h1>{{ page === 'overview' ? '概况' : '申请打印' }}</h1>
+          <div class="workspace-tools">
+            <span class="notification" role="img" aria-label="通知"><img :src="notificationIcon" alt="" width="24" height="24" /></span>
+            <label class="device-search">
+              <span class="search-leading"><img :src="searchIcon" alt="" width="24" height="24" /></span>
+              <input v-model="query" aria-label="设备" placeholder="设备" type="search" />
+            </label>
           </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h1 class="text-lg font-bold tracking-tight text-white leading-none">
-                PlateRelay
-              </h1>
-              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                EVENT MODE · 黑客松赛事
-              </span>
+        </header>
+
+        <template v-if="page === 'overview'">
+          <section class="metrics" aria-label="业务流转指标" data-node-id="7:377">
+            <article class="metric" data-node-id="7:389">
+              <div class="metric-heading"><h2>排队 / 等待中</h2><img :src="queueIcon" alt="" width="20" height="20" /></div>
+              <div class="metric-value"><span class="metric-number">16</span><span class="metric-unit">项</span></div>
+              <p class="metric-description">含 1 项紧急 · 1 项 AMS 阻断</p>
+              <p class="metric-trend">↓ 较 1 小时前 −4</p>
+            </article>
+            <article class="metric" data-node-id="7:401">
+              <div class="metric-heading"><h2>正在打印设备</h2><img :src="printerIcon" alt="" width="20" height="20" /></div>
+              <div class="metric-value"><span class="metric-number">11</span><span class="metric-unit">/ 20 台</span></div>
+              <p class="metric-description">当前利用率 60% · 1 台预热</p>
+              <p class="metric-trend">↑ 较 1 小时前 +2 台</p>
+            </article>
+            <article class="metric" data-node-id="7:413">
+              <div class="metric-heading"><h2>待清台机器</h2><img :src="clearingIcon" alt="" width="20" height="20" /></div>
+              <div class="metric-value"><span class="metric-number">3</span><span class="metric-unit">台</span></div>
+              <p class="metric-description is-warning">未入库确认前禁止派单</p>
+              <p class="metric-trend">↑ 较 1 小时前 +1 台</p>
+            </article>
+          </section>
+
+          <section class="equipment" aria-labelledby="equipment-title" data-node-id="7:444">
+            <header class="equipment-header">
+              <div class="equipment-heading">
+                <h2 id="equipment-title">设备状态</h2>
+                <p>20 台设备 · 11 打印中 / 1 预热 / 4 就绪（3 待清台、1 AMS 阻断）/ 1 空闲 / 1 故障 / 2 离线</p>
+              </div>
+              <div class="device-filters" aria-label="视图筛选">
+                <button class="device-filter focus-filter" :class="{ 'is-selected': filter === 'focus' }" :aria-pressed="filter === 'focus'" @click="filter = 'focus'"><img :src="selectedIcon" alt="" width="18" height="18" /><span>重点设备 6</span></button>
+                <button class="device-filter" :class="{ 'is-selected': filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部 20</button>
+                <button class="device-filter" :class="{ 'is-selected': filter === 'attention' }" :aria-pressed="filter === 'attention'" @click="filter = 'attention'">需处理 5</button>
+              </div>
+            </header>
+            <div class="device-columns" data-node-id="7:453">
+              <div class="device-column" data-node-id="7:454">
+                <PrinterCard v-if="isVisible('printing')" variant="printing" />
+                <PrinterCard v-if="isVisible('error')" variant="error" />
+              </div>
+              <div class="device-column" data-node-id="7:538">
+                <PrinterCard v-if="isVisible('blocked')" variant="blocked" />
+                <PrinterCard v-if="isVisible('offline')" variant="offline" />
+              </div>
+              <div class="device-column" data-node-id="7:625">
+                <PrinterCard v-if="isVisible('clearing')" variant="clearing" />
+              </div>
             </div>
-            <p class="text-[11px] text-slate-400 mt-0.5 leading-none">
-              局域网共享 3D 打印服务中枢 · 多机台大屏监控
-            </p>
-          </div>
-        </div>
-
-        <!-- Real-Time Metrics Summary Pills -->
-        <div class="flex items-center gap-2 text-xs">
-          <!-- Total -->
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#181e2b] border border-[#273042]">
-            <span class="text-slate-400">机群总数</span>
-            <span class="font-bold text-slate-100 font-mono">{{ totalCount }}</span>
-          </div>
-
-          <!-- Printing -->
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-dot-green" />
-            <span>打印中</span>
-            <span class="font-bold font-mono">{{ printingCount }}</span>
-          </div>
-
-          <!-- Idle -->
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400">
-            <span class="w-2 h-2 rounded-full bg-green-400" />
-            <span>待命</span>
-            <span class="font-bold font-mono">{{ idleCount }}</span>
-          </div>
-
-          <!-- Clearing -->
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-400">
-            <span class="w-2 h-2 rounded-full bg-amber-400" />
-            <span>待铲台</span>
-            <span class="font-bold font-mono">{{ clearingCount }}</span>
-          </div>
-
-          <!-- Offline -->
-          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300">
-            <span class="w-2 h-2 rounded-full bg-slate-400" />
-            <span>离线</span>
-            <span class="font-bold font-mono">{{ offlineCount }}</span>
-          </div>
-
-          <!-- Connection Status -->
-          <div 
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ml-2 text-xs font-medium"
-            :class="isConnected 
-              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300' 
-              : 'bg-rose-950/40 border-rose-500/30 text-rose-300'"
-          >
-            <span 
-              class="w-2 h-2 rounded-full" 
-              :class="isConnected ? 'bg-emerald-400' : 'bg-rose-400 animate-ping'" 
-            />
-            <span v-if="isConnected">
-              实时推流 {{ latencyMs ? `(${latencyMs}ms)` : '' }}
-            </span>
-            <span v-else>
-              连接断开 (正在重连...)
-            </span>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <!-- Sub-Navbar: Filters & Search Controls -->
-    <div class="max-w-[1700px] w-full mx-auto px-6 pt-5 pb-3 flex flex-wrap items-center justify-between gap-3">
-      <!-- State Filters -->
-      <div class="flex items-center gap-1.5 p-1 rounded-xl bg-[#141923] border border-[#262e3d] text-xs">
-        <button
-          v-for="filter in [
-            { key: 'ALL', label: '全部机台' },
-            { key: 'PRINTING', label: '打印中' },
-            { key: 'IDLE', label: '待命中' },
-            { key: 'CLEARING_REQUIRED', label: '待清台' },
-            { key: 'OFFLINE', label: '离线' },
-          ]"
-          :key="filter.key"
-          @click="selectedStateFilter = filter.key"
-          class="px-3 py-1.5 rounded-lg font-medium transition-all"
-          :class="selectedStateFilter === filter.key 
-            ? 'bg-emerald-600 text-white shadow-sm font-semibold' 
-            : 'text-slate-400 hover:text-slate-200 hover:bg-[#1c2230]'"
-        >
-          {{ filter.label }}
-        </button>
-      </div>
-
-      <!-- Search Input -->
-      <div class="relative min-w-[260px]">
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          placeholder="搜索机型 / 名称 / 序列号..." 
-          class="w-full bg-[#141923] border border-[#262e3d] rounded-xl px-3.5 py-1.5 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/40 transition-all"
-        />
-        <span class="absolute right-3 top-2 text-slate-400 text-xs">🔍</span>
-      </div>
+          </section>
+        </template>
+      </main>
     </div>
-
-    <!-- Main Grid Content -->
-    <main class="max-w-[1700px] w-full mx-auto px-6 py-4 flex-1">
-      <!-- Empty State -->
-      <div 
-        v-if="filteredPrinters.length === 0" 
-        class="py-16 text-center rounded-2xl bg-[#121620] border border-dashed border-[#262f3f] my-6"
-      >
-        <p class="text-base font-semibold text-slate-300">暂无符合条件的打印机</p>
-        <p class="text-xs text-slate-400 mt-1">
-          {{ printers.length === 0 ? '正在等待节点探针 (Daemon) 上报数据，请确认 Daemon 进程已启动。' : '请尝试清空搜索条件或切换状态筛选。' }}
-        </p>
-      </div>
-
-      <!-- Cards Grid -->
-      <div 
-        v-else 
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
-      >
-        <PrinterCard 
-          v-for="p in filteredPrinters" 
-          :key="p.id" 
-          :printer="p" 
-        />
-      </div>
-    </main>
-
-    <!-- Bottom Read-Only Safety Banner -->
-    <footer class="mt-auto border-t border-[#1e2533] bg-[#0e1219] px-6 py-2.5 text-center text-[11px] text-slate-400">
-      <div class="max-w-[1700px] mx-auto flex items-center justify-between">
-        <span class="inline-flex items-center gap-1.5 text-emerald-400/90 font-medium">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          物理安全防线激活：当前处于 Milestone 1 纯遥测监视阶段，下行打印控制已被熔断，真实机床受被动保护。
-        </span>
-        <span class="font-mono text-slate-400">
-          PlateRelay v0.1.0 · WebSocket Telemetry Hub
-        </span>
-      </div>
-    </footer>
   </div>
 </template>
