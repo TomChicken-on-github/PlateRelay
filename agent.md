@@ -30,14 +30,22 @@ PlateRelay 是一套面向多用户的**局域网“共享 3D 打印服务中枢
   4. 机器是否被占用或卡死（遥测监听、清台防线、野生任务隔离、断网自愈）。
   5. 谁来操作、留底与取件（双照留底、独占储物盒/溢出暂存池、短时效动态凭证核销）。
 
-### 1.3 架构演进策略：微内核 + 可插拔策略 (Microkernel + Strategy Architecture)
-系统采用“**微内核专注物理流转，业务策略高度模块化**”的设计理念。
-- **不可变微内核 (Core Engine)**：拓竹 MQTT/FTPS 协议驱动、切片 3MF 内存解包、双状态机骨架、对象存储抽象与不可变审计流水。
-- **可插拔策略层 (Pluggable Policies)**：并发控制（`ConcurrencyPolicy`）、排单调度（`SchedulePolicy`）、履约交付（`FulfillmentPolicy`）。
-- **落地实施节奏**：
-  - **v1 优先聚焦**：全系统优先交付完备的**黑客松赛事场景（Event Mode）**，所有功能与交互以此为最高优先级。
-  - **通用化设计留足空间**：实验室（Lab）与农场（Farm）不在此阶段做过度实现，但策略接口必须预留清晰契约，确保未来扩展无需推翻核心架构。
-  - **场景预设切换**：单实例通过环境变量 `WORKSPACE_PROFILE=event|lab|farm` 注入对应的策略组件。
+### 1.3 架构演进策略：面板/节点解耦与垂直切片交付 (Decoupled Panel-Daemon & Vertical Slicing)
+系统采用“**主控与网页承载（Panel 面板端）+ 硬件网关探针（Daemon 节点端）**”的松耦合解耦架构（参考 MCSManager 模式），并实行“**垂直切片（Walking Skeleton）、逐个功能闭环落地**”的工程推进纪律：
+
+1. **双主体物理分工**：
+   - **面板端（Panel - 主控平台与网页承载一体）**：负责业务中枢、用户认证、工单状态机、排单并发锁、数据持久化（PostgreSQL/MinIO），整合并托管编译后的前端静态页面（Vue 3 单页应用），向下提供 WebSocket 端口（`/daemon/ws`）接纳节点，向上向浏览器广播标准化大屏数据（`/api/v1/ws/dashboard`）。
+   - **节点端（Daemon - 硬件抽象与遥测探针）**：作为独立的轻量 Python 异步常驻服务，专职管理局域网内机台的长连接生命周期（MQTT TLS 8883）、文件下发通道（FTPS 990）与模拟机群（HAL Simulator）。节点端完全无数据库依赖，随插即用，通过内部认证 WebSocket 主动连接面板端上报遥测。
+
+2. **垂直切片演进路线（严禁全量一次性堆砌）**：
+   - **Milestone 1：多机台只读监控大屏（当前最高优先级）**：优先交付基础双端骨架与大屏 UI（参考 Komari / Naive UI 卡片风格），内置模拟机群（动态更新）与真实机台（被动挂载待命，如 X2D），严格执行只读监视防线，**严禁下发任何打印控制指令**。
+   - **Milestone 2：切片解析与提单拆盘微内核**：内存安全解包 `.gcode.3mf`，提取元数据，自动拆分子盘工单与预估料槽消耗。
+   - **Milestone 3：去队伍化账户与动态并发防霸凌排单**：账户体系、JWT 鉴权、工单审核流、动态并发限额锁（节点 A 判定）、FIFO 待排队列。
+   - **Milestone 4：拓竹硬件通信与物理双状态机闭环**：MQTT TLS/FTPS 协议驱动、派单下发原子回滚、清台打卡防线、野生任务隔离与断网自愈。
+   - **Milestone 5：仓储履约、动态凭证核销与大屏全功能**：实体储物盒独占锁定/溢出暂存池、10分钟短效 QR 核销、双照留底审计归档。
+
+3. **单实例场景切换契约**：
+   - 单实例通过环境变量 `WORKSPACE_PROFILE=event|lab|farm` 注入对应的策略组件。v1 全力保障黑客松赛事场景（Event Mode）落地，实验室与农场仅做接口抽象预留。
 
 ### 1.4 开源复用准则与依赖治理 (Dependency & Reuse Policy)
 系统鼓励站在开源巨人的肩膀上以极简代码交付高质量工程，但**严禁无节制引入开源包导致系统臃肿或架构腐化**，具体执行“三边界、三闸门”：
@@ -170,40 +178,62 @@ stateDiagram-v2
    - **物流与外部快递对接（如顺丰/菜鸟 API 面单打印）**：作为独立 Feature 后续扩展，代码层仅在 `FulfillmentAdapter` 中预留 `LogisticsFulfillment` 扩展点，v1 严禁提前引入重型外部物流 SDK。
 ---
 
-## 5. 硬件抽象层 (HAL) 与拓竹接入规范
+## 5. 硬件抽象层 (HAL) 与面板/节点拓扑规范 (Panel-Daemon Architecture)
 
 ### 5.1 现场局域网容器化中枢拓扑
-系统采用单机局域网部署（Docker Compose 一键启动），彻底解耦视频与核心业务：
+系统参考 MCSManager 架构，将**主控平台/Web 承载（Panel 面板端）**与**物理硬件探针（Daemon 节点端）**解耦，实现业务中枢与机床协议物理隔离：
 
 ```mermaid
 flowchart TD
     subgraph DockerComposeHost[现场局域网服务器 (Docker Compose)]
-        Backend[PlateRelay 后端 (FastAPI + AsyncIO)]
+        subgraph PanelApp[PlateRelay 面板端 (Panel)]
+            WebUI[前端大屏 Web UI (Vue 3 + Tailwind)]
+            BackendAPI[FastAPI 业务中枢 & WebSocket 广播网关]
+            WebUI --- BackendAPI
+        end
         MinIO[(MinIO 对象存储容器)]
         Go2rtc[go2rtc 流媒体与抓拍伴生容器]
         PG[(PostgreSQL 16 数据库)]
+        Daemon[PlateRelay 节点端 (Daemon / HAL 探针)]
     end
 
     subgraph BambuFleet[拓竹局域网机群]
         P1[Bambu X1-Carbon]
         P2[Bambu P1S]
-        P3[Bambu A1-Mini]
+        P3[Bambu A1-Mini / X2D]
     end
 
-    Backend -->|MQTT TLS:8883| BambuFleet
-    Backend -->|FTPS:990| BambuFleet
+    Daemon -->|内部认证 WS: /daemon/ws| BackendAPI
+    Daemon -->|MQTT TLS:8883| BambuFleet
+    Daemon -->|FTPS:990| BambuFleet
     Go2rtc -->|RTSP:322 / MJPEG:6000| BambuFleet
-    Backend -->|REST API 抓拍提取| Go2rtc
-    Backend -->|S3 API| MinIO
-    Backend -->|asyncpg| PG
+    Daemon -->|REST API 抓拍提取| Go2rtc
+    BackendAPI -->|S3 API| MinIO
+    BackendAPI -->|asyncpg| PG
+    BrowserClient[浏览器端监控大屏] -->|WS: /api/v1/ws/dashboard| BackendAPI
 ```
 
-### 5.2 拓竹机群协议与长连接收敛
-- **单一异步常驻进程架构**：Python 3.12+ FastAPI 后端内部由单例 `FleetManager` 协程池集中管理所有机台的 MQTT TLS 8883 长连接与周期心跳，严禁多进程模型导致的多实例重复连接机台。
-- **文件下发 (FTPS)**：端口 Explicit FTPS 990，TLS 握手，凭据 `bambu:<access_code>`，下发至机身 SD 卡 `/` 目录后由 MQTT 触发 `project_file` 打印。
-- **流媒体网关 (`go2rtc`)**：X1/P1/A1 视频流全部由 `go2rtc` 容器集中接入与转换，后端仅通过 HTTP REST 接口请求静帧（`GET /api/frame.jpeg?src=...`），主进程零视频编解码负担。
-
----
+### 5.2 面板端与节点端职责划分与通信协议
+1. **面板端 (Panel - 业务中枢与网页承载)**：
+   - 负责用户认证、工单状态机、排单并发锁、数据持久化（PostgreSQL/MinIO）。
+   - 整合并托管编译后的前端静态页面（Vue 3 单页应用），对外统一提供 `http://host:8000` 服务。
+   - 作为 WebSocket 服务端，向下接收节点端遥测汇聚（`/daemon/ws`），向上向浏览器大屏广播标准化机群卡片数据（`/api/v1/ws/dashboard`）。
+2. **节点端 (Daemon - 硬件抽象与遥测探针)**：
+   - 作为独立的轻量 Python 异步常驻服务，专职管理局域网内机台的长连接生命周期（MQTT TLS 8883）、文件下发通道（FTPS 990）与模拟机群（HAL Simulator）。
+   - 启动时作为 WebSocket 客户端主动向面板端发起握手注册（`REGISTER`），附带预共享 Token 鉴权与机台列表。
+   - 以 1 秒滑动窗口节流向面板端批量推送格式化遥测数据（`TELEMETRY_BATCH`），若连接中断自动退避重连，断网期间面板将机台自动置为 `OFFLINE`。
+   - 节点端完全无数据库依赖，随插即用。
+3. **文件下发与流媒体收敛**：
+   - **文件下发 (FTPS)**：端口 Explicit FTPS 990，TLS 握手，凭据 `bambu:<access_code>`，由节点端下发至机身 SD 卡 `/` 目录后由 MQTT 触发 `project_file` 打印。
+   - **流媒体网关 (`go2rtc`)**：机床视频流由 `go2rtc` 容器统一拉取并转换，节点端/面板端仅通过 HTTP REST 提取静帧（`GET /api/frame.jpeg?src=...`），主进程零视频转码开销。
+4. **监控阶段只读物理安全防线 (Read-Only Safety Barrier)**：
+   - 在初期监控阶段（Milestone 1），系统定位为**纯遥测监视大屏**。
+   - 节点端与面板端**严禁挂载或下发任何写控制指令**（包含但不限于：开始打印、取消打印、轴移动、挤出退料等）。
+   - 真实机床（如局域网内的 X2D）仅做被动监听或离线待命挂载，确保物理机床绝对安全，杜绝一切误触风险。
+5. **前端工程规范与 Naive UI 卡片样式**：
+   - 前端采用 Vue 3 + Tailwind CSS 独立工程开发，设计风格深度参考 **Komari / Naive UI 卡片样式**。
+   - 具备高信息密度布局、微边框卡片、平滑状态胶囊徽章（`PRINTING` 蓝绿呼吸、`IDLE` 就绪绿、`CLEARING_REQUIRED` 铲件橙、`OFFLINE` 离线灰）、双温温度仪表、百分比动态微动效与 AMS 多色供料槽位色块展示。
+   - 开发态独立使用 Vite HMR 热重载（端口 5173，自动反向代理 API 与 WS）；生产态打包输出至面板静态目录，由 FastAPI 统一切片托管。
 
 ## 6. 耗材资产与多色精准分账引擎
 
@@ -409,14 +439,21 @@ CREATE INDEX idx_printers_serial ON printers(serial_number);
 为确保全系统松耦合，后端代码划分为五大内部模块，模块间通信必须通过进程内异步事件总线（`EventBus`），严禁跨模块强行写入数据库：
 
 ```
-src/
-├── core/             # 配置、数据库会话、StorageBackend 抽象、EventBus 中枢
-├── modules/
-│   ├── identity/     # 用户、内生 ACL 拦截器、OAuthProvider 适配器
-│   ├── fleet/        # FleetManager、MQTT 长连接协程、FTPS 下发、go2rtc 抓拍客户端
-│   ├── jobs/         # 3MF 解包器、双状态机引擎、FIFO/拖拽排单队列、模型锁匹配
-│   ├── storage/      # 储物盒事务锁、BIN-OVERFLOW 溢出、10分钟动态 QR 签发与核销
-│   └── notifier/     # 大屏 WebSocket 广播、邮件/Webhook 事件通知适配器
+panel/
+├── backend/
+│   ├── core/         # 配置、数据库会话、StorageBackend 抽象、EventBus 中枢
+│   ├── modules/
+│   │   ├── identity/ # 用户、内生 ACL 拦截器、OAuthProvider 适配器
+│   │   ├── fleet/    # FleetHub（网关接纳与大屏广播）、机群状态汇聚
+│   │   ├── jobs/     # 3MF 解包器、双状态机引擎、FIFO/拖拽排单队列、模型锁匹配
+│   │   └── storage/  # 储物盒事务锁、BIN-OVERFLOW 溢出、10分钟动态 QR 签发与核销
+│   └── main.py       # FastAPI 入口、WebSocket 端点与静态分发
+└── frontend/         # Vue 3 + Tailwind + Naive UI 卡片风格独立 SPA 工程
+
+daemon/
+├── hal/              # 硬件驱动抽象（Bambu MQTT TLS / FTPS）与模拟器机群
+├── config.py         # 节点与机台配置（被动挂载 X2D / 模拟器参数）
+└── main.py           # 异步常驻服务，通过 WS 主动连接面板端上报
 ```
 
 ### 核心领域事件契约
@@ -446,3 +483,6 @@ src/
 11. **既有技术栈基线冻结**：网络请求统一走 `httpx`，硬件通信统一走 `paho-mqtt` + 原生 `ftplib`，3MF 解包统一走标准库 `zipfile`，鉴权统一走 `pyjwt` + `bcrypt`。严禁以“开源库功能更强大”为由引入新第三方包推翻现有稳定实现。
 12. **50 行代码熔断与标准库优先**：若目标功能仅需 ≤50 行无状态代码即可完成，必须自研实现，严禁为微型逻辑引入第三方包；优先使用 Python 3.12+ 内置标准库与 `pyproject.toml` 既有依赖。
 13. **严禁擅自修改依赖配置（RFC 准入声明）**：AI 助手严禁在未经用户明确同意前静默修改 `pyproject.toml`。确需引入新依赖时，必须在回复中先输出微型 RFC 声明（包含：包名及版本、GPLv3 兼容许可证、AsyncIO 适配性与跨平台 Wheel、自研成本对比），待用户确认后方可执行。
+14. **严格垂直切片推进与单步验收门禁**：严禁一次性全量生成代码。系统必须按 Milestone 单个切片推进，每个切片必须在本地端到端验证通过（经真实终端冒烟测试）并经用户确认后，方可开展下一个切片。
+15. **监控阶段只读物理防线**：在监控大屏阶段，严禁向物理机床下发任何打印、进退料、移动轴等写控制指令，真实机台（如 X2D）仅做被动遥测挂载或离线待命。
+16. **面板与节点解耦防线**：节点端（Daemon）严禁直连数据库或引入持久化依赖，仅通过标准化 JSON/WS 与面板端（Panel）通信；面板端作为一体化主控承载 Web 页面分发与 API。
