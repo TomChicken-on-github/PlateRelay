@@ -40,7 +40,7 @@ panel/backend/dist/
 # Environment Variables & Secrets
 .env
 .env.local
-
+figma_tokens.json
 # Database
 *.sqlite
 *.sqlite3

@@ -17,8 +17,9 @@ class Temperatures(BaseModel):
     nozzle_target: float = Field(default=0.0, ge=0.0, le=400.0)
     bed: float = Field(default=0.0, ge=0.0, le=150.0)
     bed_target: float = Field(default=0.0, ge=0.0, le=150.0)
+    nozzle_2: Optional[float] = Field(default=None, ge=0.0, le=400.0)
+    nozzle_2_target: Optional[float] = Field(default=None, ge=0.0, le=400.0)
     chamber: Optional[float] = Field(default=None, ge=0.0, le=100.0)
-
 class AmsTray(BaseModel):
     id: int = Field(default=0, ge=0, le=15)
     tray_id_name: Optional[str] = None
@@ -27,6 +28,15 @@ class AmsTray(BaseModel):
     tray_type: str = Field(default="PLA")
     remain_percent: Optional[int] = Field(default=100, ge=0, le=100)
     is_active: bool = False
+
+class ActiveJobSummary(BaseModel):
+    id: str = Field(..., description="Job UUID")
+    job_sn: str = Field(..., description="Job serial number e.g. JOB-20261018-001")
+    plate_name: str = Field(..., description="Plate name or file title")
+    submitter_name: str = Field(..., description="Submitter nickname")
+    submitter_avatar_url: Optional[str] = None
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
 
 class PrinterTelemetry(BaseModel):
     id: str = Field(..., description="Unique hardware or simulation identifier")
@@ -44,6 +54,7 @@ class PrinterTelemetry(BaseModel):
     status_message: Optional[str] = None
     task_name: Optional[str] = None
     wifi_signal: Optional[int] = None
+    current_job: Optional[ActiveJobSummary] = None
     updated_at: float = Field(default_factory=time.time)
 
 class FleetSnapshotMessage(BaseModel):
