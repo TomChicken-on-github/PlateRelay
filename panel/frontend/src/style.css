@@ -44,9 +44,9 @@ button { cursor: pointer; }
 button, h1, h2, h3, p { margin: 0; }
 img { display: block; }
 button:focus-visible, input:focus-visible { outline: 2px solid #d0bcff; outline-offset: 3px; }
-.dashboard-viewport { position: relative; width: 100%; min-height: 100vh; overflow: hidden; }
-.dashboard-artboard { display: flex; position: absolute; top: 0; left: 0; width: 1680px; background: #141218; transform-origin: top left; }
-.sidebar { position: relative; flex: none; align-self: stretch; width: 200px; background: #1d1b20; }
+.dashboard-viewport { position: relative; width: 100%; min-height: 100vh; display: flex; background: #141218; }
+.dashboard-artboard { display: flex; width: 100%; min-height: 100vh; background: #141218; }
+.sidebar { position: sticky; top: 0; height: 100vh; flex: none; width: 200px; background: #1d1b20; z-index: 20; }
 .brand { position: absolute; top: 30px; left: 0; right: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 24px; }
 .brand-name { height: 28px; font-family: 'Google Sans Flex', sans-serif; font-size: 22px; font-weight: 700; line-height: 28px; font-variation-settings: 'GRAD' 0, 'ROND' 0, 'wdth' 100; }
 .brand-caption { color: #cac4d0; font-family: 'Microsoft YaHei', sans-serif; font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: .4px; }
@@ -54,17 +54,26 @@ button:focus-visible, input:focus-visible { outline: 2px solid #d0bcff; outline-
 .nav-entry { width: 180px; height: 48px; overflow: hidden; padding: 0; border: 0; border-radius: 16px; background: #4a4458; text-align: left; }
 .nav-state-layer { display: flex; align-items: center; gap: 12px; width: 100%; height: 48px; padding: 10px 16px; border-radius: 12px; background: rgba(63, 59, 72, .96); font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: .1px; }
 .nav-entry.is-active .nav-state-layer { background: #4f378b; }
-.workspace { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: 24px; width: 1480px; padding: 28px; }
-.workspace-header { position: relative; flex: none; width: 100%; height: 48px; }
-.workspace-header h1 { position: absolute; top: 4px; left: 0; width: 225px; height: 40px; font-family: 'Microsoft YaHei', sans-serif; font-size: 32px; font-weight: 700; line-height: 32px; letter-spacing: 0; }
-.workspace-tools { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 12px; width: 637px; height: 48px; }
+.mobile-bottom-nav { display: none; }
+.workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 24px; padding: 24px; box-sizing: border-box; width: 100%; }
+.workspace-header { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 48px; flex-wrap: wrap; gap: 12px; }
+.workspace-header h1 { font-family: 'Microsoft YaHei', sans-serif; font-size: 28px; font-weight: 700; line-height: 32px; letter-spacing: 0; }
+.workspace-tools { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 .notification { display: flex; flex: none; align-items: center; justify-content: center; width: 48px; height: 48px; }
-.device-search { display: flex; align-items: center; width: 577px; height: 48px; padding: 4px; overflow: hidden; border-radius: 28px; background: #2b2930; }
-.search-leading { display: flex; flex: none; align-items: center; justify-content: center; width: 48px; height: 48px; margin-right: -16px; }
-.device-search input { flex: 1; min-width: 0; height: 40px; padding: 0 20px; border: 0; outline: none; background: transparent; color: #cac4d0; font-size: 16px; font-weight: 400; line-height: 24px; letter-spacing: .5px; }
+.account-profile { display: flex; align-items: center; gap: 10px; height: 48px; padding: 6px 16px 6px 6px; border-radius: 24px; background: #2b2930; color: #e6e0e9; cursor: pointer; user-select: none; }
+.profile-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; }
+.generic-avatar { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: #e8def8; flex: none; overflow: hidden; }
+.profile-info { display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.profile-name { font-size: 14px; font-weight: 600; line-height: 20px; color: #e6e0e9; white-space: nowrap; }
+.profile-role { font-size: 12px; font-weight: 400; line-height: 16px; color: #cac4d0; white-space: nowrap; }
+.profile-role.is-login { color: #d0bcff; font-weight: 500; }
+.equipment-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.device-search { display: flex; align-items: center; width: 220px; height: 32px; padding: 2px 10px 2px 4px; overflow: hidden; border-radius: 16px; background: #2b2930; }
+.device-search .search-leading { display: flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; }
+.device-search input { flex: 1; min-width: 0; height: 28px; padding: 0 6px; border: 0; outline: none; background: transparent; color: #cac4d0; font-size: 13px; font-weight: 400; line-height: 20px; }
 .device-search input::placeholder { color: #cac4d0; opacity: 1; }
 .device-search input::-webkit-search-cancel-button { appearance: none; }
-.metrics { display: flex; flex: none; gap: 12px; width: 1424px; height: 166px; }
+.metrics { display: flex; gap: 12px; width: 100%; }
 .metric { display: flex; flex: 1; flex-direction: column; gap: 10px; min-width: 0; height: 166px; padding: 20px; overflow: hidden; border-radius: 12px; background: #211f26; }
 .metric-heading { display: flex; align-items: center; justify-content: space-between; height: 20px; }
 .metric-heading h2 { color: #cac4d0; font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: .1px; }
@@ -75,15 +84,140 @@ button:focus-visible, input:focus-visible { outline: 2px solid #d0bcff; outline-
 .metric-unit { margin-top: 20px; color: #cac4d0; font-size: 14px; font-weight: 400; line-height: 20px; letter-spacing: .25px; }
 .metric-description, .metric-trend { color: #cac4d0; font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: .4px; }
 .metric-description.is-warning { color: #f6ba78; }
-.equipment { display: flex; flex: none; flex-direction: column; gap: 16px; width: 1424px; }
-.equipment-header { display: flex; align-items: center; justify-content: space-between; width: 1424px; height: 44px; }
+.equipment { display: flex; flex-direction: column; gap: 16px; width: 100%; }
+.equipment-header { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; flex-wrap: wrap; }
 .equipment-heading { display: flex; flex-direction: column; gap: 4px; }
 .equipment-heading h2 { font-size: 16px; font-weight: 600; line-height: 24px; letter-spacing: .15px; }
-.equipment-heading p { color: #cac4d0; font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: .4px; white-space: nowrap; }
+.equipment-heading p { color: #cac4d0; font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: .4px; }
 .device-filters { display: flex; flex: none; gap: 8px; height: 32px; }
 .device-filter { display: flex; flex: none; align-items: center; justify-content: center; gap: 8px; width: 80px; height: 32px; padding: 6px 16px; border: 1px solid #49454f; border-radius: 8px; color: #cac4d0; background: transparent; font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: .1px; white-space: nowrap; }
 .device-filter:last-child { width: 86px; }
 .device-filter.focus-filter { width: 118px; padding-left: 8px; }
 .device-filter.is-selected { border-color: transparent; background: #4a4458; color: #e8def8; }
-.device-columns { display: flex; gap: 16px; width: 1424px; height: 718px; overflow: hidden; }
-.device-column { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: 16px; width: 464px; }
+
+/* Shared, low-contrast hover elevation for cards and controls */
+.printer-card, .metric {
+  position: relative;
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), box-shadow 220ms ease;
+}
+.nav-entry, .device-filter, .account-profile, .mobile-nav-entry {
+  position: relative;
+}
+.nav-entry::after, .device-filter::after, .account-profile::after, .mobile-nav-entry::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+.account-profile:focus-visible {
+  outline: 2px solid #d0bcff;
+  outline-offset: 3px;
+}
+@media (hover: hover) {
+  .printer-card:hover, .metric:hover {
+    z-index: 1;
+    transform: translateY(-4px);
+    box-shadow:
+      0 0 0 1px rgba(208, 188, 255, 0.22),
+      0 0 12px rgba(208, 188, 255, 0.09),
+      0 12px 24px rgba(0, 0, 0, 0.28);
+  }
+  .printer-card.offline:hover {
+    box-shadow:
+      0 0 0 1px rgba(242, 184, 181, 0.26),
+      0 0 12px rgba(242, 184, 181, 0.08),
+      0 12px 24px rgba(0, 0, 0, 0.28);
+  }
+  .nav-entry:hover::after, .device-filter:hover::after,
+  .account-profile:hover::after, .mobile-nav-entry:hover::after {
+    opacity: 0.08;
+  }
+}
+.nav-entry:focus-visible::after, .device-filter:focus-visible::after,
+.account-profile:focus-visible::after, .mobile-nav-entry:focus-visible::after {
+  opacity: 0.1;
+}
+.nav-entry:active::after, .device-filter:active::after,
+.account-profile:active::after, .mobile-nav-entry:active::after {
+  opacity: 0.1;
+  transition-duration: 70ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .printer-card, .metric {
+    transition: none;
+  }
+  .printer-card:hover, .metric:hover {
+    transform: none;
+  }
+  .nav-entry::after, .device-filter::after, .account-profile::after, .mobile-nav-entry::after {
+    transition: none;
+  }
+}
+
+/* Responsive Masonry Layout (N-columns, zero vertical gaps) */
+.masonry-grid {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+}
+.masonry-column {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 464px;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Mobile Breakpoint (< 768px) */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .workspace { padding: 16px 12px 76px 12px; gap: 16px; }
+  .workspace-header h1 { font-size: 22px; }
+  .metrics { overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+  .metric { flex: 0 0 280px; min-width: 280px; scroll-snap-align: start; height: 148px; padding: 16px; }
+  .equipment-header { flex-direction: column; align-items: flex-start; }
+  .equipment-actions { width: 100%; justify-content: space-between; }
+  .device-search { width: 100%; max-width: 100%; }
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #1d1b20;
+    border-top: 1px solid #2b2930;
+    z-index: 50;
+    align-items: center;
+    justify-content: space-around;
+  }
+  .mobile-nav-entry {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: 1;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: #cac4d0;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .mobile-nav-entry.is-active {
+    color: #d0bcff;
+  }
+  .mobile-nav-entry img {
+    width: 20px;
+    height: 20px;
+  }
+}

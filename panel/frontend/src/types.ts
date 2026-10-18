@@ -12,6 +12,8 @@ export interface Temperatures {
   nozzle_target: number;
   bed: number;
   bed_target: number;
+  nozzle_2?: number;
+  nozzle_2_target?: number;
   chamber?: number;
 }
 
@@ -23,6 +25,16 @@ export interface AmsTray {
   tray_type: string;  // e.g. "PLA", "PETG", "ABS"
   remain_percent?: number;
   is_active?: boolean;
+}
+
+export interface ActiveJobSummary {
+  id: string; // Job UUID
+  job_sn: string; // e.g. "JOB-20261018-001"
+  plate_name: string; // Sliced plate name / filename
+  submitter_name: string; // Participant display nickname
+  submitter_avatar_url?: string;
+  started_at?: number; // Epoch timestamp in seconds
+  finished_at?: number; // Epoch timestamp in seconds (for clearing wait calculation)
 }
 
 export interface Printer {
@@ -41,6 +53,7 @@ export interface Printer {
   status_message?: string;
   task_name?: string;
   wifi_signal?: number;
+  current_job?: ActiveJobSummary;
   updated_at?: number;
 }
 
