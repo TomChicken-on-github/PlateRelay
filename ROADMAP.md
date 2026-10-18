@@ -1,56 +1,55 @@
-# PlateRelay 实施路线图 (ROADMAP.md)
+# PlateRelay 实施路线图
 
-本文档作为 PlateRelay 项目的阶段性垂直切片（Vertical Slice）工程落地指南，基于 `agent.md` 最高架构契约推进。
-本项目严格执行**生产级软件工程规范（Production-Grade Engineering）**：拒绝桩函数、拒绝未经跑通的代码、拒绝随意引入未授权第三方依赖。每个里程碑必须具备本地真实可运行的端到端冒烟测试（Smoke Run）作为准入闸门。
+本文件只维护阶段状态、当前工作与验收。常驻约束见 [agent.md](agent.md)；技术、业务和数据设计分别见 [架构](docs/architecture.md)、[领域](docs/domain.md)、[数据模型](docs/data-model.md)，不在此重复完整契约。
 
----
+## 阶段概览
 
-## 阶段演进概览
+| 阶段 | 交付目标 | 完成条件 | 状态 |
+| --- | --- | --- | --- |
+| M1 | 多机台只读监控大屏 | 独立 Panel/Daemon、认证遥测、实时 UI、离线与恢复闭环，满足下方验收门禁。 | 进行中 |
+| M2 | 3MF 解析与拆盘 | 内存安全解包、元数据/分槽预估、独立子盘工单；真实 3MF 文件验证。 | 待开始 |
+| M3 | 自然人账户与排单 | JWT/能力鉴权、动态并发与节点 A、盘级审核、FIFO/人工调序。 | 待开始 |
+| M4 | 硬件控制与双状态机 | MQTT TLS 8883/FTPS 990、派单原子回滚、机型匹配、清台、SD 卡清理、野生任务与断网恢复。 | 待开始 |
+| M5 | 仓储履约与取件 | 实体/溢出库位、短效 QR 核销、清空防呆、双照归档与全链路闭环。 | 待开始 |
 
-| 里程碑 | 核心主题 | 架构边界 | 生产级准入标准 (Definition of Done) | 当前状态 |
-| :--- | :--- | :--- | :--- | :--- |
-| **Milestone 1** | **多机台只读监控大屏** | Panel (FastAPI + Vue 3 前端) ↔ Daemon (HAL 仿真 + 真实X2D被动挂载) | 双端独立常驻进程拉起，通过认证 WS 管道实现 1s 遥测推流，前端大屏动态呈现高仿真动效，断网自动标记 OFFLINE，重连秒级自愈。 | **进行中 (In Progress)** |
-| **Milestone 2** | **3MF 切片解析与拆盘微内核** | Panel Backend (`modules/jobs/unpacker.py`) | 内存安全解包 `.gcode.3mf`，提取元数据，自动拆分子盘工单与料槽预估，真实 3MF 文件测试覆盖。 | 待开始 |
-| **Milestone 3** | **去队伍化账户与动态并发排单** | Panel Backend (`identity`, `jobs` 状态机) | 自然人 JWT 鉴权、动态并发限额锁（节点 A 判定）、FIFO 待排队列及审核流转。 | 待开始 |
-| **Milestone 4** | **拓竹硬件协议驱动与双状态机** | Daemon (`hal/bambu_mqtt.py`, `hal/bambu_ftps.py`) | 真实/模拟拓竹机床 MQTT TLS 8883 与 FTPS 990 握手、派单原子回滚、清台打卡防线、SD 卡自愈清理。 | 待开始 |
-| **Milestone 5** | **仓储履约与动态短效凭证核销** | Panel (`storage`) + Web UI 领料核销台 | 实体/溢出储物盒独占锁定、10分钟动态 QR 核销、双照留底归档、端到端全链路闭环。 | 待开始 |
+M2–M5 是目标，不是当前能力。耗材冻结/扣减、料电核算的规则保留在 [领域规范](docs/domain.md#耗材与成本)，具体交付切片尚待确认；不据此取消需求或提前实现。农场流程属于未来扩展，不纳入当前赛事交付。
 
----
+## M1 当前状态
 
-## Milestone 1 生产级详细设计（当前执行）
+以下是源码可见的实现边界，不是本次文档调整运行通过的记录；M1 尚未完成实时大屏闭环。
 
-### 1. 面板端架构 (Panel)
-- **`panel/backend/`**：
-  - 基于 FastAPI + AsyncIO 的单一主控常驻服务。
-  - Pydantic v2 `BaseSettings` 强类型环境配置与优雅停机（Graceful Shutdown）。
-  - `FleetHub` 协程安全状态机容器：支持并发写锁、Daemon 注册鉴权、多租户浏览器客户端广播、心跳保活检测。
-  - 生产静态资产挂载：直接挂载 `panel/backend/dist` 编译产物，具备 SPA 路由 Fallback 兜底。
-- **`panel/frontend/`**：
-  - 独立 Vue 3 + Tailwind CSS + TypeScript 工程。
-  - 当前界面按 [Figma 完整 Dashboard 画板 `7:356`](https://www.figma.com/design/AAcikiA6Rj7N9WMtki3Ttd/PlateRelay-Desktop?node-id=7-356) 复制，暂不沿用旧版大屏的布局约束：
-    - 原始画板 1680×1096，200px 侧栏、三张指标卡、三列五张设备卡片；按可用视口宽度整体等比适配，不重新排列卡片。
-    - 五张卡片分别保留打印、断料、AMS 阻断、待清台和离线的原稿内容与不同高度；包含原始摄像头示例图、AMS 圆弧、波浪进度条、底部告警与离线模糊遮罩。
-    - Figma 原始图像、SVG 和所需字体本地托管，字体授权文本一并保留；不使用设计截图替代 DOM，不在运行时请求临时 Figma 资源地址。
-    - 当前为设计稿内容展示：指标、设备名、发起人、画面和时间均来自原稿，不连接模拟 Daemon，也不宣称其为实时机群数据。
-    - 设备搜索、视图筛选和原稿导航可本地操作；“申请打印”按原稿 `70:581` 展示，不增加设计中不存在的表单。
-  - 后端遥测接口与 Daemon 保留原有契约；上一版为卡片新增的可选遥测字段已撤销。本地构建后由 FastAPI 在 `http://127.0.0.1:8000` 托管。
+| 区域 | 当前证据 | 尚未成立的能力 |
+| --- | --- | --- |
+| 前端 | [App.vue](panel/frontend/src/App.vue) 与 [PrinterCard.vue](panel/frontend/src/components/PrinterCard.vue) 使用本地原稿数据，支持本地导航/搜索/筛选。 | 未消费机群遥测；指标、发起人、画面、时间不是实时数据。 |
+| Panel/Daemon | [Panel 入口](panel/backend/main.py)、[FleetHub](panel/backend/modules/fleet/hub.py)、[Daemon 入口](daemon/main.py) 已有认证 WS、快照/更新、批量遥测与重连代码；默认按 1 秒周期发送。 | 尚不能仅凭源码宣称端到端门禁通过或保证恢复 SLA。 |
+| HAL | [模拟器](daemon/hal/simulator.py) 有动态进度；[真实机台适配器](daemon/hal/passive_bambu.py) 目前固定离线，持有待配对机台信息。 | 真实 X2D 未实现 MQTT 被动监听；离线占位不是已接通遥测。 |
+| 静态托管 | [Vite 配置](panel/frontend/vite.config.ts) 输出至 `panel/backend/dist`，Panel 在产物存在时托管。 | 有托管代码不等于当前构建产物或页面已通过验收。 |
 
-### 2. 节点端架构 (Daemon)
-- **`daemon/`**：
-  - 独立的纯异步 Python 3.12+ 硬件网关常驻服务。
-  - **Zero Database**：完全脱离数据库，纯内存无状态流转。
-  - **高仿真 HAL 模拟器 (`Simulator`)**：
-    - 精确模拟热床/喷头升温曲线、层高递增、打印进度推进、AMS 耗材余量递减与完工转入 `CLEARING_REQUIRED` 状态机。
-  - **真实 X2D 机台被动挂载 (`BambuPassive`)**：
-    - 预留配置文件（IP、Serial、Access Code）。
-    - 严格只读监听，端口未开启时优雅保持 `OFFLINE` 状态，坚决不发送任何写控制指令。
-  - **自愈通信链路**：
-    - 主动通过 `ws://panel:8000/daemon/ws?token=SECRET` 握手。
-    - 1 秒滑动窗口批量节流上报，断线指数退避重连。
+## 当前界面依据
 
-### 3. 验收门禁 (Verification Gate)
-1. Panel 与 Daemon 协同启动，日志整洁无未捕获异常。
-2. 自动化冒烟脚本模拟前端连接，捕获完整的 `FLEET_SNAPSHOT` 与 `FLEET_UPDATE` 数据帧。
-3. 模拟节点突然下线（Kill Daemon），Panel 瞬间将机台状态转为 `OFFLINE` 并向大屏广播。
-4. 模拟节点恢复上线，机台状态秒级恢复，数据不丢不卡。
-5. 前端静态页面通过 Vite 构建输出至 `dist/`，FastAPI 根路由 `http://localhost:8000` 正常渲染大屏。
+当前以 [Figma Dashboard 画板 7:356](https://www.figma.com/design/AAcikiA6Rj7N9WMtki3Ttd/PlateRelay-Desktop?node-id=7-356) 为准，旧 Komari/Naive UI 风格不再构成强制要求。
+
+- 1680×1096 画板、200px 侧栏、三张指标卡、三列五张设备卡片；按视口整体等比适配，不重新排列卡片。
+- 保留打印、断料、AMS 阻断、待清台、离线五种原稿内容及不同卡片高度，以及摄像头示例图、AMS 圆弧、波浪进度、底部告警和离线模糊遮罩。
+- 原图、SVG、字体本地托管并保留字体授权；不能用截图替代 DOM，也不能运行时依赖临时 Figma 资源 URL。
+- 搜索、筛选、导航本地可操作；“申请打印”遵循原稿 `70:581`，不添加设计中不存在的表单。
+- 当前页面只展示设计稿内容，不连接模拟 Daemon；后端遥测契约保留。前端接线是待完成工作，不能将当前静态内容标成实时机群数据。
+
+## M1 剩余工作
+
+1. 在当前视觉依据下完成真实机群数据到页面的接线，明确离线/恢复呈现；不恢复已撤销的卡片可选遥测字段。
+2. 完成真实机台只读监听与配置验证；无配置或端口不可用时保持离线，绝不下发物理控制指令。
+3. 按 [架构待决项](docs/architecture.md#实施前待决) 明确节流与时限要求，并执行以下端到端门禁；保留当前实现与目标的区分。
+
+## 验收门禁
+
+每个切片必须本地真实端到端冒烟通过，并经用户确认后，才能进入下一切片；测试代码存在或单纯构建成功不等于完成。
+
+M1 必须实际观察：
+
+1. Panel/Daemon 独立常驻启动、认证通信，日志无未捕获异常；捕获 `FLEET_SNAPSHOT` 与 `FLEET_UPDATE`，观察默认 1 秒周期遥测及模拟器温度/层数/进度/AMS/完工状态演进。
+2. 终止 Daemon 后，Panel 将其机台置为 `OFFLINE` 并广播；恢复后重新对齐状态，记录离线检测和恢复耗时，验证秒级恢复目标。
+3. 构建前端并通过 FastAPI `http://127.0.0.1:8000` 实际打开 Vue 页面，检查其收到实时数据、离线与恢复变化；不能只检查首页包含项目名。
+4. 确认真实机台只读/离线待命边界，不发送打印、轴运动、挤出或文件写入/删除指令。
+
+已有协议冒烟入口：[tests/smoke_milestone1.py](tests/smoke_milestone1.py)。它用 Python WS 客户端模拟浏览器，不能替代真实 Vue 页面验收；前端构建入口为 `panel/frontend` 下的 `npm run build`。
