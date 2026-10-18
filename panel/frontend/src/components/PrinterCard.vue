@@ -79,7 +79,10 @@ const ams = [
         <p class="time">{{ design.time }}</p>
       </div>
     </div>
-    <div v-if="variant === 'offline'" class="last-online"><p>最后在线时间</p><p>​</p><p> 2026-09-26 22:48:59</p></div>
+    <div v-if="variant === 'offline'" class="offline-mask">
+      <p class="offline-state"><span class="offline-dot" aria-hidden="true" />设备已离线</p>
+      <p class="last-online">最后在线 <time datetime="2026-09-26T22:48:59">2026-09-26 22:48:59</time></p>
+    </div>
     <div v-if="variant === 'error' || variant === 'blocked' || variant === 'clearing'" class="safety">
       <img :src="variant === 'error' ? error : lock" alt="" />
       <span>{{ variant === 'error' ? 'A2 断料 · 请暂停后补料并复核' : variant === 'blocked' ? 'AMS 匹配耗材失败' : '热床未清空' }}</span>
@@ -89,7 +92,7 @@ const ams = [
 
 <style scoped>
 .printer-card { position: relative; flex: none; width: 464px; height: 303px; overflow: hidden; border-radius: 12px; background: #211f26; color: #e6e0e9; font-family: Roboto, sans-serif; font-variation-settings: 'wdth' 100; }
-.printer-card.printing { height: 307px; }
+.printer-card.printing, .printer-card.offline { height: 307px; }
 .printer-card.error { height: 345px; }
 .printer-card.blocked, .printer-card.clearing { height: 359px; }
 .heading { position: absolute; top: 20px; left: 20px; width: 424px; height: 32px; display: flex; align-items: center; justify-content: space-between; overflow: hidden; }
@@ -144,7 +147,10 @@ h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; letter-spa
 .safety { position: absolute; top: 297px; left: 20px; width: 424px; height: 42px; display: flex; align-items: center; gap: 10px; padding-left: 12px; border-radius: 8px; background: #3e2d20; color: #f6ba78; font-family: 'Microsoft YaHei', sans-serif; font-size: 14px; line-height: 16px; letter-spacing: .4px; white-space: nowrap; }
 .safety img { width: 18px; height: 18px; flex: none; }
 .error .safety { top: 303px; left: 0; width: 464px; background: #8c1d18; color: #f2b8b5; font-weight: 700; }
-.offline .body { filter: blur(4px); }
-.last-online { position: absolute; top: 137px; left: 106px; width: 252px; color: #938f99; text-align: center; font-family: 'Microsoft YaHei', sans-serif; font-size: 24px; font-weight: 400; line-height: 16px; letter-spacing: .4px; white-space: pre-wrap; }
-.last-online p { margin: 0; line-height: 16px; }
+.offline .body { filter: blur(3px); opacity: .48; }
+.offline-mask { position: absolute; inset: 62px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-radius: 0 0 12px 12px; background: rgba(29, 27, 32, .72); }
+.offline-state { display: flex; align-items: center; gap: 8px; color: #f2b8b5; font-size: 18px; font-weight: 700; font-synthesis: weight; line-height: 26px; }
+.offline-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.last-online { color: #938f99; font-size: 14px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.offline::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(242, 184, 181, .4); pointer-events: none; }
 </style>
