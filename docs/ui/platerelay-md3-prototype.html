@@ -1,0 +1,362 @@
+<title>PlateRelay MD3 概况</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Inter:wght@400&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: Material 3 dark, values read from the user's Figma frame "PlateRelay Dashboard Admin" via Figwright.
+   Workspace padding 28 / gap 24, stat row gap 12, masonry of 464px cards with 16 gaps, cards r12 padding 20. */
+:root {
+  --surface: #141218; --sc: #211f26; --sc-high: #2b2930;
+  --on-surface: #e6e0e9; --on-variant: #cac4d0; --outline: #938f99; --outline-variant: #49454f;
+  --primary: #d0bcff; --secondary-container: #4a4458; --on-secondary-container: #e8def8;
+  --error: #f2b8b5; --error-container: #8c1d18;
+  --nozzle: #ff8d28; --bed: #00c3d0; --neutral-icon: #808080; --active-dot: #34c759; --white: #ffffff;
+  --chip-ok-bg: #213a2d; --chip-ok: #92d5ab; --chip-warn-bg: #3e2d20; --chip-warn: #f6ba78; --chip-err-bg: #ff383c24; --chip-err: #ff383c;
+  --banner-warn-bg: #3e2d20; --banner-warn: #f6ba78; --btn-stroke: #49454f59; --dim: #1d1b20b8;
+  --cam-a: #3b3a40; --cam-b: #111014;
+  --font: "Roboto", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  --font-cjk: "Noto Sans SC", "PingFang SC", sans-serif;
+  --font-num: "Inter", "Roboto", sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --surface: #fef7ff; --sc: #f3edf7; --sc-high: #ece6f0;
+    --on-surface: #1d1b20; --on-variant: #49454f; --outline: #79747e; --outline-variant: #cac4d0;
+    --primary: #6750a4; --secondary-container: #e8def8; --on-secondary-container: #1d192b;
+    --error: #b3261e; --error-container: #f9dedc;
+    --nozzle: #e06d00; --bed: #00838f; --neutral-icon: #79747e; --active-dot: #1e9e45; --white: #1d1b20;
+    --chip-ok-bg: #c9ecd5; --chip-ok: #1b5e35; --chip-warn-bg: #ffdfc2; --chip-warn: #8a4b00; --chip-err-bg: #ff383c1f; --chip-err: #c4161b;
+    --banner-warn-bg: #ffe9d6; --banner-warn: #8a4b00; --btn-stroke: #79747e59; --dim: #fef7ffc7;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --surface: #fef7ff; --sc: #f3edf7; --sc-high: #ece6f0;
+  --on-surface: #1d1b20; --on-variant: #49454f; --outline: #79747e; --outline-variant: #cac4d0;
+  --primary: #6750a4; --secondary-container: #e8def8; --on-secondary-container: #1d192b;
+  --error: #b3261e; --error-container: #f9dedc;
+  --nozzle: #e06d00; --bed: #00838f; --neutral-icon: #79747e; --active-dot: #1e9e45; --white: #1d1b20;
+  --chip-ok-bg: #c9ecd5; --chip-ok: #1b5e35; --chip-warn-bg: #ffdfc2; --chip-warn: #8a4b00; --chip-err-bg: #ff383c1f; --chip-err: #c4161b;
+  --banner-warn-bg: #ffe9d6; --banner-warn: #8a4b00; --btn-stroke: #79747e59; --dim: #fef7ffc7;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { background: var(--surface); color: var(--on-surface); font-family: var(--font); font-size: 14px; line-height: 20px; letter-spacing: 0.25px; -webkit-font-smoothing: antialiased; }
+button { font: inherit; letter-spacing: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+svg.i { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.page { max-width: 1960px; margin: 0 auto; padding-block: 28px; padding-left: max(28px, env(safe-area-inset-left, 0px)); padding-right: max(28px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 24px; }
+@media (max-width: 640px) { .page { padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); gap: 16px; } }
+
+/* navigation drawer, 200px column as in the Figma frame (its inner details were not read, so this part is approximate) */
+.shell { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 100%; }
+.drawer { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; height: 100dvh; padding: 28px 12px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; margin-bottom: 12px; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: 0.15px; }
+.brand i { width: 28px; height: 28px; border-radius: 8px; background: var(--primary); color: var(--surface); display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 700; }
+.drawer .lbl { padding: 16px 16px 6px; font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-variant); }
+.nav { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 16px; border-radius: 22px; border: 0; background: transparent; color: var(--on-variant); font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; text-align: left; }
+.nav svg { width: 20px; height: 20px; }
+.nav:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.nav[aria-current="page"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+.nav .n { margin-left: auto; font-size: 12px; line-height: 16px; color: var(--on-variant); }
+.shell > .page { margin: 0; width: 100%; max-width: 2200px; }
+@media (max-width: 1100px) { .shell { grid-template-columns: minmax(0, 1fr); } .drawer { display: none; } }
+/* header 48h */
+.top { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+h1 { margin: 0; flex: 1; font-family: var(--font-cjk); font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: 0; }
+.icon-btn { width: 48px; height: 48px; border-radius: 100px; border: 0; background: transparent; display: grid; place-items: center; color: var(--on-variant); }
+.icon-btn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.acct { display: flex; align-items: center; gap: 10px; height: 48px; min-width: 160px; padding: 6px 16px 6px 6px; border-radius: 24px; background: var(--sc-high); border: 0; text-align: left; }
+.acct b { display: block; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; }
+.acct small { display: block; font-size: 12px; line-height: 16px; color: var(--on-variant); letter-spacing: 0.4px; }
+.av { border-radius: 50%; display: inline-grid; place-items: center; font-weight: 500; color: #1d1b20; flex: none; letter-spacing: 0; }
+
+/* stat cards: filled, r12, padding 20, gap 10, 166h */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.stat { background: var(--sc); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 166px; }
+.stat .k { display: flex; justify-content: space-between; align-items: center; height: 20px; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: var(--on-variant); }
+.stat .k svg { width: 20px; height: 20px; color: var(--primary); }
+.stat .v { display: flex; align-items: baseline; gap: 8px; font-family: var(--font-num); font-size: 36px; line-height: 44px; font-weight: 400; color: var(--on-surface); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.stat .v small { font-family: var(--font); font-size: 14px; line-height: 20px; letter-spacing: 0.25px; color: var(--on-variant); }
+.stat .s, .stat .tr { font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-variant); }
+.stat .s.warn { color: var(--chip-warn); }
+
+/* device section */
+.dev { display: flex; flex-direction: column; gap: 16px; }
+.sec { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; min-height: 44px; }
+.sec > div:first-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sec h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: 0.15px; }
+.sec p { margin: 0; font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-variant); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 6px 16px; border-radius: 8px; border: 0; box-shadow: inset 0 0 0 1px var(--outline-variant); background: transparent; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: var(--on-variant); }
+.chip svg { width: 18px; height: 18px; }
+.chip:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.chip[aria-pressed="true"] { padding: 6px 16px 6px 8px; background: var(--secondary-container); box-shadow: none; color: var(--on-secondary-container); }
+
+/* adaptive masonry: as many columns as fit at >= 464px (the Figma card width), cards stretch to fill; 16 gaps */
+.grid { display: flex; gap: 16px; align-items: flex-start; }
+.col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* printer card: r12, body padding 20, gap 14; 307h, 349h with banner */
+.card { position: relative; background: var(--sc); border-radius: 12px; overflow: hidden; container-type: inline-size; display: flex; flex-direction: column; }
+.cb { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.ph { display: flex; align-items: center; gap: 8px; height: 32px; }
+.ph > svg { width: 20px; height: 20px; color: var(--primary); }
+.ph b { font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: 0.15px; }
+.ph .star { color: var(--primary); display: inline-flex; }
+.ph .star svg { width: 16px; height: 16px; fill: currentColor; }
+.st { margin-left: auto; height: 32px; padding: 6px 16px; border-radius: 8px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; background: var(--sc-high); color: var(--on-variant); white-space: nowrap; }
+.st.ok { background: var(--chip-ok-bg); color: var(--chip-ok); }
+.st.warn { background: var(--chip-warn-bg); color: var(--chip-warn); }
+.st.err { background: var(--chip-err-bg); color: var(--chip-err); }
+.media { display: grid; grid-template-columns: minmax(0, 220fr) minmax(188px, 188fr); gap: 16px; align-items: center; }
+.cam { position: relative; width: 100%; aspect-ratio: 220 / 123; max-width: 100%; border-radius: 8px; overflow: hidden; background: radial-gradient(120% 90% at 30% 120%, rgb(230 225 210 / .3), transparent 55%), radial-gradient(60% 40% at 70% 30%, rgb(255 255 255 / .12), transparent 70%), linear-gradient(170deg, var(--cam-a), var(--cam-b)); }
+.cam::before { content: ""; position: absolute; left: -10%; right: -10%; bottom: -30%; height: 75%; border-radius: 50%; background: radial-gradient(closest-side, #2b2a2e, #18171a); box-shadow: inset 0 5px 0 rgb(255 255 255 / .35); transform: rotate(-8deg); }
+.cam::after { content: ""; position: absolute; left: 62%; top: 52%; width: 22%; height: 18%; border-radius: 5px 12px 5px 5px; background: linear-gradient(160deg, #fbfbfb, #c9c9c9); box-shadow: 0 6px 14px rgb(0 0 0 / .45); transform: skewX(-14deg); }
+.cam .tag { position: absolute; left: 6px; top: 6px; z-index: 1; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 4px; background: rgb(0 0 0 / .55); color: #e6e0e9; letter-spacing: 0.5px; }
+.tele { display: grid; grid-template-columns: minmax(98px, 98fr) minmax(90px, 90fr); align-self: stretch; }
+.tc { display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.tr2 { display: flex; align-items: center; gap: 6px; height: 20px; color: var(--on-surface); white-space: nowrap; font-size: 14px; line-height: 20px; letter-spacing: 0.25px; }
+.tr2 svg { width: 14px; height: 14px; color: var(--neutral-icon); stroke-width: 1.6; }
+.tr2 .tv { width: 78px; }
+.tr2 .nz svg { color: var(--nozzle); } .tr2 .bd svg { color: var(--bed); }
+.tc.ams { padding: 0 4px; }
+.sp { gap: 4px; padding: 0 2px; font-size: 11px; line-height: 16px; font-weight: 500; letter-spacing: 0.5px; color: var(--white); }
+.sp .sl { min-width: 15px; white-space: nowrap; } .sp .sm { min-width: 32px; }
+.sp .on { width: 4px; height: 4px; border-radius: 50%; background: var(--active-dot); }
+.sp.none { color: var(--on-variant); font-weight: 400; }
+.ring { width: 14px; height: 14px; transform: rotate(-90deg); flex: none; }
+.ring circle { fill: none; stroke-width: 1.75; }
+.job { display: flex; flex-direction: column; gap: 4px; }
+.who { display: flex; align-items: center; gap: 6px; height: 24px; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; color: var(--white); }
+.file { display: flex; justify-content: space-between; gap: 12px; height: 20px; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; }
+.file span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.file span:last-child { color: var(--primary); flex: none; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.pt { display: flex; flex-direction: column; gap: 4px; }
+.time { font-size: 12px; line-height: 16px; letter-spacing: 0.4px; color: var(--on-variant); font-variant-numeric: tabular-nums; }
+/* MD3 wavy progress (4dp): height 12, stroke 4, wavelength 40, gap 6, track 4 r2, 4x4 stop dot */
+.prog { display: flex; align-items: center; height: 12px; padding-left: 2px; }
+.prog .fill { height: 12px; background: var(--primary); flex: none; }
+.prog .fill.wave { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='12' viewBox='0 0 40 12'%3E%3Cpath d='M0 6 Q10 -2 20 6 T40 6' fill='none' stroke='black' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x left center / 40px 12px; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='12' viewBox='0 0 40 12'%3E%3Cpath d='M0 6 Q10 -2 20 6 T40 6' fill='none' stroke='black' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x left center / 40px 12px; }
+.prog .fill.flat { height: 4px; border-radius: 2px; }
+.prog .rest { flex: 1; height: 4px; border-radius: 2px; background: var(--secondary-container); margin-left: 6px; position: relative; }
+.prog .rest::after { content: ""; position: absolute; right: 0; top: 0; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
+.prog.full .rest { display: none; }
+.prog.zero .rest { margin-left: 0; }
+/* bottom banner 42h */
+.ban { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 14px 0 12px; border-radius: 12px; font-family: var(--font-cjk); font-size: 14px; line-height: 16px; letter-spacing: 0.4px; }
+.ban svg { width: 18px; height: 18px; }
+.ban.warn { background: var(--banner-warn-bg); color: var(--banner-warn); }
+.ban.err { background: var(--error-container); color: var(--error); font-weight: 700; }
+.ban.err svg { stroke-width: 2; }
+.ban button { margin-left: auto; height: 32px; padding: 6px 12px; border-radius: 12px; border: 0; box-shadow: inset 0 0 0 1px var(--btn-stroke); background: transparent; color: inherit; font-family: var(--font); font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px; }
+.ban button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+/* offline: content dimmed, bottom overlay 106h with #1D1B20 @ 0.72 */
+.card.offline .tele, .card.offline .job { filter: blur(3px); opacity: .48; }
+.offmask { position: absolute; left: 0; right: 0; bottom: 0; height: 106px; border-radius: 0 0 12px 12px; background: var(--dim); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; z-index: 2; }
+.offmask b { display: flex; align-items: center; gap: 8px; font-size: 18px; line-height: 26px; font-weight: 700; letter-spacing: 0; color: var(--error); }
+.offmask b::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.offmask span { font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0; color: var(--outline); }
+/* narrow cards (phones): camera on top, telemetry below */
+@container (max-width: 420px) { .cb { padding: 16px; } .media { grid-template-columns: minmax(0, 1fr); height: auto; gap: 12px; } .tele { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  h1 { font-size: 26px; line-height: 32px; }
+  .acct { min-width: 0; padding: 6px; } .acct > span:last-child { display: none; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .stat { min-height: 0; padding: 12px; gap: 6px; } .stat .k { font-size: 12px; height: auto; line-height: 16px; } .stat .k svg { display: none; }
+  .stat .v { font-size: 28px; line-height: 34px; gap: 4px; } .stat .v small { font-size: 12px; }
+  .stat .s:not(.warn), .stat .tr { display: none; }
+}
+</style>
+<div class="shell">
+<nav class="drawer" aria-label="主导航">
+  <div class="brand"><i>PR</i>PlateRelay</div>
+  <button class="nav" aria-current="page"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>概况</button>
+  <span class="lbl">我的打印</span>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>提交订单</button>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>我的订单</button>
+  <span class="lbl">现场</span>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>待办<span class="n">3</span></button>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>扫码核销</button>
+  <span class="lbl">管理</span>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>审核队列<span class="n">4</span></button>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18"/></svg>订单管理</button>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg>打印机管理</button>
+  <button class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>系统设置</button>
+</nav>
+<main class="page" id="root"></main></div>
+<script>
+const IC = {
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 12 0v1"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+  rows: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18"/>',
+  server: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  form: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  grip: '<circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  nozzle: '<path d="M8 3h8v6l-2 4h-4l-2-4z"/><path d="M12 13v4M10 21h4"/>',
+  bed: '<path d="M3 17h18M5 13h14M7 9h10"/>',
+  box: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  up: '<path d="m18 15-6-6-6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  play: '<path d="M6 3l14 9-14 9z"/>',
+  stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+  pkg: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  printer: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  star: '<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+};
+const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
+function rgba(hex8) {
+  if (!hex8 || hex8.length < 8) return 'transparent';
+  const n = i => parseInt(hex8.slice(i, i + 2), 16);
+  return `rgba(${n(0)},${n(2)},${n(4)},${(n(6) / 255).toFixed(2)})`;
+}
+const isEmptySlot = s => !s.m || s.c.slice(6) === '00';
+const PRINTERS = [
+  { id: 'X2D-01', model: 'Bambu Lab X2D', state: 'PRINTING', star: true,
+    nozzles: [{ n: '左', d: 0.4, cur: 220, tgt: 220 }, { n: '右', d: 0.4, cur: 238, tgt: 240 }], bed: [60, 60], chamber: [38, 40],
+    ams: [{ s: 'A1', m: 'PLA', c: 'F2F2F2FF', r: 82, active: true }, { s: 'A2', m: 'PETG', c: '1F6FEBFF', r: 45 }, { s: 'A3', m: 'PLA', c: 'E5484DFF', r: -1 }, { s: 'A4', m: null, c: '00000000', r: null }],
+    ext: { m: 'TPU', c: 'F5A524FF', r: -1 }, order: 'PR-0142', progress: 62, layer: [133, 215], used: '1h 41m', left: '1h 04m' },
+  { id: 'H2D-01', model: 'Bambu Lab H2D', state: 'ERROR_PAUSED', star: true,
+    nozzles: [{ n: '左', d: 0.4, cur: 200, tgt: 220 }, { n: '右', d: 0.6, cur: 25, tgt: 0 }], bed: [55, 55], chamber: [36, 0],
+    ams: [{ s: 'A1', m: 'PLA', c: '2B2B2BFF', r: 60 }, { s: 'A2', m: 'PLA', c: '3DD68CFF', r: 0, active: true }, { s: 'A3', m: 'PETG', c: 'FFFFFFFF', r: 30 }, { s: 'A4', m: 'PLA', c: 'FFD60AFF', r: -1 }],
+    ext: null, order: 'PR-0141', progress: 37, layer: [64, 180], used: '58m', left: '1h 40m',
+    error: { id: 'err-7731', code: '0700-2000-0002-0001', module: 'AMS', sev: 'error', msg: 'AMS A2 断料，请补料后继续', at: '11:47',
+      actions: [
+        { a: 'RESUME_PROBLEM_SOLVED', label: '已在现场补料，继续', onsite: true, perm: 'error.basic' },
+        { a: 'RETRY', label: '重试进料', perm: 'error.basic' },
+        { a: 'ACKNOWLEDGE', label: '仅关闭提示', perm: 'error.basic' },
+        { a: 'STOP', label: '停止打印', destructive: true, perm: 'stop' },
+      ] } },
+  { id: 'X1C-01', model: 'Bambu Lab X1C', state: 'PRINTING',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 215, tgt: 220 }], bed: [62, 60], chamber: [38, 0],
+    ams: [{ s: 'A1', m: 'PLA', c: 'F2F2F2FF', r: 70, active: true }, { s: 'A2', m: 'PETG', c: '6E56CFFF', r: 52 }, { s: 'A3', m: 'PLA', c: '111111FF', r: 18 }, { s: 'A4', m: 'PLA', c: 'F76B15FF', r: 90 }],
+    ext: null, order: 'PR-0140', progress: 80, layer: [172, 215], used: '1h 36m', left: '24m' },
+  { id: 'P1S-02', model: 'Bambu Lab P1S', state: 'PREPARING', substage: '自动调平',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 170, tgt: 220 }], bed: [58, 60], chamber: null,
+    ams: [{ s: 'A1', m: 'PLA', c: 'E5484DFF', r: 66, active: true }, { s: 'A2', m: 'PLA', c: 'F2F2F2FF', r: 40 }, { s: 'A3', m: null, c: '00000000', r: null }, { s: 'A4', m: null, c: '00000000', r: null }],
+    ext: null, order: 'PR-0138', progress: 0, layer: [0, 160], used: '4m', left: '2h 10m' },
+  { id: 'P2S-04', model: 'Bambu Lab P2S', state: 'CLEARING_REQUIRED',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 42, tgt: 0 }], bed: [35, 0], chamber: null,
+    ams: [{ s: 'A1', m: 'PLA', c: '1F6FEBFF', r: 55 }, { s: 'A2', m: 'PLA', c: 'F2F2F2FF', r: 71 }, { s: 'A3', m: null, c: '00000000', r: null }, { s: 'A4', m: null, c: '00000000', r: null }],
+    ext: null, order: 'PR-0139', progress: 100, layer: [140, 140], used: '1h 40m', waiting: '35m' },
+  { id: 'A1-01', model: 'Bambu Lab A1', state: 'UNMANAGED_PRINTING',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 210, tgt: 210 }], bed: [60, 60], chamber: null,
+    ams: [], ext: { m: 'PLA', c: '3DD68CFF', r: -1, active: true }, order: null, progress: 12, layer: [9, 75], used: '9m', left: '?' },
+  { id: 'P1S-05', model: 'Bambu Lab P1S', state: 'IDLE',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 28, tgt: 0 }], bed: [26, 0], chamber: null,
+    ams: [{ s: 'A1', m: 'PLA', c: 'F2F2F2FF', r: 95 }, { s: 'A2', m: 'PLA', c: '111111FF', r: 88 }, { s: 'A3', m: null, c: '00000000', r: null }, { s: 'A4', m: null, c: '00000000', r: null }],
+    ext: null, order: null },
+  { id: 'P2S-03', model: 'Bambu Lab P2S', state: 'OFFLINE', lastSeen: '2026-10-23 10:48:59',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: null, tgt: null }], bed: [null, null], chamber: null, ams: [], ext: null, order: null },
+  { id: 'X1C-02', model: 'Bambu Lab X1C', state: 'MAINTENANCE', maintNote: '更换 0.4 硬化钢喷嘴',
+    nozzles: [{ n: '喷嘴', d: 0.4, cur: 30, tgt: 0 }], bed: [25, 0], chamber: [26, 0], ams: [], ext: null, order: null },
+];
+IC.errc = '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 16.5h.01"/>';
+const OWN = { 'PR-0142': ['陈一帆', '机械臂轴承座.gcode.3mf'], 'PR-0141': ['赵乐', '齿轮箱外壳.gcode.3mf'], 'PR-0140': ['王可', '云台底座.gcode.3mf'], 'PR-0138': ['李想', '花盆托盘.gcode.3mf'], 'PR-0139': ['陈一帆', '超声波传感器支架.gcode.3mf'] };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* tonal initial avatars, hue from the name */
+function av(name, size) {
+  if (!name) return `<span class="av" style="width:${size}px;height:${size}px;background:var(--sc-highest);color:var(--on-variant);font-size:${size * .45}px">?</span>`;
+  const h = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+  return `<span class="av" style="width:${size}px;height:${size}px;background:hsl(${h} 70% 82%);font-size:${size * .45}px">${esc(name[0])}</span>`;
+}
+const CARD_ST = { PRINTING: ['打印中', 'ok'], PREPARING: ['预热', ''], IDLE: ['空闲', ''], CLEARING_REQUIRED: ['问题', 'warn'], UNMANAGED_PRINTING: ['问题', 'warn'], ERROR_PAUSED: ['故障', 'err'], OFFLINE: ['离线', ''], MAINTENANCE: ['维护', ''] };
+function ring(slot) {
+  const R = 6.125, C = 2 * Math.PI * R, col = rgba(slot.c);
+  if (slot.r == null || slot.r < 0) return `<svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="${R}" stroke="${col}" stroke-dasharray="1.4 2.4"/></svg>`;
+  return `<svg class="ring" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="${R}" stroke="${col}" stroke-dasharray="${(C * Math.max(slot.r, 5) / 100).toFixed(2)} ${C.toFixed(2)}"/></svg>`;
+}
+function prog(pct, active) {
+  return `<div class="prog ${pct >= 100 ? 'full' : ''} ${pct <= 0 ? 'zero' : ''}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">${pct > 0 ? `<i class="fill ${active ? 'wave' : 'flat'}" style="width:calc(${pct}% - ${pct >= 100 ? 0 : 6}px)"></i>` : ''}<i class="rest"></i></div>`;
+}
+function card(p) {
+  const o = OWN[p.order];
+  const off = p.state === 'OFFLINE';
+  const [sl, sc] = CARD_ST[p.state];
+  const v = (c, t) => c == null ? '— / —' : `${c} / ${t || '—'}°C`;
+  const nz = p.nozzles.length > 1 ? p.nozzles.map(n => n.cur ?? '—').join('·') + '°C' : v(p.nozzles[0].cur, p.nozzles[0].tgt);
+  const row = (icon, cls, val) => `<div class="tr2"><span class="${cls}">${ic(icon)}</span><span class="tv">${val}</span></div>`;
+  const temps = row('nozzle', 'nz', nz) + row('bed', 'bd', v(p.bed[0], p.bed[1])) + row('box', '', p.chamber ? v(p.chamber[0], p.chamber[1]) : '— / —') + row('layers', '', p.layer ? `${p.layer[0]} / ${p.layer[1]}` : '— / —');
+  const loaded = p.ams.filter(x => !isEmptySlot(x)).map(x => ({ ...x, label: x.s })).concat(p.ext ? [{ ...p.ext, label: '外挂' }] : []);
+  const spools = loaded.slice(0, 4).map(x => `<div class="tr2 sp" title="${x.label} ${esc(x.m)}${x.r >= 0 ? ' · 余 ' + x.r + '%' : ''}">${ring(x)}<span class="sl">${x.label}</span><span class="sm">${esc(x.m)}</span>${x.active ? '<span class="on"></span>' : ''}</div>`).join('') || '<div class="tr2 sp none">未装料</div>';
+  let who = null, file = '', pct = p.progress ?? 0, time = '', show = true;
+  if (o) { who = o[0]; file = o[1]; time = p.state === 'CLEARING_REQUIRED' ? `总耗时 ${p.used} / 等待清台 ${p.waiting}` : p.state === 'PREPARING' ? `${p.substage} / 剩余 ${p.left}` : `已用 ${p.used} / 剩余 ${p.left}`; }
+  else if (p.state === 'UNMANAGED_PRINTING') { file = '非系统下发的任务'; time = `已用 ${p.used} / 剩余未知`; who = '未知来源'; }
+  else if (off) { who = '—'; file = '—'; time = '—'; pct = 0; }
+  else { show = false; file = p.state === 'MAINTENANCE' ? '维护中，不参与派单' : '空闲，等待派单'; time = p.state === 'MAINTENANCE' ? esc(p.maintNote) : '暂未派单'; pct = 0; }
+  /* Figma uses the wave instance on every card; at 100% it is a full flat line */
+  const active = pct > 0 && pct < 100;
+  const job = `<div class="job">
+    ${show ? `<div class="who">${av(who === '未知来源' || who === '—' ? null : who, 20)}<span>${esc(who)}</span></div>` : ''}
+    <div class="file"><span>${esc(file)}</span><span>${show && !off ? pct + '%' : ''}</span></div>
+    <div class="pt">${prog(pct, active)}<div class="time">${time}</div></div></div>`;
+  let ban = '';
+  if (p.state === 'ERROR_PAUSED') ban = `<div class="ban err">${ic('errc')}<span>${esc(p.error.msg)}</span></div>`;
+  else if (p.state === 'CLEARING_REQUIRED') ban = `<div class="ban warn">${ic('lock')}<span>热床未清空</span></div>`;
+  else if (p.state === 'UNMANAGED_PRINTING') ban = `<div class="ban warn">${ic('lock')}<span>检测到外部任务</span><button>查看详情</button></div>`;
+  return `<article class="card ${off ? 'offline' : ''}"><div class="cb">
+    <div class="ph">${ic('printer')}<b>${p.id}</b>${p.star ? `<span class="star" title="星标">${ic('star')}</span>` : ''}<span class="st ${sc}">${sl}</span></div>
+    <div class="media"><div class="cam" role="img" aria-label="${p.id} 摄像头画面"></div><div class="tele"><div class="tc">${temps}</div><div class="tc ams">${spools}</div></div></div>
+    ${job}</div>${ban}${off ? `<div class="offmask"><b>设备已离线</b><span>最后遥测 ${p.lastSeen}</span></div>` : ''}
+  </article>`;
+}
+let filter = 'all';
+const ATTN = ['ERROR_PAUSED', 'UNMANAGED_PRINTING', 'CLEARING_REQUIRED'];
+function render() {
+  const list = filter === 'star' ? PRINTERS.filter(p => p.star) : filter === 'attn' ? PRINTERS.filter(p => ATTN.includes(p.state)) : PRINTERS;
+  const n = s => PRINTERS.filter(p => p.state === s).length;
+  const chip = (k, l) => `<button class="chip" aria-pressed="${filter === k}" data-f="${k}">${filter === k ? ic('check') : ''}${l}</button>`;
+  document.getElementById('root').innerHTML = `
+  <header class="top"><h1>概况</h1>
+    <button class="icon-btn" aria-label="通知">${ic('bell')}</button>
+    <button class="acct" aria-label="账户">${av('Tom_Chicken', 36)}<span><b>Tom_Chicken</b><small>Builder</small></span></button></header>
+  <section class="stats">
+    <div class="stat"><div class="k">排队 / 等待中${ic('list')}</div><div class="v">7<small>项</small></div><div class="s">含 4 项待审核 · 1 项等待兼容打印机</div><div class="tr">↓ 较 1 小时前 -2</div></div>
+    <div class="stat"><div class="k">正在打印设备${ic('printer')}</div><div class="v">${n('PRINTING')}<small>/ ${PRINTERS.length} 台</small></div><div class="s">当前利用率 ${Math.round(n('PRINTING') / PRINTERS.length * 100)}% · ${n('PREPARING')} 台预热</div><div class="tr">↑ 较 1 小时前 +1 台</div></div>
+    <div class="stat"><div class="k">待清台机器${ic('scan')}</div><div class="v">${n('CLEARING_REQUIRED')}<small>台</small></div><div class="s warn">未入库确认前禁止派单</div><div class="tr">↑ 较 1 小时前 +1 台</div></div>
+  </section>
+  <section class="dev"><div class="sec"><div><h2>设备状态</h2><p>${PRINTERS.length} 台设备 · ${n('PRINTING')} 打印中 / ${n('PREPARING')} 预热 / ${n('CLEARING_REQUIRED')} 待清台 / ${n('UNMANAGED_PRINTING')} 外部任务 / ${n('IDLE')} 空闲 / ${n('ERROR_PAUSED')} 故障 / ${n('OFFLINE')} 离线 / ${n('MAINTENANCE')} 维护</p></div>
+    <div class="chips">${chip('star', `星标设备 ${PRINTERS.filter(p => p.star).length}`)}${chip('all', `全部 ${PRINTERS.length}`)}${chip('attn', `需处理 ${PRINTERS.filter(p => ATTN.includes(p.state)).length}`)}</div></div>
+  <div class="grid" id="grid">${list.map(card).join('')}</div></section>`;
+  lastCols = 0; layout();
+}
+/* masonry like the Figma board: round-robin into N columns */
+const CARD_MIN = 448; // the Figma card is 464; a little slack so 1680 still gets 3 columns with a scrollbar let lastCols = 0;
+function layout() {
+  const g = document.getElementById('grid'); if (!g) return;
+  const cards = [...g.querySelectorAll('.card')];
+  const n = Math.max(1, Math.min(cards.length, Math.floor((g.clientWidth + 16) / (CARD_MIN + 16))));
+  if (n === lastCols) return; lastCols = n;
+  const cols = Array.from({ length: n }, () => Object.assign(document.createElement('div'), { className: 'col' }));
+  cards.forEach((c, i) => cols[i % n].appendChild(c));
+  g.replaceChildren(...cols);
+}
+addEventListener('resize', layout);
+document.addEventListener('click', e => { const f = e.target.closest('[data-f]'); if (f) { filter = f.dataset.f; render(); } });
+render();
+</script>
