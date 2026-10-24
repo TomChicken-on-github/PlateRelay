@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { SYSTEM } from "../auth/actor.js";
 import { DB, type Db } from "../db/db.js";
@@ -26,14 +26,12 @@ export class SchedulerService {
 
   /** Tries every idle, reachable printer. Call after anything that frees a printer or queues an order. */
   async kick(): Promise<void> {
-    const idle = await this.db.select({ id: printers.id }).from(printers).where(eq(printers.state, "IDLE"));
-    for (const p of idle) {
-      if (!this.commands.reachable(p.id)) continue;
-      try {
-        await this.dispatch(p.id);
-      } catch (e) {
-        this.log.error(`dispatch to ${p.id} failed: ${(e as Error).message}`);
-      }
+    try {
+      const idle = await this.db.select({ id: printers.id }).from(printers).where(eq(printers.state, "IDLE"));
+      for (const p of idle) if (this.commands.reachable(p.id)) await this.dispatch(p.id);
+    } catch (e) {
+      /* never fails the request that triggered it; the next kick tries again */
+      this.log.error(`dispatch failed: ${(e as Error).message}`);
     }
   }
 
@@ -76,7 +74,7 @@ export class SchedulerService {
     const q = await db
       .select({ id: orders.id, s: orders.printSeconds })
       .from(orders)
-      .where(and(eq(orders.status, "QUEUED")))
+      .where(eq(orders.status, "QUEUED"))
       .orderBy(asc(orders.queueSeq), asc(orders.id));
     const out = new Map<number, { position: number; aheadSeconds: number }>();
     let ahead = 0;
