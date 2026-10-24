@@ -50,3 +50,9 @@ figma_tokens.json
 Thumbs.db
 .idea/
 .vscode/
+
+# TypeScript build info
+*.tsbuildinfo
+# the Python `lib/` rule above must not swallow frontend source folders
+!apps/*/src/lib/
+!packages/*/src/lib/
