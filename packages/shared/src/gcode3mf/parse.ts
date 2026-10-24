@@ -1,5 +1,5 @@
 import { unzipSync, type UnzipFileInfo } from "fflate";
-import { blocks, metadata, tags } from "./xml";
+import { blocks, metadata, tags } from "./xml.js";
 
 /*
  * Reads the metadata of a Bambu Studio sliced project (.gcode.3mf).

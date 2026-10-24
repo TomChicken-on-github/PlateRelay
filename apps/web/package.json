@@ -18,6 +18,7 @@
     "@fontsource/inter": "5.3.0",
     "@fontsource/noto-sans-sc": "5.3.1",
     "@fontsource/roboto": "5.3.0",
+    "@platerelay/shared": "workspace:*",
     "clsx": "2.1.1",
     "material-symbols": "0.48.1",
     "motion": "14.6.0",
