@@ -9,5 +9,9 @@
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=24"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @platerelay/web dev",
+    "build:web": "pnpm --filter @platerelay/web build"
   }
 }
