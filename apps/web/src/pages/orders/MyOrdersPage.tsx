@@ -15,6 +15,7 @@ import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { type MyOrder, type OrderGroup, STATUS, myOrders } from "../../mock/myOrders";
 import { ME } from "../../mock/session";
+import { PickupCode } from "./PickupCode";
 
 type TabKey = "all" | OrderGroup;
 const TABS: [TabKey, string][] = [["all", "全部"], ["act", "进行中"], ["pick", "待取件"], ["todo", "需处理"], ["end", "已结束"]];
@@ -166,34 +167,6 @@ function Timeline({ o }: { o: MyOrder }) {
   );
 }
 
-/* ---------- pickup QR ---------- */
-
-/** Deterministic stand-in for a QR code (25x25 modules with three finder patterns). */
-function FakeQR({ code }: { code: string }) {
-  let h = 0;
-  for (const c of code) h = (h * 131 + c.charCodeAt(0)) >>> 0;
-  const rnd = () => (h = (h * 1664525 + 1013904223) >>> 0) / 4294967296;
-  const N = 25, cell = 8;
-  const fin = (x: number, y: number) => (x < 7 && y < 7) || (x >= N - 7 && y < 7) || (x < 7 && y >= N - 7);
-  let p = "";
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (!fin(x, y) && rnd() > 0.5) p += `M${x * cell} ${y * cell}h${cell}v${cell}h-${cell}z`;
-  const F = ({ x, y }: { x: number; y: number }) => (
-    <>
-      <path d={`M${x} ${y}h56v56h-56z`} fill="#000" />
-      <path d={`M${x + 8} ${y + 8}h40v40h-40z`} fill="#fff" />
-      <path d={`M${x + 16} ${y + 16}h24v24h-24z`} fill="#000" />
-    </>
-  );
-  return (
-    <svg viewBox={`0 0 ${N * cell} ${N * cell}`} role="img" aria-label="取件二维码" className="block size-[200px]">
-      <path d={p} fill="#000" />
-      <F x={0} y={0} />
-      <F x={(N - 7) * cell} y={0} />
-      <F x={0} y={(N - 7) * cell} />
-    </svg>
-  );
-}
-
 /* ---------- page ---------- */
 
 type SheetState = { type: "detail" | "qr" | "cancel" | "retry"; id: number } | null;
@@ -300,8 +273,7 @@ export function MyOrdersPage() {
 
           <Sheet open={sheet?.type === "qr"} onClose={close} title="取件码" footer={<Button variant="text" onClick={close}>关闭</Button>}>
             <div className="text-center text-note text-on-variant">{o.file} · #{o.id}</div>
-            <div className="self-center rounded-2xl bg-white p-3">{o.code && <FakeQR code={o.code} />}</div>
-            <div className="text-center font-num text-[28px] leading-9 font-semibold tracking-[3px]">{o.code}</div>
+            <PickupCode orderId={o.id} open={sheet?.type === "qr"} />
             <div className="text-center text-note text-on-variant">{o.slot} · 到现场出示给工作人员扫码</div>
           </Sheet>
 
