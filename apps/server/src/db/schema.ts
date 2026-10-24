@@ -1,0 +1,327 @@
+import { FAILURE_ATTRIBUTIONS, ORDER_STATUSES, PRINTER_STATES } from "@platerelay/shared";
+import { sql } from "drizzle-orm";
+import {
+  bigint,
+  bigserial,
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgSequence,
+  pgTable,
+  primaryKey,
+  real,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+const createdAt = () => ts("created_at").notNull().defaultNow();
+
+export const orderStatus = pgEnum("order_status", ORDER_STATUSES);
+export const printerState = pgEnum("printer_state", PRINTER_STATES);
+export const failureAttribution = pgEnum("failure_attribution", FAILURE_ATTRIBUTIONS);
+export const actorType = pgEnum("actor_type", ["user", "system", "daemon", "printer"]);
+export const auditResult = pgEnum("audit_result", ["ok", "failed", "denied"]);
+
+/* ---- accounts ---- */
+
+/** Preset roles; permissions are synced from PRESET_ROLES on start. */
+export const roles = pgTable("roles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  builtin: boolean("builtin").notNull().default(true),
+  permissions: text("permissions").array().notNull(),
+});
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    /** null for accounts that only sign in through an external provider. */
+    passwordHash: text("password_hash"),
+    /** Object key in storage, under avatars/. */
+    avatarKey: text("avatar_key"),
+    disabled: boolean("disabled").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("users_username_lower").on(sql`lower(${t.username})`)],
+);
+
+/** One role per scope. Only "global" is used in the first phase (brief §5.4). */
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    scope: text("scope").notNull().default("global"),
+    roleId: text("role_id").notNull().references(() => roles.id),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.scope] })],
+);
+
+/** External logins (OIDC), keyed by issuer + subject, never by e-mail (brief §5.6). */
+export const externalIdentities = pgTable(
+  "external_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("external_identities_iss_sub").on(t.issuer, t.subject)],
+);
+
+/** Browser sessions. Only the SHA-256 of the cookie value is stored. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    expiresAt: ts("expires_at").notNull(),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+  },
+  (t) => [index("sessions_user").on(t.userId)],
+);
+
+/** Daemon connection tokens. Shown once; only the hash and the last four characters are kept. */
+export const daemons = pgTable("daemons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  network: text("network"),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenTail: text("token_tail").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: createdAt(),
+  lastSeenAt: ts("last_seen_at"),
+});
+
+/* ---- printers ---- */
+
+export interface ReportedNozzle {
+  /** 1-based extruder, same numbering as the slicer. */
+  extruder: number;
+  diameter: number;
+}
+
+export interface ReportedStorage {
+  medium: "internal" | "sd" | "usb";
+  present: boolean;
+  writable: boolean;
+  freeBytes?: number;
+}
+
+export interface PrinterError {
+  errorId: string;
+  vendorCode: string;
+  module?: string;
+  message?: string;
+  raisedAt: string;
+  /** Standard actions the driver allows for this error (driver draft §6). */
+  actions: string[];
+}
+
+export const printers = pgTable("printers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  serial: text("serial").notNull().unique(),
+  ip: text("ip").notNull(),
+  daemonId: uuid("daemon_id").references(() => daemons.id, { onDelete: "set null" }),
+  /* Reported by the printer through the daemon, never typed in. */
+  model: text("model"),
+  modelId: text("model_id"),
+  nozzles: jsonb("nozzles").$type<ReportedNozzle[]>(),
+  storage: jsonb("storage").$type<ReportedStorage[]>(),
+  /** Latest telemetry snapshot (temperatures, AMS, progress). Not audited. */
+  telemetry: jsonb("telemetry").$type<Record<string, unknown>>(),
+  state: printerState("state").notNull().default("OFFLINE"),
+  stateSince: ts("state_since").notNull().defaultNow(),
+  error: jsonb("error").$type<PrinterError>(),
+  maintenanceReason: text("maintenance_reason"),
+  currentOrderId: integer("current_order_id"),
+  starred: boolean("starred").notNull().default(false),
+  lastSeenAt: ts("last_seen_at"),
+  createdAt: createdAt(),
+});
+
+/* ---- request form ---- */
+
+export type FormFieldType = "text" | "textarea" | "single" | "multi" | "number";
+
+export interface FormField {
+  id: string;
+  label: string;
+  type: FormFieldType;
+  required: boolean;
+  options?: string[];
+}
+
+/** Every edit makes a new version; orders keep the version they were submitted with. */
+export const formVersions = pgTable("form_versions", {
+  id: serial("id").primaryKey(),
+  fields: jsonb("fields").$type<FormField[]>().notNull(),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/* ---- orders ---- */
+
+/** Hands out FIFO keys on approval. */
+export const orderQueueSeq = pgSequence("order_queue_seq");
+
+export const files = pgTable("files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sha256: text("sha256").notNull(),
+  key: text("key").notNull(),
+  fileName: text("file_name").notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export interface OrderNozzle {
+  extruder: number;
+  side: "left" | "right" | null;
+  diameter: number;
+}
+
+export interface OrderFilament {
+  slot: number;
+  type: string;
+  color: string;
+  usedGrams: number;
+  extruder: number | null;
+}
+
+export interface AnswerSnapshot {
+  fieldId: string;
+  label: string;
+  type: FormFieldType;
+  value: string | string[] | number | null;
+}
+
+/** One order per plate (brief §5.3); plates of one upload share file_id and nothing else. */
+export const orders = pgTable(
+  "orders",
+  {
+    id: serial("id").primaryKey(),
+    status: orderStatus("status").notNull(),
+    ownerId: uuid("owner_id").notNull().references(() => users.id),
+    fileId: uuid("file_id").notNull().references(() => files.id),
+    plateIndex: integer("plate_index").notNull(),
+    plateCount: integer("plate_count").notNull(),
+    plateName: text("plate_name").notNull().default(""),
+    printerModel: text("printer_model"),
+    printerModelId: text("printer_model_id").notNull(),
+    nozzles: jsonb("nozzles").$type<OrderNozzle[]>().notNull(),
+    filaments: jsonb("filaments").$type<OrderFilament[]>().notNull(),
+    printSeconds: integer("print_seconds").notNull(),
+    weightGrams: real("weight_grams").notNull(),
+    thumbnailKey: text("thumbnail_key"),
+    formVersionId: integer("form_version_id").notNull().references(() => formVersions.id),
+    answers: jsonb("answers").$type<AnswerSnapshot[]>().notNull(),
+    /** FIFO key, set on approval. Kept after the order leaves the queue so a machine-fault retry can reuse it. */
+    queueSeq: bigint("queue_seq", { mode: "number" }),
+    submittedAt: ts("submitted_at").notNull().defaultNow(),
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    reviewedAt: ts("reviewed_at"),
+    rejectReason: text("reject_reason"),
+    printerId: uuid("printer_id").references(() => printers.id, { onDelete: "set null" }),
+    startedAt: ts("started_at"),
+    printedAt: ts("printed_at"),
+    /** Time spent in ERROR_PAUSED, counted into the order's actual duration. */
+    errorPausedMs: bigint("error_paused_ms", { mode: "number" }).notNull().default(0),
+    storedBy: uuid("stored_by").references(() => users.id),
+    storedAt: ts("stored_at"),
+    storageSlot: text("storage_slot"),
+    storePhotoKey: text("store_photo_key"),
+    redeemedBy: uuid("redeemed_by").references(() => users.id),
+    redeemedAt: ts("redeemed_at"),
+    cancelledBy: uuid("cancelled_by").references(() => users.id),
+    cancelledAt: ts("cancelled_at"),
+    cancelReason: text("cancel_reason"),
+    failedBy: uuid("failed_by").references(() => users.id),
+    failedAt: ts("failed_at"),
+    failureReason: text("failure_reason"),
+    attribution: failureAttribution("attribution"),
+    attributedBy: uuid("attributed_by").references(() => users.id),
+    attributedAt: ts("attributed_at"),
+    retryOf: integer("retry_of"),
+  },
+  (t) => [
+    index("orders_status_queue").on(t.status, t.queueSeq, t.id),
+    index("orders_owner").on(t.ownerId, t.submittedAt),
+    uniqueIndex("orders_retry_of").on(t.retryOf),
+  ],
+);
+
+/** Pickup codes: issued on demand, valid 10 minutes, a new one revokes the previous one. */
+export const pickupCodes = pgTable(
+  "pickup_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Normalized, without the PR1 prefix or dashes. */
+    code: text("code").notNull(),
+    orderId: integer("order_id").notNull().references(() => orders.id),
+    issuedAt: ts("issued_at").notNull().defaultNow(),
+    expiresAt: ts("expires_at").notNull(),
+    revokedAt: ts("revoked_at"),
+    redeemedAt: ts("redeemed_at"),
+  },
+  (t) => [uniqueIndex("pickup_codes_code").on(t.code), index("pickup_codes_order").on(t.orderId)],
+);
+
+/** The order's own timeline, shown on order detail. */
+export const orderEvents = pgTable(
+  "order_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    orderId: integer("order_id").notNull().references(() => orders.id),
+    at: ts("at").notNull().defaultNow(),
+    actorType: actorType("actor_type").notNull(),
+    actorId: uuid("actor_id"),
+    kind: text("kind").notNull(),
+    fromStatus: orderStatus("from_status"),
+    toStatus: orderStatus("to_status"),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+  },
+  (t) => [index("order_events_order").on(t.orderId, t.at)],
+);
+
+/** Append-only; a trigger in the migrations rejects UPDATE and DELETE. Never holds secrets. */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    at: ts("at").notNull().defaultNow(),
+    actorType: actorType("actor_type").notNull(),
+    actorId: uuid("actor_id"),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    reason: text("reason"),
+    result: auditResult("result").notNull().default("ok"),
+    ip: text("ip"),
+    device: text("device"),
+  },
+  (t) => [index("audit_at").on(t.at), index("audit_target").on(t.targetType, t.targetId), index("audit_actor").on(t.actorId)],
+);
+
+/** Panel settings that are not their own table (queue policy, registration…). */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
