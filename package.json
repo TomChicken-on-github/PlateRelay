@@ -12,6 +12,7 @@
   },
   "scripts": {
     "dev:web": "pnpm --filter @platerelay/web dev",
-    "build:web": "pnpm --filter @platerelay/web build"
+    "build:web": "pnpm --filter @platerelay/web build",
+    "test": "pnpm -r --if-present test"
   }
 }
