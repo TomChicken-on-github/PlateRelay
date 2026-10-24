@@ -1,22 +1,45 @@
 import { createStore } from "../lib/store";
-import type { Fil } from "./myOrders";
+import type { PickupOrder } from "../lib/pickupApi";
 
-export type Code =
-  | { st: "ok"; id: number; file: string; n: number; model: string; fil: Fil; g: number; owner: string; role: string; slot: string; when: string }
-  | { st: "used"; id: number; owner: string; by: string; at: string }
-  | { st: "notready"; id: number; label: string };
+/* Mock backend rows behind lib/pickupApi.ts. Times are ISO strings. */
+export type MockOrder = {
+  status: string;
+  order: PickupOrder;
+  redeemed?: { at: string; by: string };
+};
 
-export const codes = createStore<Record<string, Code>>({
-  "7K3Q-92": { st: "ok", id: 1046, file: "传感器支架.gcode.3mf", n: 1, model: "X1C", fil: [["#00c0e8", "PLA"]], g: 18, owner: "Tom_Chicken", role: "Builder", slot: "暂存篮 B-07", when: "10-24 07:55" },
-  "4M8D-15": { st: "ok", id: 1044, file: "云台支架.gcode.3mf", n: 2, model: "P1S", fil: [["#ff7043", "ABS"]], g: 44, owner: "林小满", role: "User", slot: "暂存篮 A-03", when: "10-24 06:40" },
-  "9X2P-60": { st: "used", id: 1041, owner: "周浩然", by: "Staff 陈一帆", at: "10-24 09:41" },
-  "2H5N-77": { st: "notready", id: 1048, label: "打印中，还没入库" },
+const order = (o: Partial<PickupOrder> & Pick<PickupOrder, "orderId" | "fileName">): PickupOrder => ({
+  plateIndex: 1, printerModel: "X2D", weightG: 20, filaments: [{ color: "#0088ff", type: "PLA" }],
+  owner: { name: "Tom_Chicken", role: "Builder" }, slot: "", storedAt: "2026-10-24T07:55:00+08:00", thumbUrl: null, ...o,
 });
 
-export const redeemed = createStore([
-  { id: 1039, file: "电机固定板", owner: "周浩然", at: "09:41" },
-  { id: 1036, file: "线缆夹", owner: "Tom_Chicken", at: "09:12" },
-]);
+export const pickupOrders = createStore<Record<number, MockOrder>>({
+  1046: { status: "STORED_READY_PICKUP", order: order({ orderId: 1046, fileName: "传感器支架.gcode.3mf", printerModel: "X1C", weightG: 18, filaments: [{ color: "#00c0e8", type: "PLA" }], slot: "暂存篮 B-07" }) },
+  1044: { status: "STORED_READY_PICKUP", order: order({ orderId: 1044, fileName: "云台支架.gcode.3mf", plateIndex: 2, printerModel: "P1S", weightG: 44, filaments: [{ color: "#ff7043", type: "ABS" }], owner: { name: "林小满", role: "User" }, slot: "暂存篮 A-03", storedAt: "2026-10-24T06:40:00+08:00" }) },
+  1043: { status: "STORED_READY_PICKUP", order: order({ orderId: 1043, fileName: "灯罩.gcode.3mf", owner: { name: "吴桐", role: "User" }, slot: "暂存篮 A-05" }) },
+  1041: { status: "COMPLETED", order: order({ orderId: 1041, fileName: "电机固定板.gcode.3mf", owner: { name: "周浩然", role: "User" }, slot: "暂存篮 A-01" }), redeemed: { at: "2026-10-24T09:41:00+08:00", by: "陈一帆" } },
+  1048: { status: "PRINTING", order: order({ orderId: 1048, fileName: "机械臂轴承座.gcode.3mf" }) },
+});
 
-/* prototype only: cycles through valid, used, not-ready and unknown codes */
-export const SIM_CODES = ["7K3Q-92", "9X2P-60", "2H5N-77", "4M8D-15", "ZZZZ-00"];
+/* Issued codes (bare 8 chars) and the one live code per order; issuing again supersedes the old one. */
+export const pickupCodes = createStore<Record<string, { orderId: number; expiresAt: string }>>({});
+export const liveCode = createStore<Record<number, string>>({});
+
+/*
+ * Demo codes so the scan page can be tried without a second device. In mock mode the codes issued in
+ * 我的订单 live only in that browser tab, so a phone cannot scan them from another device.
+ */
+const soon = new Date(Date.now() + 24 * 3600e3).toISOString();
+export const DEMO_CODES = { ok: "DEM0-0K44", expired: "DEM0-EXP1", redeemed: "DEM0-D0NE", notReady: "DEM0-PR1N" };
+pickupCodes.set({
+  DEM00K44: { orderId: 1044, expiresAt: soon },
+  DEM0EXP1: { orderId: 1043, expiresAt: "2026-10-24T08:00:00+08:00" },
+  DEM0D0NE: { orderId: 1041, expiresAt: soon },
+  DEM0PR1N: { orderId: 1048, expiresAt: soon },
+});
+liveCode.set({ 1044: "DEM00K44", 1043: "DEM0EXP1", 1041: "DEM0D0NE", 1048: "DEM0PR1N" });
+
+export const redeemed = createStore([
+  { orderId: 1041, fileName: "电机固定板.gcode.3mf", owner: { name: "周浩然" }, redeemedAt: "2026-10-24T09:41:00+08:00" },
+  { orderId: 1036, fileName: "线缆夹.gcode.3mf", owner: { name: "Tom_Chicken" }, redeemedAt: "2026-10-24T09:12:00+08:00" },
+]);

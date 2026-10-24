@@ -24,7 +24,6 @@ export type MyOrder = {
   why?: string;
   done?: string;
   slot?: string;
-  code?: string;
   when?: string;
   reason?: string;
   by?: string;
@@ -54,7 +53,7 @@ export const myOrders = createStore<MyOrder[]>([
   { id: 1050, file: "机械臂轴承座.gcode.3mf", n: 3, model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "queued", at: "10-24 08:40", pos: 5, wait: "等待兼容的打印机：H2D 当前没有可用设备" },
   { id: 1047, file: "舵机支架.gcode.3mf", n: 1, model: "H2D", nozzle: "0.4", time: "1h 50m", g: 36, fil: [["#ff7043", "ABS"]], st: "paused", why: "耗材异常", at: "10-24 07:20", printer: "H2D-02", pct: 41 },
   { id: 1045, file: "云台底座.gcode.3mf", n: 1, model: "P1S", nozzle: "0.4", time: "2h 40m", g: 61, fil: [["#ff7043", "ABS"]], st: "awaiting", at: "10-24 05:30", printer: "P1S-02", done: "10-24 09:01" },
-  { id: 1046, file: "传感器支架.gcode.3mf", n: 1, model: "X1C", nozzle: "0.4", time: "0h 55m", g: 18, fil: [["#00c0e8", "PLA"]], st: "ready", at: "10-23 22:10", printer: "X1C-01", slot: "暂存篮 B-07", code: "7K3Q-92", when: "10-24 07:55" },
+  { id: 1046, file: "传感器支架.gcode.3mf", n: 1, model: "X1C", nozzle: "0.4", time: "0h 55m", g: 18, fil: [["#00c0e8", "PLA"]], st: "ready", at: "10-23 22:10", printer: "X1C-01", slot: "暂存篮 B-07", when: "10-24 07:55" },
   { id: 1040, file: "电池仓盖.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "1h 05m", g: 22, fil: [["#0088ff", "PLA"]], st: "rejected", at: "10-23 19:20", reason: "壁厚过薄，可能打不成型，请加厚到 1.2 mm 以上后重新提交。", by: "Builder 赵乐" },
   { id: 1038, file: "线缆夹.gcode.3mf", n: 1, model: "H2D", nozzle: "0.4", time: "0h 40m", g: 9, fil: [["#ffcc00", "PLA"]], st: "failed", at: "10-23 15:02", printer: "H2D-01", pct: 37, reason: "A2 断料，打印中止（已完成 37%）" },
   { id: 1030, file: "电机固定板.gcode.3mf", n: 1, model: "X1C", nozzle: "0.4", time: "1h 30m", g: 40, fil: [["#6155f5", "PETG"]], st: "done", at: "10-23 09:00", when: "10-23 16:20" },
