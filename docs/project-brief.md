@@ -221,7 +221,7 @@ Builder 和 Coreteam 权限完全一样，但仍然保留为两个角色：身�
 
 **8. 目前用单仓库（monorepo）【已定】**
 
-目录建议【建议】：
+目录【已定：2026-10-24 确认采用以下布局；表中应用职责为后续实现目标】：
 
 | 目录 | 内容 |
 | --- | --- |
@@ -230,6 +230,12 @@ Builder 和 Coreteam 权限完全一样，但仍然保留为两个角色：身�
 | `daemon/` | 连接打印机的 Python 守护进程；接口草稿 §9 的 `driver-api` 和各品牌 driver 包也先放在这里 |
 | `packages/shared` | 前后端和 daemon 共用的类型与接口定义：daemon 的 pydantic 模型导出 JSON Schema，再生成 TS 类型（见 §5.6） |
 | `docs/`、`tools/` | 保持现状 |
+
+2026-10-24 已完成目录与工作区配置初始化，尚无应用源码或可运行入口：
+
+- Node.js `>=24`，使用 `pnpm@11.22.0`；根 `pnpm-workspace.yaml` 包含 `apps/*`、`packages/*`，共用根 `pnpm-lock.yaml`。在仓库根执行 `pnpm install --frozen-lockfile --offline`。
+- Python `>=3.12`，使用 uv；根 `pyproject.toml` 包含 `daemon` 成员，共用根 `uv.lock` 和 `.venv`。根项目与 daemon 均为非打包项目。在仓库根执行 `uv sync --frozen --all-packages --offline --no-python-downloads`。
+- 当前依赖为空；未生成 NestJS、React、daemon 入口、共享协议或 driver 包。driver 拆分与类型生成方案仍按相应章节的【建议】处理，本次初始化不作额外决定。
 
 - 好处：改订单状态或接口时，前后端和 daemon 在同一个 PR 里一起改；CI 和文档也只维护一份。
 - 以后需要单独发布 driver 包，或者有人只负责其中一块时，再考虑拆仓库。

@@ -35,7 +35,6 @@ htmlcov/
 node_modules/
 .npm
 .vite/
-panel/backend/dist/
 
 # Environment Variables & Secrets
 .env

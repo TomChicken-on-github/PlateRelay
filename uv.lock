@@ -1,0 +1,19 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[manifest]
+members = [
+    "platerelay-daemon",
+    "platerelay-workspace",
+]
+
+[[package]]
+name = "platerelay-daemon"
+version = "0.1.0"
+source = { virtual = "daemon" }
+
+[[package]]
+name = "platerelay-workspace"
+version = "0.1.0"
+source = { virtual = "." }

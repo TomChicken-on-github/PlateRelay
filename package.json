@@ -1,0 +1,13 @@
+{
+  "name": "platerelay",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "author": {
+    "name": "Tom_Chicken",
+    "email": "Tom_Chicken@qq.com"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  }
+}

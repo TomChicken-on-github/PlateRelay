@@ -1,0 +1,9 @@
+[project]
+name = "platerelay-daemon"
+version = "0.1.0"
+authors = [{ name = "Tom_Chicken", email = "Tom_Chicken@qq.com" }]
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
