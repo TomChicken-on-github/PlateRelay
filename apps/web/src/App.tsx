@@ -1,7 +1,9 @@
 import { MotionConfig } from "motion/react";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { AppShell } from "./components/AppShell";
+import { RequireAuth } from "./components/RequireAuth";
 import { ToastProvider } from "./components/Toast";
+import { LoginPage } from "./pages/login/LoginPage";
 import { OrderAdminPage } from "./pages/admin/OrderAdminPage";
 import { MyOrdersPage } from "./pages/orders/MyOrdersPage";
 import { OverviewPage } from "./pages/overview/OverviewPage";
@@ -13,8 +15,14 @@ import { SubmitPage } from "./pages/submit/SubmitPage";
 import { TodoPage } from "./pages/todo/TodoPage";
 
 const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage key="login" mode="login" /> },
+  { path: "/register", element: <LoginPage key="register" mode="register" /> },
   {
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { path: "/", element: <OverviewPage /> },
       { path: "/printers/:id", element: <PrinterDetailPage /> },
