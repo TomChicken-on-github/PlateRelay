@@ -9,9 +9,11 @@ import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
+import type { ParsedUpload, ParseErrorBody } from "@platerelay/shared";
 import { LinearIndeterminate } from "../../components/WavyProgress";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
+import { PRINTERS } from "../../mock/printers";
 
 const QUEUE_AHEAD = 7, MAX_MB = 200;
 
@@ -24,9 +26,9 @@ const FIELDS = [
 ] as const;
 type FieldDef = (typeof FIELDS)[number];
 
-type Plate = { n: number; model: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string };
+type Plate = { n: number; model: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; thumb?: string | null };
 
-/* Parsing result of the sample file. Real parsing happens on the server (format check, plates, target model). */
+/* Canned result for the "使用示例文件" demo; real files go to the panel's parse endpoint. */
 const SAMPLE = {
   name: "机械臂轴承座.gcode.3mf",
   mb: 38.4,
@@ -42,6 +44,43 @@ const mins = (s: string) => {
   return m ? +m[1] * 60 + +m[2] : 0;
 };
 const fmt = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+
+/* Availability still comes from the mock printer list until printer management has a backend. */
+function toPlates(r: ParsedUpload): Plate[] {
+  const model = r.printerModel?.replace(/^Bambu Lab\s+/, "") ?? r.plates[0]?.printerModelId ?? "未知机型";
+  const fleet = PRINTERS.filter((p) => p.model === r.printerModel);
+  return r.plates.map((p) => {
+    const plate: Plate = {
+      n: p.index,
+      model,
+      nozzle: [...new Set(p.nozzles.map((z) => z.diameter))].join(" / "),
+      time: fmt(Math.round(p.printSeconds / 60)),
+      g: Math.round(p.weightGrams),
+      fil: p.filaments.map((f) => [f.color, f.type]),
+      st: "ok",
+      thumb: p.thumbnailUrl,
+    };
+    if (!fleet.length) return { ...plate, st: "err", note: `没有 ${model} 打印机，暂时不能提交这一盘` };
+    if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
+    return plate;
+  });
+}
+
+async function parseOnServer(f: File): Promise<ParsedUpload> {
+  const body = new FormData();
+  body.append("file", f);
+  let res: Response;
+  try {
+    res = await fetch("/api/gcode3mf/parse", { method: "POST", body });
+  } catch {
+    throw new Error("连不上解析服务，请稍后再试。");
+  }
+  const json: unknown = await res.json().catch(() => null);
+  /* A non-JSON answer comes from a proxy in front of a server that is down. */
+  if (json === null) throw new Error(`连不上解析服务，请稍后再试（HTTP ${res.status}）。`);
+  if (!res.ok) throw new Error((json as Partial<ParseErrorBody>).message || `解析失败（HTTP ${res.status}）`);
+  return json as ParsedUpload;
+}
 
 function Step({ n, title, right, done, children }: { n: number; title: string; right?: string; done?: boolean; children: React.ReactNode }) {
   return (
@@ -60,6 +99,7 @@ export function SubmitPage() {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<"idle" | "parsing" | "parsed">("idle");
   const [file, setFile] = useState<{ name: string; mb: number } | null>(null);
+  const [parsed, setParsed] = useState<Plate[]>([]);
   const [error, setError] = useState("");
   const [pick, setPick] = useState<Record<number, boolean>>({});
   const [form, setForm] = useState<Record<string, string>>({});
@@ -70,19 +110,29 @@ export function SubmitPage() {
   const [over, setOver] = useState(false);
   const fin = useRef<HTMLInputElement>(null);
 
-  const plates = phase === "parsed" ? SAMPLE.plates : [];
+  const plates = phase === "parsed" ? parsed : [];
   const sel = plates.filter((p) => pick[p.n] && p.st !== "err");
 
-  const load = (name: string, mb: number) => {
+  const show = (ps: Plate[]) => {
+    setParsed(ps);
+    setPick(Object.fromEntries(ps.map((p) => [p.n, p.st !== "err"])));
+    setPhase("parsed");
+  };
+  const load = async (f: File | typeof SAMPLE) => {
+    const mb = f instanceof File ? f.size / 1048576 : f.mb;
     setError("");
-    if (!/\.gcode\.3mf$/i.test(name)) return setError("只能提交 .gcode.3mf 文件（由你自行切片后导出），当前文件格式不对。");
+    if (!/\.gcode\.3mf$/i.test(f.name)) return setError("只能提交 .gcode.3mf 文件（由你自行切片后导出），当前文件格式不对。");
     if (mb > MAX_MB) return setError(`文件 ${mb.toFixed(0)} MB，超过 ${MAX_MB} MB 上限。`);
-    setFile({ name, mb });
+    setFile({ name: f.name, mb });
     setPhase("parsing");
-    setTimeout(() => {
-      setPhase("parsed");
-      setPick(Object.fromEntries(SAMPLE.plates.map((p) => [p.n, p.st !== "err"])));
-    }, 1100);
+    if (!(f instanceof File)) return void setTimeout(() => show(f.plates), 1100);
+    try {
+      show(toPlates(await parseOnServer(f)));
+    } catch (e) {
+      setPhase("idle");
+      setFile(null);
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
   const reset = () => {
     setPhase("idle");
@@ -192,7 +242,7 @@ export function SubmitPage() {
                         e.preventDefault();
                         setOver(false);
                         const f = e.dataTransfer.files[0];
-                        if (f) load(f.name, f.size / 1048576);
+                        if (f) void load(f);
                       }}
                       className={cx(
                         "flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed p-6 text-center transition-colors duration-150 ease-standard max-sm:min-h-[168px]",
@@ -208,7 +258,7 @@ export function SubmitPage() {
                           variant="text"
                           onClick={(e) => {
                             e.stopPropagation();
-                            load(SAMPLE.name, SAMPLE.mb);
+                            void load(SAMPLE);
                           }}
                         >
                           使用示例文件
@@ -228,7 +278,8 @@ export function SubmitPage() {
                       hidden
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) load(f.name, f.size / 1048576);
+                        e.target.value = "";
+                        if (f) void load(f);
                       }}
                     />
                   </>
@@ -262,7 +313,11 @@ export function SubmitPage() {
                         >
                           <RowCheckbox label={`第 ${p.n} 盘`} checked={on} disabled={p.st === "err"} onChange={(v) => setPick({ ...pick, [p.n]: v })} />
                           <div className="size-16 justify-self-start overflow-hidden rounded-[10px] bg-sc sm:size-[88px]">
-                            <ModelThumb c1={p.fil[0][0]} c2={p.fil[1]?.[0]} bg="var(--md-sc-high)" />
+                            {p.thumb ? (
+                              <img src={p.thumb} alt={`第 ${p.n} 盘预览`} className="block size-full object-contain" />
+                            ) : (
+                              <ModelThumb c1={p.fil[0]?.[0] ?? "var(--md-outline)"} c2={p.fil[1]?.[0]} bg="var(--md-sc-high)" />
+                            )}
                           </div>
                           <div className="col-span-full flex min-w-0 flex-col gap-1.5 sm:col-span-1">
                             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-label-l font-medium tracking-normal">
