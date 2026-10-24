@@ -67,7 +67,7 @@ export async function startApp(): Promise<TestApp> {
   const handle = await openDb("memory");
   const commands = new FakeCommands();
   const mod = await Test.createTestingModule({
-    imports: [AppModule.forRoot({ databaseUrl: null, dataDir, secret: Buffer.from("test-secret"), secureCookies: false }, handle)],
+    imports: [AppModule.forRoot({ databaseUrl: null, dataDir, secret: Buffer.from("test-secret"), secureCookies: false, storage: { kind: "local" } }, handle)],
   })
     .overrideProvider(PRINTER_COMMANDS)
     .useValue(commands)

@@ -19,6 +19,13 @@ pnpm dev:server          # 在仓库根执行，监听 :3000，前端 vite 把 /
 | `PLATERELAY_SECURE_COOKIES` | 设为 `1` 时会话 cookie 带 `Secure`（HTTPS 部署时打开） |
 | `PLATERELAY_TRUST_PROXY` | 在反向代理后面时设置，审计日志才记得到真实 IP |
 | `PORT` | 默认 3000 |
+| `PLATERELAY_STORAGE` | `local`（默认，存在 `PLATERELAY_DATA_DIR/storage`）或 `oss`（阿里云 OSS 等 S3 兼容存储） |
+| `OSS_ENDPOINT`、`OSS_BUCKET`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | `PLATERELAY_STORAGE=oss` 时必填。桶保持私有，浏览器只拿到短时效签名链接 |
+| `OSS_PUBLIC_ENDPOINT`、`OSS_REGION`、`OSS_PATH_STYLE` | 可选：签名链接用的对外地址、签名区域（默认取 endpoint 的第一段，如 `oss-cn-beijing`）、路径式寻址（MinIO 用 `1`） |
+
+`dev`、`start`、`user:create` 会读取 `apps/server/.env`（已被 git 忽略），模板见 `.env.example`。凭据只放在环境变量或 `.env` 里，不进仓库。
+
+接上 OSS 后可以跑一次 `pnpm --filter @platerelay/server storage:check`：上传一个小文件、用签名链接读回、再删掉，一共 5 个请求。测试始终用本地磁盘，不访问 OSS。
 
 启动时自动执行 `drizzle/` 里的迁移。改了 `src/db/schema.ts` 后用 `pnpm --filter @platerelay/server db:generate` 生成新迁移。
 
@@ -45,7 +52,7 @@ pnpm --filter @platerelay/server test
 | `src/db` | 表结构（drizzle）和数据库连接 |
 | `src/auth` | 会话 cookie 登录、权限节点守卫、预置角色同步 |
 | `src/audit` | 只追加的审计日志（数据库触发器拒绝改和删） |
-| `src/storage` | 对象存储接口 + 本地磁盘实现；S3 / OSS 实现以后按同一接口加 |
+| `src/storage` | 对象存储接口，本地磁盘和 S3 兼容（阿里云 OSS）两个实现 |
 | `src/orders` | 订单状态机、审核、排队、取消、失败归因、铲件入库、取件码 |
 | `src/printers` | 打印机管理、报错处理、调度（FIFO + 兼容性过滤），以及给 daemon 用的状态上报入口 |
 | `src/forms`、`src/users`、`src/daemons`、`src/settings` | 申请表单（带版本）、用户与角色、daemon 令牌、系统设置 |
@@ -72,4 +79,4 @@ pnpm --filter @platerelay/server test
 ## 还没做
 
 - daemon 连接（WebSocket）。现在 `PrinterCommands` 的实现是"连不上任何打印机"，所以不会派单，也不会向真实打印机发任何命令；打印机状态上报的入口（`PrintersService.onStarted` 等）已写好，只在测试里调用。
-- 实时推送（SSE）、通知（邮件 / 飞书）、OIDC 登录、头像、S3 / OSS 存储实现。
+- 实时推送（SSE）、通知（邮件 / 飞书）、OIDC 登录、头像。

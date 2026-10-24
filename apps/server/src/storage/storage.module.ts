@@ -5,19 +5,20 @@ import { Public } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
 import { APP_CONFIG, type AppConfig } from "../config/config.js";
 import { LocalDiskStorage } from "./local-disk.storage.js";
-import { STORAGE } from "./storage.js";
+import { S3Storage } from "./s3.storage.js";
+import { type ObjectStorage, STORAGE } from "./storage.js";
 
 const TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", "3mf": "application/vnd.ms-package.3dmanufacturing-3dmodel+xml" };
 
-/** Serves local-disk objects behind signed links. The S3 backend will not need this route. */
+/** Serves local-disk objects behind signed links. With the S3 backend, links point at the bucket and this route refuses. */
 @Controller("files")
 class FilesController {
-  constructor(@Inject(STORAGE) private readonly storage: LocalDiskStorage) {}
+  constructor(@Inject(STORAGE) private readonly storage: ObjectStorage) {}
 
   @Public()
   @Get()
   async download(@Query("k") key: string, @Query("e") e: string, @Query("s") sig: string, @Query("n") name: string | undefined, @Res() res: Response) {
-    if (typeof key !== "string" || typeof sig !== "string" || !this.storage.verify(key, Number(e), sig, name ?? "")) {
+    if (!(this.storage instanceof LocalDiskStorage) || typeof key !== "string" || typeof sig !== "string" || !this.storage.verify(key, Number(e), sig, name ?? "")) {
       throw new ApiError(HttpStatus.FORBIDDEN, "bad-signature", "链接无效或已过期");
     }
     let stream;
@@ -37,7 +38,13 @@ class FilesController {
 @Global()
 @Module({
   controllers: [FilesController],
-  providers: [{ provide: STORAGE, inject: [APP_CONFIG], useFactory: (c: AppConfig) => new LocalDiskStorage(join(c.dataDir, "storage"), c.secret, "/api/files") }],
+  providers: [
+    {
+      provide: STORAGE,
+      inject: [APP_CONFIG],
+      useFactory: (c: AppConfig): ObjectStorage => (c.storage.kind === "s3" ? new S3Storage(c.storage) : new LocalDiskStorage(join(c.dataDir, "storage"), c.secret, "/api/files")),
+    },
+  ],
   exports: [STORAGE],
 })
 export class StorageModule {}
