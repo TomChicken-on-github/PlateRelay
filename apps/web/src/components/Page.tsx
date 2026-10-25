@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { cx } from "../lib/cx";
-import { ME } from "../mock/session";
+import { logout, useMe } from "../lib/session";
+import { Button } from "./Button";
+import { Sheet } from "./Sheet";
 import { Avatar } from "./Avatar";
 import { FigmaIcon } from "./icons/FigmaIcon";
 
@@ -20,14 +22,35 @@ export function Page({ children, className, style }: { children: ReactNode; clas
 }
 
 export function Account() {
+  const me = useMe();
+  const [ask, setAsk] = useState(false);
   return (
-    <button type="button" aria-label="账户" className="state-layer flex h-12 min-w-40 items-center gap-2.5 rounded-3xl border-0 bg-sc-high py-1.5 pr-4 pl-1.5 text-left max-sm:min-w-0 max-sm:pr-1.5">
-      <Avatar name={ME.name} size={36} />
+    <>
+    <button type="button" aria-label="账户" onClick={() => setAsk(true)} className="state-layer flex h-12 min-w-40 items-center gap-2.5 rounded-3xl border-0 bg-sc-high py-1.5 pr-4 pl-1.5 text-left max-sm:min-w-0 max-sm:pr-1.5">
+      <Avatar name={me.name} size={36} />
       <span className="max-sm:hidden">
-        <b className="block text-label-l font-medium">{ME.name}</b>
-        <small className="block text-body-s text-on-variant">{ME.role}</small>
+        <b className="block text-label-l font-medium">{me.name}</b>
+        <small className="block text-body-s text-on-variant">{me.role}</small>
       </span>
     </button>
+    <Sheet
+      open={ask}
+      onClose={() => setAsk(false)}
+      icon="logout"
+      title="退出登录？"
+      footer={
+        <>
+          <Button variant="text" onClick={() => setAsk(false)}>取消</Button>
+          <Button variant="text" onClick={logout}>退出登录</Button>
+        </>
+      }
+    >
+      <div className="text-label-l font-normal text-on-variant">
+        当前登录：<b className="font-medium text-on-surface">{me.name}</b>
+        {me.username && ` (${me.username})`} · {me.role}
+      </div>
+    </Sheet>
+    </>
   );
 }
 

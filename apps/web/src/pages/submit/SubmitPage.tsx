@@ -1,3 +1,4 @@
+import { session } from "../../lib/session";
 import { AnimatePresence, motion } from "motion/react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -78,6 +79,8 @@ async function parseOnServer(f: File): Promise<ParsedUpload> {
   const json: unknown = await res.json().catch(() => null);
   /* A non-JSON answer comes from a proxy in front of a server that is down. */
   if (json === null) throw new Error(`连不上解析服务，请稍后再试（HTTP ${res.status}）。`);
+  /* The session ran out: back to sign-in, which returns here afterwards. */
+  if (res.status === 401) session.set({ st: "out" });
   if (!res.ok) throw new Error((json as Partial<ParseErrorBody>).message || `解析失败（HTTP ${res.status}）`);
   return json as ParsedUpload;
 }

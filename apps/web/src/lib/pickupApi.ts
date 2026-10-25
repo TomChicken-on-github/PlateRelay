@@ -1,3 +1,4 @@
+import { LIVE, api } from "./api";
 import { liveCode, pickupCodes, pickupOrders, redeemed } from "../mock/pickup";
 import { ME as SESSION } from "../mock/session";
 
@@ -11,8 +12,7 @@ import { ME as SESSION } from "../mock/session";
  * Errors are {code, message, ...}. Codes are PR1-XXXX-XXXX, 8 Crockford base32 chars, case-insensitive;
  * the QR payload is the full "PR1-XXXX-XXXX", people type the XXXX-XXXX part.
  *
- * Pages talk to `pickupApi`: the mock store until the backend lands, the real endpoints when built
- * with VITE_PICKUP_API=http.
+ * Pages talk to `pickupApi`: the mock store, or the real endpoints when built with VITE_API=http.
  */
 
 export type PickupOrder = {
@@ -69,17 +69,7 @@ export function codeFromScan(text: string) {
   return /^PR1[0-9A-Z]{8}$/.test(t) ? bareCode(t) : null;
 }
 
-async function call<T>(url: string, init?: RequestInit): Promise<Res<T>> {
-  try {
-    const r = await fetch(url, { credentials: "include", ...init });
-    const body = await r.json().catch(() => null);
-    if (r.ok) return { ok: true, data: body as T };
-    if (body && typeof body.code === "string") return { ok: false, error: body as PickupError };
-    return { ok: false, error: { code: "network", message: `服务器返回 ${r.status}` } };
-  } catch {
-    return { ok: false, error: { code: "network", message: "连不上面板服务器" } };
-  }
-}
+const call = <T>(url: string, init?: { method: string }) => api<T, PickupError>(url, init) as Promise<Res<T>>;
 
 const httpApi: PickupApi = {
   issue: (id) => call(`/api/orders/${id}/pickup-code`, { method: "POST" }),
@@ -134,4 +124,4 @@ const mockApi: PickupApi = {
   },
 };
 
-export const pickupApi: PickupApi = import.meta.env.VITE_PICKUP_API === "http" ? httpApi : mockApi;
+export const pickupApi: PickupApi = LIVE ? httpApi : mockApi;

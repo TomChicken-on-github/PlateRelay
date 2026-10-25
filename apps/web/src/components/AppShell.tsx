@@ -2,9 +2,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { cx } from "../lib/cx";
+import { canOpen, useMe } from "../lib/session";
 import { duration, easing } from "../lib/motion";
 import { adminOrders } from "../mock/adminOrders";
 import { tasks } from "../mock/todo";
+import { Empty } from "./OrderBits";
+import { Page, PageHeader } from "./Page";
 import { FigmaIcon } from "./icons/FigmaIcon";
 import { Icon } from "./icons/Icon";
 
@@ -13,7 +16,8 @@ type Item = { to: string; label: string; icon: string; badge?: number; end?: boo
 function useNav(): (Item | string)[] {
   const pending = adminOrders.use().filter((o) => o.st === "pending").length;
   const todo = tasks.use().length;
-  return [
+  const me = useMe();
+  const all: (Item | string)[] = [
     { to: "/", label: "概况", icon: "dashboard", end: false },
     "我的打印",
     { to: "/submit", label: "提交订单", icon: "upload_file" },
@@ -27,6 +31,9 @@ function useNav(): (Item | string)[] {
     { to: "/manage/printers", label: "打印机管理", icon: "print" },
     { to: "/settings", label: "系统设置", icon: "settings" },
   ];
+  /* Only the pages this account may open; a section heading goes when nothing is left under it. */
+  const items = all.filter((it) => typeof it === "string" || canOpen(me, it.to));
+  return items.filter((it, i) => typeof it !== "string" || (i + 1 < items.length && typeof items[i + 1] !== "string"));
 }
 
 /* 概况 also owns the device detail route */
@@ -91,6 +98,7 @@ function titleOf(path: string) {
 }
 
 export function AppShell() {
+  const me = useMe();
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   useEffect(() => {
@@ -146,7 +154,16 @@ export function AppShell() {
             animate={{ opacity: 1, y: 0, transition: { duration: duration.medium2, ease: easing.emphasizedDecelerate } }}
             exit={{ opacity: 0, transition: { duration: duration.short2, ease: easing.emphasizedAccelerate } }}
           >
-            <Outlet />
+            {canOpen(me, pathname) ? (
+              <Outlet />
+            ) : (
+              <Page>
+                <PageHeader title={titleOf(pathname)} />
+                <Empty icon="lock" title="没有权限打开这个页面">
+                  当前账号没有这个页面需要的权限，需要的话请联系管理员。
+                </Empty>
+              </Page>
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
