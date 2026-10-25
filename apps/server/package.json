@@ -9,25 +9,38 @@
   "license": "GPL-3.0-only",
   "scripts": {
     "build": "pnpm --filter @platerelay/shared build && tsc -p tsconfig.json",
-    "start": "node dist/src/main.js",
-    "dev": "pnpm build && node --watch-path=dist dist/src/main.js",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "dev": "pnpm build && node --env-file-if-exists=.env --watch-path=dist dist/src/main.js",
     "test": "pnpm build && node --test \"dist/test/**/*.test.js\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "user:create": "pnpm build && node --env-file-if-exists=.env dist/src/cli/create-user.js",
+    "db:generate": "drizzle-kit generate",
+    "storage:check": "pnpm build && node --env-file-if-exists=.env dist/src/cli/storage-check.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1149.0",
+    "@aws-sdk/s3-request-presigner": "3.1149.0",
     "@nestjs/common": "12.1.3",
     "@nestjs/core": "12.1.3",
     "@nestjs/platform-express": "12.1.3",
     "@platerelay/shared": "workspace:*",
+    "cookie-parser": "1.4.7",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.9",
     "@nestjs/testing": "12.1.3",
+    "@types/cookie-parser": "1.4.10",
     "@types/express": "5.0.6",
     "@types/multer": "2.3.0",
     "@types/node": "24.10.1",
+    "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
+    "drizzle-kit": "0.31.11",
     "fflate": "0.8.3",
     "supertest": "7.3.1",
     "typescript": "5.9.3"

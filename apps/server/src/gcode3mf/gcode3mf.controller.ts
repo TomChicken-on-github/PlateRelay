@@ -14,6 +14,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { MAX_UPLOAD_BYTES, type ParsedUpload, type ParseErrorBody } from "@platerelay/shared";
 import type { Response } from "express";
+import { RequirePerm } from "../auth/actor.js";
 import { Gcode3mfService } from "./gcode3mf.service.js";
 
 /** Multer stops the upload at the size cap; answer with the parser's error shape. */
@@ -32,6 +33,7 @@ export class Gcode3mfController {
 
   /** Parse without storing anything: the submit page's preview. */
   @Post("parse")
+  @RequirePerm("order:submit")
   @HttpCode(200)
   /* defParamCharset: browsers send UTF-8 file names; busboy assumes latin1. */
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
