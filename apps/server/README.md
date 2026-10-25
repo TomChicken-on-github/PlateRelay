@@ -68,9 +68,9 @@ pnpm --filter @platerelay/server test
 | 页面 | 接口 |
 | --- | --- |
 | 登录 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`GET /auth/me` |
-| 概况 / 打印机详情 | `GET /printers`、`GET /printers/:id` |
-| 提交订单 | `GET /form`、`POST /gcode3mf/parse`（预览）、`POST /orders`（multipart：`file` + `answers` JSON） |
-| 我的订单 | `GET /orders/mine`、`GET /orders/:id`、`POST /orders/:id/cancel`、`POST /orders/:id/pickup-code` |
+| 概况 / 打印机详情 | `GET /overview`（排队、待审核、等待兼容打印机的数量）、`GET /printers`、`GET /printers/:id` |
+| 提交订单 | `GET /form`、`POST /orders/preview`（multipart `file`：解析结果、每盘有没有兼容的打印机、队列长度，不存任何东西）、`POST /orders`（multipart：`file` + `answers` JSON，可选 `plates` JSON 数组只提交其中几盘） |
+| 我的订单 | `GET /orders/mine`、`GET /orders/:id`（含 `storePhotoUrl` 入库照片签名链接，仅本人和 `order:view:any`）、`POST /orders/:id/cancel`、`POST /orders/:id/pickup-code` |
 | 待办 | `GET /todo`、`POST /orders/:id/store`（multipart：`photo`、`slot`、`bedCleared=true`）、`POST /printers/:id/resolve`、`POST /printers/:id/stop`、`POST /printers/:id/clear-bed` |
 | 扫码取件 | `GET /pickup/:code`、`POST /pickup/:code/redeem`、`GET /pickup/redemptions?since=` |
 | 审核队列 | `GET /review`、`POST /orders/:id/approve`、`POST /orders/:id/reject` |

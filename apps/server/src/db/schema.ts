@@ -1,4 +1,16 @@
-import { FAILURE_ATTRIBUTIONS, ORDER_STATUSES, PRINTER_STATES } from "@platerelay/shared";
+import {
+  type AnswerSnapshot,
+  FAILURE_ATTRIBUTIONS,
+  type FormField,
+  type FormFieldType,
+  ORDER_STATUSES,
+  type OrderFilament,
+  type OrderNozzle,
+  PRINTER_STATES,
+  type PrinterError,
+  type ReportedNozzle,
+  type ReportedStorage,
+} from "@platerelay/shared";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -28,6 +40,9 @@ export const printerState = pgEnum("printer_state", PRINTER_STATES);
 export const failureAttribution = pgEnum("failure_attribution", FAILURE_ATTRIBUTIONS);
 export const actorType = pgEnum("actor_type", ["user", "system", "daemon", "printer"]);
 export const auditResult = pgEnum("audit_result", ["ok", "failed", "denied"]);
+
+/* JSON column shapes live in @platerelay/shared because the API sends them as they are. */
+export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, PrinterError, ReportedNozzle, ReportedStorage };
 
 /* ---- accounts ---- */
 
@@ -108,29 +123,6 @@ export const daemons = pgTable("daemons", {
 
 /* ---- printers ---- */
 
-export interface ReportedNozzle {
-  /** 1-based extruder, same numbering as the slicer. */
-  extruder: number;
-  diameter: number;
-}
-
-export interface ReportedStorage {
-  medium: "internal" | "sd" | "usb";
-  present: boolean;
-  writable: boolean;
-  freeBytes?: number;
-}
-
-export interface PrinterError {
-  errorId: string;
-  vendorCode: string;
-  module?: string;
-  message?: string;
-  raisedAt: string;
-  /** Standard actions the driver allows for this error (driver draft §6). */
-  actions: string[];
-}
-
 export const printers = pgTable("printers", {
   id: uuid("id").primaryKey().$defaultFn(uuidv7),
   name: text("name").notNull().unique(),
@@ -156,16 +148,6 @@ export const printers = pgTable("printers", {
 
 /* ---- request form ---- */
 
-export type FormFieldType = "text" | "textarea" | "single" | "multi" | "number";
-
-export interface FormField {
-  id: string;
-  label: string;
-  type: FormFieldType;
-  required: boolean;
-  options?: string[];
-}
-
 /** Every edit makes a new version; orders keep the version they were submitted with. */
 export const formVersions = pgTable("form_versions", {
   id: serial("id").primaryKey(),
@@ -188,27 +170,6 @@ export const files = pgTable("files", {
   uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
   createdAt: createdAt(),
 });
-
-export interface OrderNozzle {
-  extruder: number;
-  side: "left" | "right" | null;
-  diameter: number;
-}
-
-export interface OrderFilament {
-  slot: number;
-  type: string;
-  color: string;
-  usedGrams: number;
-  extruder: number | null;
-}
-
-export interface AnswerSnapshot {
-  fieldId: string;
-  label: string;
-  type: FormFieldType;
-  value: string | string[] | number | null;
-}
 
 /** One order per plate (brief §5.3); plates of one upload share file_id and nothing else. */
 export const orders = pgTable(

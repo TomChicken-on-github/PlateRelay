@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
-import { type FailureAttribution, type OrderStatus, OWNER_CANCELLABLE } from "@platerelay/shared";
+import { type FailureAttribution, type OrderDetail, type OrderPreview, type OrderStatus, type OrderView, type OverviewStats, OWNER_CANCELLABLE } from "@platerelay/shared";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
@@ -12,18 +12,12 @@ import { files, orderEvents, orders, pickupCodes, printers } from "../db/schema.
 import { FormsService } from "../forms/forms.service.js";
 import { Gcode3mfService } from "../gcode3mf/gcode3mf.service.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "../printers/commands.js";
-import { waitReason } from "../printers/compat.js";
+import { availability, waitReason } from "../printers/compat.js";
 import { lockPrinter, movePrinter, pausedMs } from "../printers/printer-state.js";
 import { SchedulerService } from "../printers/scheduler.service.js";
 import { STORAGE, type ObjectStorage } from "../storage/storage.js";
 import { type OrderRow, orderEvent, transition } from "./transition.js";
-import { loadPeople, type OrderView, orderViews } from "./views.js";
-
-export interface OrderDetail extends OrderView {
-  /** Request form answers: owner and reviewers only. */
-  answers: { label: string; value: string | string[] | number | null }[] | null;
-  timeline: { at: string; kind: string; from: OrderStatus | null; to: OrderStatus | null; by: string | null; data: Record<string, unknown> | null }[];
-}
+import { loadPeople, orderViews, THUMB_TTL_S } from "./views.js";
 
 export interface OrderQuery {
   status?: OrderStatus[];
@@ -119,8 +113,10 @@ export class OrdersService {
     const events = await this.db.select().from(orderEvents).where(eq(orderEvents.orderId, id)).orderBy(asc(orderEvents.at), asc(orderEvents.id));
     const people = await loadPeople(this.db, events.map((e) => e.actorId));
     const operate = can(ctx, "printer:operate");
+    const photo = r.storePhotoKey && (mine || can(ctx, "order:view:any")) ? await this.storage.signedUrl(r.storePhotoKey, THUMB_TTL_S) : null;
     return {
       ...v,
+      storePhotoUrl: photo,
       answers: mine || can(ctx, "order:review") || can(ctx, "order:view:any") ? r.answers.map((a) => ({ label: a.label, value: a.value })) : null,
       timeline: events.map((e) => ({
         at: e.at.toISOString(),
@@ -150,9 +146,37 @@ export class OrdersService {
 
   /* ---------- submitting ---------- */
 
-  /** One order per plate, all PENDING_REVIEW (brief §5.3). */
-  async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown): Promise<OrderView[]> {
-    const info = this.gcode3mf.read(fileName, data);
+  /** What the submit page shows before anything is stored: plates, whether the fleet can print them, the queue. */
+  async preview(fileName: string, data: Buffer): Promise<OrderPreview> {
+    const parsed = this.gcode3mf.parse(fileName, data);
+    const fleet = await this.db.select().from(printers);
+    const queued = await this.db.select({ s: orders.printSeconds }).from(orders).where(eq(orders.status, "QUEUED"));
+    return {
+      ...parsed,
+      plates: parsed.plates.map((p) => ({ ...p, availability: availability({ printerModel: parsed.printerModel, printerModelId: p.printerModelId, nozzles: p.nozzles }, fleet) })),
+      queue: { length: queued.length, aheadSeconds: queued.reduce((a, o) => a + o.s, 0) },
+    };
+  }
+
+  /** The numbers on top of 概况. */
+  async overview(): Promise<OverviewStats> {
+    const counts = await this.db.select({ status: orders.status, n: count() }).from(orders).where(inArray(orders.status, ["PENDING_REVIEW", "QUEUED"])).groupBy(orders.status);
+    const queued = await this.db.select({ printerModel: orders.printerModel, printerModelId: orders.printerModelId, nozzles: orders.nozzles }).from(orders).where(eq(orders.status, "QUEUED"));
+    const fleet = queued.length ? await this.db.select().from(printers) : [];
+    const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
+    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length };
+  }
+
+  /**
+   * One order per plate, all PENDING_REVIEW (brief §5.3). `plates` picks which
+   * plates of the file to submit (1-based, as in the slicer); all of them when absent.
+   */
+  async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown, plates?: number[]): Promise<OrderView[]> {
+    const parsed = this.gcode3mf.read(fileName, data);
+    const unknown = plates?.filter((n) => !parsed.plates.some((p) => p.index === n)) ?? [];
+    if (unknown.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${unknown.join("、")} 盘`, { plates: unknown });
+    if (plates && !plates.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "至少要选一盘");
+    const info = plates ? { ...parsed, plates: parsed.plates.filter((p) => plates.includes(p.index)) } : parsed;
     const form = await this.forms.current();
     const answers = this.forms.answer(form, rawAnswers);
     const fileId = uuidv7();
@@ -180,7 +204,7 @@ export class OrdersService {
               ownerId: userId(ctx)!,
               fileId,
               plateIndex: p.index,
-              plateCount: info.plates.length,
+              plateCount: parsed.plates.length,
               plateName: p.name,
               printerModel: info.printerModel,
               printerModelId: p.printerModelId,
@@ -193,7 +217,7 @@ export class OrdersService {
               answers,
             })
             .returning();
-          await orderEvent(tx, ctx, o.id, "submit", { plate: p.index, of: info.plates.length });
+          await orderEvent(tx, ctx, o.id, "submit", { plate: p.index, of: parsed.plates.length });
           await this.audit.record(ctx, { action: "order.submit", targetType: "order", targetId: o.id, after: { fileId, plate: p.index } }, tx);
           created.push(o);
         }

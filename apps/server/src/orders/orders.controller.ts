@@ -22,7 +22,18 @@ const ListQuery = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/** 1-based plate numbers, as a JSON array in the multipart body. */
+const Plates = z.array(z.number().int().positive()).max(64);
+
 const PHOTO_MAX = 15 * 1024 * 1024;
+
+function json(text: string, field: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new BadRequestException(`${field} 不是合法的 JSON`);
+  }
+}
 
 @Controller()
 export class OrdersController {
@@ -35,17 +46,26 @@ export class OrdersController {
   @Post("orders")
   @RequirePerm("order:submit")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
-  async submit(@ReqCtx() ctx: Ctx, @UploadedFile() file: Express.Multer.File | undefined, @Body("answers") answers: string | undefined) {
+  async submit(@ReqCtx() ctx: Ctx, @UploadedFile() file: Express.Multer.File | undefined, @Body("answers") answers: string | undefined, @Body("plates") plates: string | undefined) {
     if (!file) throw new BadRequestException("缺少文件字段 file");
-    let parsed: unknown = {};
-    if (answers) {
-      try {
-        parsed = JSON.parse(answers);
-      } catch {
-        throw new BadRequestException("answers 不是合法的 JSON");
-      }
-    }
-    return { orders: await this.orders.submit(ctx, file.originalname, file.buffer, parsed) };
+    const picked = plates ? parse(Plates, json(plates, "plates")) : undefined;
+    return { orders: await this.orders.submit(ctx, file.originalname, file.buffer, answers ? json(answers, "answers") : {}, picked) };
+  }
+
+  /** The submit page's preview: parse result, per-plate availability and the queue. Nothing is stored. */
+  @Post("orders/preview")
+  @HttpCode(200)
+  @RequirePerm("order:submit")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
+  preview(@UploadedFile() file: Express.Multer.File | undefined) {
+    if (!file) throw new BadRequestException("缺少文件字段 file");
+    return this.orders.preview(file.originalname, file.buffer);
+  }
+
+  @Get("overview")
+  @RequirePerm("overview:view")
+  overview() {
+    return this.orders.overview();
   }
 
   @Get("orders/mine")

@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import type { PrinterState } from "@platerelay/shared";
+import type { OrderView, PrinterView, TodoView } from "@platerelay/shared";
 import { asc, eq, inArray } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, SYSTEM, userId } from "../auth/actor.js";
@@ -8,31 +8,10 @@ import { DB, type Db } from "../db/db.js";
 import { files, orders, type PrinterError, printers } from "../db/schema.js";
 import { OrdersService } from "../orders/orders.service.js";
 import { orderEvent, transition } from "../orders/transition.js";
-import { loadPeople, type OrderView, type PersonView } from "../orders/views.js";
+import { loadPeople } from "../orders/views.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "./commands.js";
 import { lockPrinter, movePrinter, pausedMs, type PrinterRow } from "./printer-state.js";
 import { SchedulerService } from "./scheduler.service.js";
-
-export interface PrinterView {
-  id: string;
-  name: string;
-  serial: string | null;
-  ip: string | null;
-  daemonId: string | null;
-  model: string | null;
-  modelId: string | null;
-  nozzles: PrinterRow["nozzles"];
-  storage: PrinterRow["storage"];
-  telemetry: PrinterRow["telemetry"];
-  state: PrinterState;
-  stateSince: string;
-  /** Details only with printer:operate; everyone else just sees state ERROR_PAUSED (等待处理). */
-  error: PrinterError | null;
-  maintenanceReason: string | null;
-  starred: boolean;
-  lastSeenAt: string | null;
-  job: { orderId: number; fileName: string; plate: { index: number; count: number }; owner: PersonView; status: string } | null;
-}
 
 export interface PrinterInput {
   name: string;
@@ -234,7 +213,7 @@ export class PrintersService {
   }
 
   /** 待办: plates to store, beds to clear, errors to handle. */
-  async todo(ctx: Ctx) {
+  async todo(ctx: Ctx): Promise<TodoView> {
     const busy = await this.db.select().from(printers).where(inArray(printers.state, ["CLEARING_REQUIRED", "ERROR_PAUSED"])).orderBy(asc(printers.stateSince));
     const awaiting = await this.db.select().from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE")).orderBy(asc(orders.printedAt));
     const onBeds = busy.map((p) => p.currentOrderId).filter((x): x is number => x != null);
