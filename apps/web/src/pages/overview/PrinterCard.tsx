@@ -145,8 +145,11 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
                   >
                     <Ring slot={x} />
                     <span className="min-w-[15px] whitespace-nowrap">{x.label}</span>
-                    <span className="min-w-8">{x.m}</span>
-                    {x.active && <span className="size-1 rounded-full bg-active-dot" />}
+                    <span className="relative min-w-8 @max-[420px]:min-w-0">
+                      {x.m}
+                      {/* out of flow so the active dot never widens the column that gets centred */}
+                      {x.active && <span className="absolute top-1.5 left-[calc(100%+4px)] size-1 rounded-full bg-active-dot" />}
+                    </span>
                   </div>
                 ))
               ) : (
