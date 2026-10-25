@@ -123,6 +123,79 @@ async function parseOnServer<T>(url: string, f: File): Promise<T> {
   return r.data;
 }
 
+/* 提交须知: shown as step 4; the submitter must agree before submitting. */
+const NOTICE_CHECKS = [
+  "悬空部分是否开启了支撑，支撑类型和接触面是否合适",
+  "模型与热床的接触面积是否过小，必要时开启 Brim 或调整摆放方向",
+  "切片的机型、喷嘴口径、热床板类型是否与要使用的打印机一致",
+  "耗材类型、颜色及左右喷嘴分配是否正确",
+  "只用到一个喷嘴的模型是否切给了单喷头机型，不要无端占用双喷头打印机",
+  "模型是否有破面、壁厚过薄、尺寸或比例错误",
+  "预计用时和耗材用量是否合理",
+];
+const NOTICE_RULES: [icon: string, title: string, text: string][] = [
+  ["person", "模型或切片问题由提交者自行承担", "因模型缺陷或切片参数错误（包括但不限于机型、喷嘴、耗材设置不当）导致的打印失败、翘边变形、强度不足、尺寸偏差、外观瑕疵等问题，无论发生在打印过程中还是打印件上，均由提交者自行承担，打印方不对此负责。如需重打，应修正后重新提交排队。"],
+  ["build", "设备原因由工作人员安排重打", "因打印机故障、耗材异常等设备原因导致的失败，由工作人员判定后安排重打，无需重新提交。"],
+  ["fact_check", "审核不代表质量确认", "审核仅确认是否符合活动规则，不负责检查模型或切片参数，发现明显问题时有权打回，通过审核不代表文件无误。"],
+];
+
+function Notice({ agree, onAgree }: { agree: boolean; onAgree: (v: boolean) => void }) {
+  const [open, setOpen] = useState(!agree);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="submit-notice"
+        onClick={() => setOpen(!open)}
+        className="relative flex min-h-12 w-full cursor-pointer appearance-none items-center gap-3 overflow-hidden rounded-xl border-0 bg-sc-high py-1.5 pr-3 pl-4 text-left text-on-surface before:absolute before:inset-0 before:bg-current before:opacity-0 before:transition-opacity hover:before:opacity-8 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        <Icon name="checklist" className="text-on-variant" />
+        <span className="flex-1">
+          <span className="block text-label-l font-medium">提交前请自行检查模型和切片参数</span>
+          <small className="block text-body-s text-on-variant">
+            {NOTICE_CHECKS.length} 项常见问题 · {NOTICE_RULES.length} 条责任说明
+          </small>
+        </span>
+        <Icon name="expand_more" className={cx("text-on-variant transition-transform duration-200 ease-standard", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div id="submit-notice" className="flex flex-col gap-3">
+          <ul className="m-0 grid list-none gap-x-6 gap-y-2 px-4 py-1 sm:grid-cols-2">
+            {NOTICE_CHECKS.map((c) => (
+              <li key={c} className="relative pl-4 text-body-m before:absolute before:top-2 before:left-0.5 before:size-1.5 before:rounded-full before:bg-primary">
+                {c}
+              </li>
+            ))}
+          </ul>
+          <ul className="m-0 list-none overflow-hidden rounded-xl bg-sc-high p-0">
+            {NOTICE_RULES.map(([icon, title, text]) => (
+              <li key={title} className="flex items-start gap-4 px-4 py-3 text-body-m border-t border-solid border-outline-variant first:border-t-0">
+                <Icon name={icon} className="text-on-variant" />
+                <div>
+                  <b className="mb-0.5 block font-medium">{title}</b>
+                  <span className="text-on-variant">{text}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <Checkbox
+        checked={agree}
+        onChange={(v) => {
+          onAgree(v);
+          if (v) setOpen(false);
+        }}
+      >
+        <span className="font-medium">
+          我已阅读并同意提交须知<em className="ml-0.5 text-error not-italic">*</em>
+        </span>
+      </Checkbox>
+    </>
+  );
+}
+
 function Step({ n, title, right, done, children }: { n: number; title: string; right?: string; done?: boolean; children: React.ReactNode }) {
   return (
     <motion.section layout="position" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0, transition: t("medium4", "emphasizedDecelerate") }} className="flex flex-col gap-4 rounded-xl bg-sc p-5 max-sm:p-4">
@@ -151,6 +224,7 @@ export function SubmitPage() {
   const [form, setForm] = useState<Record<string, Answer>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [all, setAll] = useState(false);
+  const [agree, setAgree] = useState(false);
   const [done, setDone] = useState<{ id: string; n: number; model: string; time: string }[] | null>(null);
   const [sumOpen, setSumOpen] = useState(false);
   const [over, setOver] = useState(false);
@@ -194,6 +268,7 @@ export function SubmitPage() {
     setForm({});
     setTouched({});
     setAll(false);
+    setAgree(false);
     setDone(null);
   };
 
@@ -207,12 +282,13 @@ export function SubmitPage() {
     return "";
   };
   const formOk = FIELDS.every((f) => !fieldErr(f));
-  const canSubmit = phase === "parsed" && sel.length > 0 && formOk;
+  const canSubmit = phase === "parsed" && sel.length > 0 && formOk && agree;
   const total = sel.reduce((a, p) => a + mins(p.time), 0), grams = sel.reduce((a, p) => a + p.g, 0);
   const checks: [boolean, string][] = [
     [phase === "parsed", "文件已解析"],
     [sel.length > 0, "至少一张订单可提交"],
     [formOk && phase === "parsed", "申请信息已填写"],
+    [agree, "已同意提交须知"],
   ];
 
   const submit = async () => {
@@ -461,6 +537,12 @@ export function SubmitPage() {
                       );
                     })}
                   </div>
+                </Step>
+              )}
+
+              {phase === "parsed" && (
+                <Step n={4} title="提交须知" right="必读" done={agree}>
+                  <Notice agree={agree} onAgree={setAgree} />
                 </Step>
               )}
             </div>
