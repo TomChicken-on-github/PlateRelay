@@ -41,6 +41,7 @@ node_modules/
 .env.local
 figma_tokens.json
 # Database
+.platerelay-data/
 *.sqlite
 *.sqlite3
 *.db

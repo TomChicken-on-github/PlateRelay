@@ -22,6 +22,13 @@ export interface AppConfig {
 
 export const APP_CONFIG = Symbol("APP_CONFIG");
 
+/*
+ * Default: .platerelay-data at the repository root, outside apps/server.
+ * Inside apps/server, node --watch on Windows restarts the dev server on
+ * every PGlite write, whatever --watch-path says.
+ */
+const DEFAULT_DATA_DIR = resolve(__dirname, "../../../../../.platerelay-data");
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   let secret: Buffer;
   if (env.PLATERELAY_SECRET) secret = Buffer.from(env.PLATERELAY_SECRET, "utf8");
@@ -31,7 +38,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   return {
     databaseUrl: env.DATABASE_URL || null,
-    dataDir: resolve(env.PLATERELAY_DATA_DIR || "var"),
+    dataDir: env.PLATERELAY_DATA_DIR ? resolve(env.PLATERELAY_DATA_DIR) : DEFAULT_DATA_DIR,
     secret,
     secureCookies: env.PLATERELAY_SECURE_COOKIES === "1",
     storage: storageConfig(env),

@@ -9,13 +9,13 @@ pnpm install
 pnpm dev:server          # 在仓库根执行，监听 :3000，前端 vite 把 /api 代理到这里
 ```
 
-不设 `DATABASE_URL` 时用内嵌的 PGlite（数据在 `apps/server/var/pglite`），只用于开发。正式部署用 PostgreSQL：
+不设 `DATABASE_URL` 时用内嵌的 PGlite（数据在仓库根目录的 `.platerelay-data/pglite`），只用于开发。正式部署用 PostgreSQL：
 
 | 环境变量 | 说明 |
 | --- | --- |
 | `DATABASE_URL` | `postgresql://…`。不设则用内嵌 PGlite |
 | `PLATERELAY_SECRET` | 签名链接用的密钥。不设则每次启动随机生成，重启后旧链接失效 |
-| `PLATERELAY_DATA_DIR` | 本地存储和内嵌数据库的目录，默认 `var` |
+| `PLATERELAY_DATA_DIR` | 本地存储和内嵌数据库的目录，默认是仓库根目录下的 `.platerelay-data`（已被 git 忽略）。放在 `apps/server` 里面的话，Windows 上 dev 模式会因数据库写盘不停重启 |
 | `PLATERELAY_SECURE_COOKIES` | 设为 `1` 时会话 cookie 带 `Secure`（HTTPS 部署时打开） |
 | `PLATERELAY_TRUST_PROXY` | 在反向代理后面时设置，审计日志才记得到真实 IP |
 | `PORT` | 默认 3000 |
