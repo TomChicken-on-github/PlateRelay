@@ -8,14 +8,20 @@ import { Sheet } from "../../components/Sheet";
 import { useToast } from "../../components/Toast";
 import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
-import { printersApi, useFleet } from "../../lib/printersApi";
+import { canEncrypt, type PrinterInput, printersApi, refreshDaemonKeys, sealAccessCode, useDaemonKeys, useFleet } from "../../lib/printersApi";
+import type { AccessCodeState } from "@platerelay/shared";
 import { FLEET_STATUS, FOUND, type FleetPrinter, OFFLINE_WHY, fleet } from "../../mock/fleet";
 
 const ipOk = (v: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(v) && v.split(".").every((n) => +n <= 255);
 const COLS = "grid-cols-[minmax(0,1.2fr)_88px_110px_minmax(0,1fr)_120px_minmax(0,1.3fr)_40px] max-md:grid-cols-[minmax(0,1fr)_auto_auto]";
 
 /* id is the name typed in; pid the row being edited */
-type Form = { isNew: boolean; orig?: string; pid?: string; id: string; model: string; ip: string; sn: string; code: string };
+type Form = {
+  isNew: boolean; orig?: string; pid?: string; id: string; model: string; ip: string; sn: string; code: string;
+  /** Server builds: the daemon the printer is under, and the stored code's state (never the code). */
+  daemon: string; was?: { daemon: string; sn: string; code: AccessCodeState | null };
+};
+const EMPTY: Form = { isNew: true, id: "", model: "", ip: "", sn: "", code: "", daemon: "" };
 type Found = (typeof FOUND)[number];
 
 /** Spinner used while the LAN scan runs. */
@@ -29,11 +35,34 @@ function FormSheet({ init, open, onClose }: { init: Form; open: boolean; onClose
   const timer = useRef<number>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
   const ipBad = !!f.ip && !ipOk(f.ip.trim());
-  /* The access code goes to the daemon, never to the panel (brief §5.1), so real builds do not ask for it. */
-  const valid = f.id.trim() && ipOk(f.ip.trim()) && f.sn.trim() && (f.isNew && !LIVE ? f.code.trim() : true);
   const [saving, setSaving] = useState(false);
+
+  /*
+   * Real builds: the code is encrypted here with the chosen daemon's public key and only the ciphertext
+   * goes to the panel (brief §0.9 #10). It cannot be read back, so an edit shows 已配置 and takes a new one.
+   */
+  const keys = useDaemonKeys();
+  const daemon = keys.rows.find((d) => d.id === f.daemon);
+  const stored = f.was?.code ?? null;
+  const moved = !!f.was && (f.was.daemon !== f.daemon || f.was.sn !== f.sn.trim());
+  const codeOff = LIVE && (!daemon?.keyId || !canEncrypt());
+  const codeHint = !LIVE
+    ? undefined
+    : !canEncrypt()
+      ? "当前页面不是 HTTPS 或 localhost，浏览器不能加密访问码"
+      : !f.daemon
+        ? "先选择 daemon，访问码要用它的公钥加密"
+        : !daemon?.keyId
+          ? "这个 daemon 还没连上面板，连上后再来填访问码"
+          : stored && moved
+            ? "换了 daemon 或序列号，原来的访问码会失效，请重新输入"
+            : stored && !stored.current
+              ? "daemon 换了密钥，原来的访问码已失效，请重新输入"
+              : "在浏览器里用 daemon 的公钥加密，面板只保存密文，看不到访问码";
+  const codeBad = LIVE && !!f.code && !/^[\x21-\x7e]{1,64}$/.test(f.code) ? "访问码只能是字母、数字和符号" : undefined;
+  const valid = f.id.trim() && ipOk(f.ip.trim()) && f.sn.trim() && !codeBad && (f.isNew && !LIVE ? f.code.trim() : true);
   const runScan = () => {
     setScan("busy");
     clearTimeout(timer.current);
@@ -45,12 +74,22 @@ function FormSheet({ init, open, onClose }: { init: Form; open: boolean; onClose
   };
   const save = async () => {
     if (LIVE) {
-      const input = { name: f.id.trim(), ip: f.ip.trim(), serial: f.sn.trim() };
+      const input: PrinterInput = { name: f.id.trim(), ip: f.ip.trim(), serial: f.sn.trim(), daemonId: f.daemon || null };
       setSaving(true);
+      if (f.code.trim() && daemon) {
+        const sealed = await sealAccessCode(daemon, input.serial!, f.code.trim());
+        if (!sealed.ok) return setSaving(false), toast(sealed.error.message);
+        input.accessCode = sealed.data;
+      }
       const r = f.isNew ? await printersApi.create(input) : await printersApi.update(f.pid!, input);
       setSaving(false);
-      if (!r.ok) return toast(r.error.message || "保存失败，请重试");
-      toast(f.isNew ? `已添加 ${input.name}，型号和喷嘴等 daemon 连上后由打印机上报` : `${input.name} 已保存`);
+      if (!r.ok) {
+        /* the daemon made a new key since the form opened: reload it so the next try uses it */
+        if (r.error.code === "daemon-key-changed") void refreshDaemonKeys();
+        return toast(r.error.message || "保存失败，请重试");
+      }
+      const codeNote = input.accessCode ? "，访问码已加密保存" : stored && moved ? "，原访问码已失效" : "";
+      toast(f.isNew ? `已添加 ${input.name}${codeNote}，型号和喷嘴等 daemon 连上后由打印机上报` : `${input.name} 已保存${codeNote}`);
       return onClose();
     }
     if (f.isNew) {
@@ -147,14 +186,35 @@ function FormSheet({ init, open, onClose }: { init: Form; open: boolean; onClose
       <Field label="序列号" required>
         {(id, cls) => <TextInput id={id} className={cls} placeholder="打印机背面或设置里查看" value={f.sn} onChange={set("sn")} />}
       </Field>
-      <Field label="访问码" required={f.isNew && !LIVE} hint={LIVE ? "访问码只配置在 daemon 所在的电脑上，不经过面板" : undefined}>
-        {(id, cls) =>
-          LIVE ? (
-            <TextInput id={id} className={cls} type="password" disabled placeholder="在 daemon 上配置" value="" />
-          ) : (
-            <TextInput id={id} className={cls} type="password" placeholder={f.isNew ? "局域网模式下的访问码" : "已保存，输入新的访问码即可替换"} value={f.code} onChange={set("code")} />
-          )
-        }
+      {LIVE && (
+        <Field label="daemon" hint={keys.error ?? (keys.rows.length ? "场地里负责连这台打印机的电脑" : keys.loading ? undefined : "还没有 daemon，先到 系统设置 › daemon 生成连接令牌")}>
+          {(id, cls) => (
+            <select id={id} className={cls} value={f.daemon} onChange={set("daemon")}>
+              <option value="">暂不指定</option>
+              {keys.rows.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                  {d.network ? ` · ${d.network}` : ""}
+                  {d.keyId ? "" : "（尚未连接）"}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+      <Field label="访问码" required={f.isNew && !LIVE} error={codeBad} hint={codeHint}>
+        {(id, cls) => (
+          <TextInput
+            id={id}
+            className={cls}
+            type="password"
+            autoComplete="new-password"
+            disabled={codeOff}
+            placeholder={stored && !moved && stored.current ? "已配置，输入新的访问码即可替换" : f.isNew || LIVE ? "局域网模式下的访问码" : "已保存，输入新的访问码即可替换"}
+            value={codeOff ? "" : f.code}
+            onChange={set("code")}
+          />
+        )}
       </Field>
     </Sheet>
   );
@@ -201,7 +261,7 @@ export function PrintersPage() {
   const [q, setQ] = useState("");
   const [sheet, setSheet] = useState<SheetType | null>(null);
   const [target, setTarget] = useState<string>("");
-  const [form, setForm] = useState<Form>({ isNew: true, id: "", model: "", ip: "", sn: "", code: "" });
+  const [form, setForm] = useState<Form>(EMPTY);
   const [key, setKey] = useState(0);
 
   const open = (type: SheetType, id = target) => {
@@ -211,11 +271,13 @@ export function PrintersPage() {
   };
   const close = () => setSheet(null);
   const edit = (p: FleetPrinter) => {
-    setForm({ isNew: false, orig: p.name ?? p.id, pid: p.id, id: p.name ?? p.id, model: p.model, ip: p.ip === "—" ? "" : p.ip, sn: p.sn === "—" ? "" : p.sn.replace(/•/g, ""), code: "" });
+    const sn = p.sn === "—" ? "" : p.sn.replace(/•/g, "");
+    const daemon = p.daemonId ?? "";
+    setForm({ isNew: false, orig: p.name ?? p.id, pid: p.id, id: p.name ?? p.id, model: p.model, ip: p.ip === "—" ? "" : p.ip, sn, code: "", daemon, was: { daemon, sn, code: p.code ?? null } });
     open("form", p.id);
   };
   const add = () => {
-    setForm({ isNew: true, id: "", model: "", ip: "", sn: "", code: "" });
+    setForm(EMPTY);
     open("form", "");
   };
 

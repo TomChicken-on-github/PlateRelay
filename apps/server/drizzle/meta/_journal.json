@@ -22,6 +22,13 @@
       "when": 1792894783928,
       "tag": "0002_uuid_v7_in_app",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792908133819,
+      "tag": "0003_access_code_keys",
+      "breakpoints": true
     }
   ]
 }

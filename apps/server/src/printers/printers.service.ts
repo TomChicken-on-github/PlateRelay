@@ -1,11 +1,12 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import type { OrderView, PrinterView, TodoView } from "@platerelay/shared";
-import { asc, eq, inArray } from "drizzle-orm";
+import type { DaemonAccessCode, EncryptedAccessCode, OrderView, PrinterView, TodoView } from "@platerelay/shared";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, SYSTEM, userId } from "../auth/actor.js";
 import { ApiError, notFound } from "../common/errors.js";
+import { modulusBytes } from "../daemons/daemons.service.js";
 import { DB, type Db } from "../db/db.js";
-import { files, orders, type PrinterError, printers } from "../db/schema.js";
+import { daemons, files, orders, type PrinterError, printers } from "../db/schema.js";
 import { OrdersService } from "../orders/orders.service.js";
 import { orderEvent, transition } from "../orders/transition.js";
 import { loadPeople } from "../orders/views.js";
@@ -18,7 +19,11 @@ export interface PrinterInput {
   ip: string;
   serial: string;
   daemonId?: string | null;
+  /** Encrypted in the browser with the daemon's key; null removes the stored code, absent keeps it. */
+  accessCode?: EncryptedAccessCode | null;
 }
+
+const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /** Actions that resume or dismiss an error without ending the print (driver draft §6). */
 const RESUME_ACTIONS = ["RESUME", "RESUME_ACCEPT_DEFECTS", "RESUME_PROBLEM_SOLVED", "RETRY", "CONFIRM_DONE", "IGNORE", "ACKNOWLEDGE"];
@@ -48,6 +53,8 @@ export class PrintersService {
     const people = await loadPeople(this.db, jobs.map((j) => j.ownerId));
     const manage = can(ctx, "printer:manage");
     const operate = can(ctx, "printer:operate");
+    const daemonIds = [...new Set(rows.map((p) => p.daemonId).filter((x): x is string => !!x))];
+    const keyOf = new Map(manage && daemonIds.length ? (await this.db.select({ id: daemons.id, keyId: daemons.keyId }).from(daemons).where(inArray(daemons.id, daemonIds))).map((d) => [d.id, d.keyId]) : []);
     return rows.map((p) => {
       const j = p.currentOrderId != null ? jobMap.get(p.currentOrderId) : undefined;
       return {
@@ -57,6 +64,11 @@ export class PrintersService {
         serial: manage ? p.serial : null,
         ip: manage ? p.ip : null,
         daemonId: manage ? p.daemonId : null,
+        /* whether a code is stored, never the code or its ciphertext */
+        accessCode:
+          manage && p.accessCodeCipher && p.accessCodeSetAt
+            ? { setAt: p.accessCodeSetAt.toISOString(), delivered: !!p.accessCodeDeliveredAt, current: !!p.daemonId && keyOf.get(p.daemonId) === p.accessCodeKeyId }
+            : null,
         model: p.model,
         modelId: p.modelId,
         nozzles: p.nozzles,
@@ -87,22 +99,70 @@ export class PrintersService {
 
   /** Model and nozzles are not taken here: the printer reports them through its daemon. */
   async create(ctx: Ctx, input: PrinterInput) {
-    return this.db.transaction(async (tx) => {
+    /* views read outside the transaction: PGlite has one connection and the transaction holds it */
+    const p = await this.db.transaction(async (tx) => {
       await this.assertUnique(tx, input);
-      const [p] = await tx.insert(printers).values({ name: input.name, ip: input.ip, serial: input.serial, daemonId: input.daemonId ?? null }).returning();
-      await this.audit.record(ctx, { action: "printer.create", targetType: "printer", targetId: p.id, after: { name: p.name, ip: p.ip, serial: p.serial } }, tx);
-      return (await this.views(ctx, [p]))[0];
+      const daemonId = input.daemonId ?? null;
+      const code = await this.accessCodeColumns(tx, daemonId, input.accessCode);
+      const [p] = await tx.insert(printers).values({ name: input.name, ip: input.ip, serial: input.serial, daemonId, ...code }).returning();
+      await this.audit.record(ctx, { action: "printer.create", targetType: "printer", targetId: p.id, after: { name: p.name, ip: p.ip, serial: p.serial, daemonId, accessCode: p.accessCodeCipher ? "set" : null } }, tx);
+      return p;
     });
+    return (await this.views(ctx, [p]))[0];
   }
 
   async update(ctx: Ctx, id: string, input: Partial<PrinterInput>) {
-    return this.db.transaction(async (tx) => {
+    const n = await this.db.transaction(async (tx) => {
       const p = await lockPrinter(tx, id);
       await this.assertUnique(tx, input, id);
-      const [n] = await tx.update(printers).set(input).where(eq(printers.id, id)).returning();
-      await this.audit.record(ctx, { action: "printer.update", targetType: "printer", targetId: id, before: { name: p.name, ip: p.ip, serial: p.serial, daemonId: p.daemonId }, after: input }, tx);
-      return (await this.views(ctx, [n]))[0];
+      const { accessCode, ...fields } = input;
+      const daemonId = fields.daemonId === undefined ? p.daemonId : fields.daemonId;
+      /* the code is encrypted for one daemon and bound to one serial, so moving either drops it */
+      const moved = daemonId !== p.daemonId || (fields.serial !== undefined && fields.serial !== p.serial);
+      const code = accessCode !== undefined ? await this.accessCodeColumns(tx, daemonId, accessCode) : moved ? await this.accessCodeColumns(tx, daemonId, null) : {};
+      const [n] = await tx.update(printers).set({ ...fields, ...code }).where(eq(printers.id, id)).returning();
+      const codeChange = accessCode ? "set" : (accessCode === null || moved) && p.accessCodeCipher ? "cleared" : undefined;
+      await this.audit.record(
+        ctx,
+        { action: "printer.update", targetType: "printer", targetId: id, before: { name: p.name, ip: p.ip, serial: p.serial, daemonId: p.daemonId }, after: { ...fields, ...(codeChange ? { accessCode: codeChange } : {}) } },
+        tx,
+      );
+      return n;
     });
+    return (await this.views(ctx, [n]))[0];
+  }
+
+  /** Checks an encrypted code against the daemon's current key and returns the columns to write. */
+  private async accessCodeColumns(tx: Db, daemonId: string | null, code: EncryptedAccessCode | null | undefined) {
+    const d = daemonId ? (await tx.select().from(daemons).where(eq(daemons.id, daemonId)))[0] : undefined;
+    if (daemonId && !d) throw new ApiError(HttpStatus.BAD_REQUEST, "daemon-not-found", "选择的 daemon 不存在");
+    if (!code) return { accessCodeCipher: null, accessCodeKeyId: null, accessCodeSetAt: null, accessCodeDeliveredAt: null };
+    if (!d) throw new ApiError(HttpStatus.BAD_REQUEST, "daemon-required", "先选择负责这台打印机的 daemon，访问码要用它的公钥加密");
+    if (!d.publicKey || d.keyId !== code.keyId)
+      throw new ApiError(HttpStatus.CONFLICT, "daemon-key-changed", d.publicKey ? "daemon 的公钥已经换了，请刷新后重新输入访问码" : "这个 daemon 还没连上面板，连上后才能设置访问码", { daemonId: d.id, keyId: d.keyId });
+    if (!B64.test(code.ciphertext) || Buffer.from(code.ciphertext, "base64").length !== modulusBytes(d.publicKey))
+      throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-access-code", "访问码密文格式不对");
+    return { accessCodeCipher: code.ciphertext, accessCodeKeyId: code.keyId, accessCodeSetAt: new Date(), accessCodeDeliveredAt: null };
+  }
+
+  /* ---------- daemon link (not wired yet: the daemon protocol is not built) ---------- */
+
+  /** Codes the daemon can decrypt: its printers whose code was encrypted with its current key. */
+  async accessCodesFor(daemonId: string): Promise<DaemonAccessCode[]> {
+    const rows = await this.db
+      .select({ printerId: printers.id, serial: printers.serial, ip: printers.ip, keyId: printers.accessCodeKeyId, ciphertext: printers.accessCodeCipher })
+      .from(printers)
+      .innerJoin(daemons, eq(daemons.id, printers.daemonId))
+      .where(and(eq(printers.daemonId, daemonId), eq(daemons.enabled, true), isNotNull(printers.accessCodeCipher), eq(printers.accessCodeKeyId, daemons.keyId)));
+    return rows.map((r) => ({ ...r, keyId: r.keyId!, ciphertext: r.ciphertext! }));
+  }
+
+  /** The daemon confirms it decrypted and stored the code; shown as 已送达 in 打印机管理. */
+  async markAccessCodeDelivered(daemonId: string, printerId: string) {
+    await this.db
+      .update(printers)
+      .set({ accessCodeDeliveredAt: new Date() })
+      .where(and(eq(printers.id, printerId), eq(printers.daemonId, daemonId), isNotNull(printers.accessCodeCipher)));
   }
 
   private async assertUnique(tx: Db, input: Partial<PrinterInput>, self?: string) {

@@ -1,4 +1,5 @@
 import type { ParsedPlate, ParsedUpload } from "../gcode3mf/api.js";
+import type { AccessCodeState } from "../printers/access-code.js";
 import type { FailureAttribution, OrderStatus, PrinterState } from "./status.js";
 
 /*
@@ -153,6 +154,8 @@ export interface PrinterView {
   serial: string | null;
   ip: string | null;
   daemonId: string | null;
+  /** printer:manage only; null when no code is stored. */
+  accessCode: AccessCodeState | null;
   model: string | null;
   modelId: string | null;
   nozzles: ReportedNozzle[] | null;
@@ -210,6 +213,8 @@ export interface DaemonView {
   tokenTail: string;
   createdAt: string;
   lastSeenAt: string | null;
+  /** Id of the public key the daemon reported; null until it has connected. */
+  keyId: string | null;
 }
 
 export interface PanelSettings {
