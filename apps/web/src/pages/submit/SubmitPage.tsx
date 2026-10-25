@@ -9,7 +9,7 @@ import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
-import { type FormView, type OrderPreview, type OrderView, type ParsedUpload, parseGcode3mf } from "@platerelay/shared";
+import type { FormView, OrderPreview, OrderView, ParsedUpload } from "@platerelay/shared";
 import { LinearIndeterminate } from "../../components/WavyProgress";
 import { useToast } from "../../components/Toast";
 import { LIVE, api } from "../../lib/api";
@@ -115,21 +115,6 @@ function toPlates(r: ParsedUpload): Plate[] {
 }
 
 /* Prototype builds still parse real files on the server, only availability is mocked. */
-async function parseInBrowser(f: File): Promise<ParsedUpload> {
-  const buf = new Uint8Array(await f.arrayBuffer());
-  const info = parseGcode3mf(buf, { fileName: f.name });
-  return {
-    ...info,
-    fileName: f.name,
-    sizeBytes: f.size,
-    plates: info.plates.map(({ thumbnail, ...p }) => ({
-      ...p,
-      thumbnailUrl: thumbnail ? URL.createObjectURL(new Blob([thumbnail.buffer as ArrayBuffer], { type: "image/png" })) : null,
-    })),
-  };
-}
-
-/* Prototype builds still parse real files on the server, only availability is mocked. */
 async function parseOnServer<T>(url: string, f: File): Promise<T> {
   const body = new FormData();
   body.append("file", f);
@@ -193,13 +178,7 @@ export function SubmitPage() {
         setUpload(f);
         setQueue(r.queue);
         show(previewPlates(r));
-      } else {
-        try {
-          show(toPlates(await parseInBrowser(f)));
-        } catch {
-          show(toPlates(await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f)));
-        }
-      }
+      } else show(toPlates(await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f)));
     } catch (e) {
       setPhase("idle");
       setFile(null);
