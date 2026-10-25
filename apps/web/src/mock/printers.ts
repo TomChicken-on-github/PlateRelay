@@ -15,6 +15,13 @@ export type Spool = { s?: string; m: string | null; c: string; r: number | null;
 
 export type Printer = {
   id: string;
+  /** Display name; server rows use a UUID id, mock rows use the name as id. */
+  name?: string;
+  /** Current job's submitter and file when the row comes from the server (mock rows use OWNERS). */
+  who?: string;
+  file?: string;
+  serial?: string;
+  ip?: string;
   model: string;
   state: PrinterState;
   star?: boolean;
@@ -122,7 +129,7 @@ const hex6 = (c: string) => "#" + c.slice(0, 6).toLowerCase();
 
 export function detailFor(p: Printer): PrinterDetail {
   if (DETAIL[p.id]) return DETAIL[p.id];
-  const o = p.order ? OWNERS[p.order] : null;
+  const o: [string, string] | null = p.order ? (p.file ? [p.who ?? "", p.file] : (OWNERS[p.order] ?? null)) : null;
   const temps: PrinterDetail["temps"] = p.nozzles.map((n) => ({ icon: "nozzle" as const, label: p.nozzles.length > 1 ? `${n.n}喷嘴` : "喷嘴", cur: n.cur ?? 0, tgt: n.tgt ?? 0, max: 300 }));
   temps.push({ icon: "bed", label: "热床", cur: p.bed[0] ?? 0, tgt: p.bed[1] ?? 0, max: 110 });
   if (p.chamber) temps.push({ icon: "chamber", label: "腔体", cur: p.chamber[0], tgt: p.chamber[1] });

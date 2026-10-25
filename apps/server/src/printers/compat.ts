@@ -1,3 +1,4 @@
+import type { PlateAvailability } from "@platerelay/shared";
 import type { orders, printers } from "../db/schema.js";
 
 type O = Pick<typeof orders.$inferSelect, "printerModelId" | "nozzles">;
@@ -12,6 +13,16 @@ export function compatible(o: O, p: P): boolean {
 /** Can take a job now: idle and has a medium it can write the file to (P1 without an SD card cannot). */
 export function hasWritableStorage(p: P): boolean {
   return !!p.storage?.some((s) => s.present && s.writable);
+}
+
+/** Whether the fleet as it is now can print a plate; the submit page shows it before anything is stored. */
+export function availability(o: O & { printerModel: string | null }, fleet: P[]): PlateAvailability {
+  const fit = fleet.filter((p) => compatible(o, p));
+  const model = (o.printerModel ?? o.printerModelId).replace(/^Bambu Lab /, "");
+  if (!fit.length) return { state: "none", message: `还没有兼容的 ${model} 打印机（机型和喷嘴直径都要一致），提交后会一直排队到有设备为止` };
+  if (!fit.some((p) => p.state !== "OFFLINE" && p.state !== "MAINTENANCE")) return { state: "unavailable", message: `兼容的 ${model} 打印机目前都离线或在维护，提交后要等它们恢复` };
+  if (!fit.some(hasWritableStorage)) return { state: "unavailable", message: "兼容的打印机都没有可用的存储卡，提交后要等工作人员处理" };
+  return { state: "ok" };
 }
 
 /** Why a queued order is not printing yet, shown to submitters and staff; null when it is simply waiting its turn. */

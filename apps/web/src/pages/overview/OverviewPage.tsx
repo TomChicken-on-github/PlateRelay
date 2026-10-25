@@ -4,7 +4,9 @@ import { SelectChip } from "../../components/Chip";
 import { FigmaIcon, type FigmaIconName } from "../../components/icons/FigmaIcon";
 import { Page, PageHeader } from "../../components/Page";
 import { cx } from "../../lib/cx";
-import { PRINTERS, starStore, type PrinterState } from "../../mock/printers";
+import { useCounts } from "../../lib/ordersApi";
+import { usePrinters } from "../../lib/printersApi";
+import type { PrinterState } from "../../mock/printers";
 import { PrinterCard } from "./PrinterCard";
 
 /* Masonry like the Figma board: round-robin into N columns. Cards stay between CARD_MIN and CARD_MAX;
@@ -51,11 +53,12 @@ function Stat({ label, icon, warn, value, unit, sub, trend }: { label: string; i
 
 export function OverviewPage() {
   const [filter, setFilter] = useState<"star" | "all" | "attn">("all");
-  const stars = starStore.use();
+  const { rows: PRINTERS } = usePrinters();
+  const { stats } = useCounts();
   const { ref, cols, cardW, maxW } = useMasonry();
 
   const n = (s: PrinterState) => PRINTERS.filter((p) => p.state === s).length;
-  const starred = PRINTERS.filter((p) => stars[p.id]);
+  const starred = PRINTERS.filter((p) => p.star);
   const attn = PRINTERS.filter((p) => ATTN.includes(p.state));
   const list = filter === "star" ? starred : filter === "attn" ? attn : PRINTERS;
   const used = Math.max(1, Math.min(list.length, cols));
@@ -67,16 +70,21 @@ export function OverviewPage() {
       <Page style={{ maxWidth: maxW }}>
         <PageHeader title="概况" keepAccount />
         <section className="grid grid-cols-[repeat(auto-fit,minmax(min(280px,100%),1fr))] gap-3 max-sm:grid-cols-3 max-sm:gap-2">
-          <Stat label="排队 / 等待中" icon="queue" value={7} unit="项" sub="含 4 项待审核 · 1 项等待兼容打印机" trend="↓ 较 1 小时前 -2" />
+          {/* the server keeps no history yet, so live numbers come without the hour-ago trend */}
+          {stats ? (
+            <Stat label="排队 / 等待中" icon="queue" value={stats.queued + stats.pendingReview} unit="项" sub={`含 ${stats.pendingReview} 项待审核 · ${stats.waitingCompatible} 项等待兼容打印机`} trend="" />
+          ) : (
+            <Stat label="排队 / 等待中" icon="queue" value={7} unit="项" sub="含 4 项待审核 · 1 项等待兼容打印机" trend="↓ 较 1 小时前 -2" />
+          )}
           <Stat
             label="正在打印设备"
             icon="printer"
             value={n("PRINTING")}
             unit={`/ ${PRINTERS.length} 台`}
-            sub={`当前利用率 ${Math.round((n("PRINTING") / PRINTERS.length) * 100)}% · ${n("PREPARING")} 台预热`}
-            trend="↑ 较 1 小时前 +1 台"
+            sub={`当前利用率 ${PRINTERS.length ? Math.round((n("PRINTING") / PRINTERS.length) * 100) : 0}% · ${n("PREPARING")} 台预热`}
+            trend={stats ? "" : "↑ 较 1 小时前 +1 台"}
           />
-          <Stat label="待清台机器" icon="scanLine" warn value={n("CLEARING_REQUIRED")} unit="台" sub="未入库确认前禁止派单" trend="↑ 较 1 小时前 +1 台" />
+          <Stat label="待清台机器" icon="scanLine" warn value={n("CLEARING_REQUIRED")} unit="台" sub="未入库确认前禁止派单" trend={stats ? "" : "↑ 较 1 小时前 +1 台"} />
         </section>
 
         <section className="flex flex-col gap-4">
@@ -99,6 +107,7 @@ export function OverviewPage() {
               </SelectChip>
             </div>
           </div>
+          {!PRINTERS.length && <p className="m-0 py-10 text-center text-body-m text-on-variant">还没有打印机。有 printer:manage 权限的人可以在「打印机管理」里添加。</p>}
           <LayoutGroup>
             <div className="flex items-start gap-4">
               {columns.map((col, i) => (

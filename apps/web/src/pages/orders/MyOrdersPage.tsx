@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { Button } from "../../components/Button";
@@ -10,11 +10,14 @@ import { PhotoPlaceholder } from "../../components/ModelThumb";
 import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock, Thumb } from "../../components/OrderBits";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
+import { useToast } from "../../components/Toast";
 import { WavyProgress } from "../../components/WavyProgress";
+import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
+import { ordersApi, useMyOrders } from "../../lib/ordersApi";
+import { useMe } from "../../lib/session";
 import { type MyOrder, type OrderGroup, STATUS, myOrders } from "../../mock/myOrders";
-import { ME } from "../../mock/session";
 import { PickupCode } from "./PickupCode";
 
 type TabKey = "all" | OrderGroup;
@@ -29,9 +32,9 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
       return <StatusBlock icon="schedule" title={`队列第 ${o.pos} 位`} right={o.ahead ? `前方 ${o.ahead}` : undefined}>{o.wait ?? "空闲且兼容的打印机会从队首开始接单。"}</StatusBlock>;
     case "printing":
       return (
-        <StatusBlock tone="ok" icon="print" title={`${o.printer} 打印中`} right={`${o.pct}% · 剩余 ${o.left}`}>
+        <StatusBlock tone="ok" icon="print" title={`${o.printer} 打印中`} right={`${o.pct ?? 0}%${o.left ? ` · 剩余 ${o.left}` : ""}`}>
           <WavyProgress pct={o.pct ?? 0} className="mb-2" />
-          预计 {o.eta} 完成
+          {o.eta ? `预计 ${o.eta} 完成` : "完成后工作人员会铲件入库。"}
         </StatusBlock>
       );
     case "paused":
@@ -47,7 +50,11 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
         <StatusBlock tone="err" icon="error" title={`${o.printer} 打印失败`}>
           {o.reason}
           <br />
-          {o.retried ? `已重打为订单 #${o.retried}。` : "可以一键重打：按已用耗材折算后派生一张新订单，重新进入审核。"}
+          {o.retried
+            ? `已重打为订单 #${o.retried}。`
+            : LIVE
+              ? "工作人员会做失败归因：机器故障按原位置重新排队，模型或切片问题会派生新订单重新审核。"
+              : "可以一键重打：按已用耗材折算后派生一张新订单，重新进入审核。"}
         </StatusBlock>
       );
     case "done":
@@ -60,15 +67,17 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
 /* ---------- record timeline ---------- */
 
 type Tone = "ok" | "bad" | "cur" | "wait";
-type RecNode = { t: string; who?: string; sys?: boolean; pool?: boolean; s: string; tone: Tone; time?: string; note?: string; more?: { printer?: string; photo?: boolean; label?: string } };
+type RecNode = { t: string; who?: string; sys?: boolean; pool?: boolean; s: string; tone: Tone; time?: string; note?: string; more?: { printer?: string; photo?: boolean; url?: string | null; label?: string } };
 
-function recNodes(o: MyOrder): RecNode[] {
-  const rev = o.by || "Builder 赵乐", staff = "Staff 陈一帆", st = o.st;
-  const N: RecNode[] = [{ t: "提交申请", who: ME.name, s: "已提交", tone: "ok", time: o.at }];
+/* Real orders only have the 入库 photo so far (no camera snapshots); `photo` is its signed link then. */
+function recNodes(o: MyOrder, me: string, photo: string | null | undefined): RecNode[] {
+  const rev = o.by || "Builder 赵乐", staff = o.storer || "Staff 陈一帆", st = o.st;
+  const shot = (label: string) => (LIVE ? undefined : { photo: true, label });
+  const N: RecNode[] = [{ t: "提交申请", who: me, s: "已提交", tone: "ok", time: o.at }];
   /* Staff steps that have not happened yet have no person attached. */
   const later = (...k: ("print" | "stock" | "pick")[]) =>
     k.map((x): RecNode => (x === "print" ? { t: "打印", sys: true, s: "待打印", tone: "wait" } : x === "stock" ? { t: "入库", s: "待入库", tone: "wait" } : { t: "取件", s: "待核销", tone: "wait" }));
-  if (st === "cancelled") return [...N, { t: "取消订单", who: ME.name, s: "已取消", tone: "bad", note: o.reason?.replace("你取消了：", "") }];
+  if (st === "cancelled") return [...N, { t: "取消订单", who: o.canceller ?? me, s: "已取消", tone: "bad", note: o.reason?.replace(/^(你|工作人员)取消了?：/, "") }];
   if (st === "pending") return [...N, { t: "审核", pool: true, s: "待审核", tone: "cur" }, { t: "排队", sys: true, s: "待排队", tone: "wait" }, ...later("print", "stock", "pick")];
   if (st === "rejected") return [...N, { t: "审核", who: rev, s: "已驳回", tone: "bad", time: o.at, note: o.reason }];
   N.push({ t: "审核", who: rev, s: "已通过", tone: "ok", time: o.at });
@@ -77,14 +86,15 @@ function recNodes(o: MyOrder): RecNode[] {
   if (st === "printing" || st === "paused")
     return [...N, { t: "打印", sys: true, s: st === "paused" ? `等待处理 · ${o.why}` : `${o.printer} 打印中 · ${o.pct}%`, tone: "cur", more: { printer: o.printer } }, ...later("stock", "pick")];
   if (st === "failed") {
-    N.push({ t: "打印", sys: true, s: `${o.printer} 打印失败`, tone: "bad", note: o.reason, more: { photo: true, label: "失败时现场" } });
+    N.push({ t: "打印", sys: true, s: `${o.printer} 打印失败`, tone: "bad", note: o.reason, more: shot("失败时现场") });
     if (o.retried) N.push({ t: "重打", sys: true, s: `已派生新订单 #${o.retried}`, tone: "ok" });
     return N;
   }
-  N.push({ t: "打印", sys: true, s: "打印完成", tone: "ok", time: o.done, more: { photo: true, label: "打印完成" + (o.done ? " · " + o.done : "") } });
+  N.push({ t: "打印", sys: true, s: "打印完成", tone: "ok", time: o.done, more: shot("打印完成" + (o.done ? " · " + o.done : "")) });
   if (st === "awaiting") return [...N, { t: "入库", s: "待入库", tone: "cur" }, { t: "取件", s: "待核销", tone: "wait" }];
-  N.push({ t: "入库", who: staff, s: "已入库", tone: "ok", time: o.when, note: `暂存位：${o.slot || "暂存篮"}`, more: { photo: true, label: "入库验货" + (o.when ? " · " + o.when : "") } });
-  N.push(st === "ready" ? { t: "取件", s: "待核销", tone: "cur", note: "出示取件码，由工作人员扫码核销" } : { t: "取件", who: staff, s: "已核销", tone: "ok", time: o.when });
+  const label = "入库验货" + (o.when ? " · " + o.when : "");
+  N.push({ t: "入库", who: staff, s: "已入库", tone: "ok", time: o.when, note: `暂存位：${o.slot || "暂存篮"}`, more: LIVE ? (photo ? { photo: true, url: photo, label } : undefined) : { photo: true, label } });
+  N.push(st === "ready" ? { t: "取件", s: "待核销", tone: "cur", note: "出示取件码，由工作人员扫码核销" } : { t: "取件", who: o.redeemer || staff, s: "已核销", tone: "ok", time: o.when });
   return N;
 }
 
@@ -93,7 +103,13 @@ const SUB: Record<Tone, string> = { ok: "text-ok", bad: "text-error", cur: "text
 
 function Timeline({ o }: { o: MyOrder }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const nodes = recNodes(o);
+  const me = useMe().name;
+  const [photo, setPhoto] = useState<string | null>(null);
+  const stored = o.st === "ready" || o.st === "done";
+  useEffect(() => {
+    if (LIVE && stored) void ordersApi.detail(o.id).then((r) => r.ok && setPhoto(r.data.storePhotoUrl ?? null));
+  }, [o.id, stored]);
+  const nodes = recNodes(o, me, photo);
   return (
     <ol className="m-0 mt-1 list-none p-0">
       {nodes.map((n, i) => {
@@ -120,7 +136,14 @@ function Timeline({ o }: { o: MyOrder }) {
               {n.more.photo && ex && (
                 <motion.div className="overflow-hidden" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1, transition: t("medium2", "emphasizedDecelerate") }} exit={{ height: 0, opacity: 0, transition: t("short3", "emphasizedAccelerate") }}>
                   <div className="pt-2.5">
-                    <PhotoPlaceholder c={o.fil[0][0]} label={n.more.label} />
+                    {n.more.url ? (
+                      <div className="relative aspect-[5/2] overflow-hidden rounded-xl bg-sc">
+                        <img src={n.more.url} alt={n.more.label} className="block size-full object-cover" />
+                        <span className="absolute bottom-2 left-2 rounded-md bg-black/65 px-2 py-0.5 text-body-s font-medium tracking-normal text-white">{n.more.label}</span>
+                      </div>
+                    ) : (
+                      <PhotoPlaceholder c={o.fil[0]?.[0] ?? "#8a8590"} label={n.more.label} />
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -173,7 +196,8 @@ type SheetState = { type: "detail" | "qr" | "cancel" | "retry"; id: number } | n
 
 export function MyOrdersPage() {
   const navigate = useNavigate();
-  const orders = myOrders.use();
+  const toast = useToast();
+  const { rows: orders, loading, error } = useMyOrders();
   const [tab, setTab] = useState<TabKey>("all");
   const [sheet, setSheet] = useState<SheetState>(null);
   const [last, setLast] = useState<NonNullable<SheetState>>({ type: "detail", id: 0 });
@@ -192,8 +216,9 @@ export function MyOrdersPage() {
   const todo = orders.filter((x) => STATUS[x.st].g === "todo" && !x.retried).length;
   const list = orders.filter((x) => tab === "all" || STATUS[x.st].g === tab).sort((a, b) => b.id - a.id);
 
-  const confirmCancel = () => {
-    myOrders.set((s) => s.map((x) => (x.id === last.id ? { ...x, st: "cancelled", reason: "你取消了：" + reason } : x)));
+  const confirmCancel = async () => {
+    const r = await ordersApi.cancelMine(last.id, reason);
+    if (!r.ok) return toast(r.error.message || "取消失败，请重试");
     close();
   };
   const confirmRetry = () => {
@@ -237,13 +262,13 @@ export function MyOrdersPage() {
                     }}
                   >
                     <OrderHead id={x.id} chip={<StatusChip tone={s.tone}>{s.t}</StatusChip>} right={x.at} />
-                    <OrderBody thumb={<Thumb fil={x.fil} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
+                    <OrderBody thumb={<Thumb fil={x.fil} url={x.thumb} alt={`#${x.id} 预览`} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
                     <OrderStatusBlock o={x} />
-                    {(x.st === "ready" || x.st === "pending" || x.st === "queued" || (x.st === "failed" && !x.retried) || x.st === "rejected") && (
+                    {(x.st === "ready" || x.st === "pending" || x.st === "queued" || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
                       <OrderActions>
                         {x.st === "ready" && <Button icon="qr_code_2" onClick={(e) => (stop(e), open({ type: "qr", id: x.id }))}>出示取件码</Button>}
                         {(x.st === "pending" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
-                        {x.st === "failed" && !x.retried && <Button icon="replay" onClick={(e) => (stop(e), open({ type: "retry", id: x.id }))}>一键重打</Button>}
+                        {x.st === "failed" && !x.retried && !LIVE && <Button icon="replay" onClick={(e) => (stop(e), open({ type: "retry", id: x.id }))}>一键重打</Button>}
                         {x.st === "rejected" && <Button variant="tonal" icon="send" onClick={(e) => (stop(e), navigate("/submit"))}>修改后重新提交</Button>}
                       </OrderActions>
                     )}
@@ -254,7 +279,7 @@ export function MyOrdersPage() {
           </AnimatePresence>
         </OrderGrid>
       ) : (
-        <Empty icon="description">这里还没有订单</Empty>
+        <Empty icon={error ? "cloud_off" : "description"}>{error ? `加载失败：${error}` : loading ? "正在加载…" : "这里还没有订单"}</Empty>
       )}
 
       {o && (
@@ -285,7 +310,7 @@ export function MyOrdersPage() {
             footer={
               <>
                 <Button variant="text" onClick={close}>返回</Button>
-                <Button variant="danger" disabled={!reason} onClick={confirmCancel}>确认取消</Button>
+                <Button variant="danger" disabled={!reason} onClick={() => void confirmCancel()}>确认取消</Button>
               </>
             }
           >

@@ -1,20 +1,14 @@
 import { createHash } from "node:crypto";
-import type { FailureAttribution, OrderStatus, PrinterState } from "@platerelay/shared";
+import type { OrderView, PersonView } from "@platerelay/shared";
 import { eq, inArray } from "drizzle-orm";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import type { Db } from "../db/db.js";
-import { type AnswerSnapshot, files, type OrderFilament, type OrderNozzle, type PrinterError, orders, printers, roles, userRoles, users } from "../db/schema.js";
+import { type AnswerSnapshot, files, orders, printers, roles, userRoles, users } from "../db/schema.js";
 import type { ObjectStorage } from "../storage/storage.js";
 import type { OrderRow } from "./transition.js";
 
 /** Signed preview links live this long. */
 export const THUMB_TTL_S = 600;
-
-export interface PersonView {
-  id: string | null;
-  name: string;
-  role: string | null;
-}
 
 /** Anonymous label for a submitter, stable per account: "选手 K07". */
 export function aliasOf(id: string): string {
@@ -44,45 +38,6 @@ export async function loadPeople(db: Db, ids: (string | null | undefined)[]): Pr
     get,
     owner: (ctx, id) => (userId(ctx) === id || can(ctx, "order:submitter-name:view-others") ? get(id)! : { id: null, name: aliasOf(id), role: null }),
   };
-}
-
-export interface OrderView {
-  id: number;
-  status: OrderStatus;
-  /** PRINTING but the printer is paused on an error: shown as 等待处理. */
-  waitingForHandler: boolean;
-  fileName: string;
-  sizeBytes: number;
-  /** Plates of one upload share this. */
-  sourceFileId: string;
-  plate: { index: number; count: number; name: string };
-  printerModel: string | null;
-  printerModelId: string;
-  nozzles: OrderNozzle[];
-  filaments: OrderFilament[];
-  printSeconds: number;
-  weightGrams: number;
-  thumbUrl: string | null;
-  owner: PersonView;
-  isMine: boolean;
-  submittedAt: string;
-  /** 1-based place among queued orders and the estimated print time ahead of it. */
-  queue: { position: number; aheadSeconds: number } | null;
-  waitReason: string | null;
-  printer: { id: string; name: string; state: PrinterState } | null;
-  progress: number | null;
-  startedAt: string | null;
-  printedAt: string | null;
-  errorPausedMs: number;
-  /** Error details, only for viewers with printer:operate. */
-  error: PrinterError | null;
-  review: { by: PersonView | null; at: string; reason: string | null } | null;
-  cancel: { by: PersonView | null; at: string; reason: string } | null;
-  failure: { by: PersonView | null; at: string; reason: string; attribution: FailureAttribution | null; attributedBy: PersonView | null; attributedAt: string | null } | null;
-  stored: { by: PersonView | null; at: string; slot: string } | null;
-  redeemed: { by: PersonView | null; at: string } | null;
-  retryOf: number | null;
-  retriedAs: number | null;
 }
 
 export interface ViewExtras {
@@ -162,4 +117,4 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
   );
 }
 
-export type { AnswerSnapshot };
+export type { AnswerSnapshot, OrderView, PersonView };

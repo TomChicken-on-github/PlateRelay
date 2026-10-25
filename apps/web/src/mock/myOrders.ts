@@ -28,6 +28,11 @@ export type MyOrder = {
   reason?: string;
   by?: string;
   retried?: number;
+  /* from the server; the mock leaves them out */
+  thumb?: string | null;
+  storer?: string;
+  redeemer?: string;
+  canceller?: string;
 };
 
 export type OrderGroup = "act" | "pick" | "todo" | "end";

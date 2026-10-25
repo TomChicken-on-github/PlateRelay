@@ -16,7 +16,13 @@ import { auditApi } from "../../lib/auditApi";
 import { AUDIT_ACTIONS, AUDIT_TARGETS, auditAction, auditActor, auditChanges, auditNote, auditReason, auditRole, auditTarget } from "../../lib/auditPresentation";
 import { canOpen, useMe } from "../../lib/session";
 import { cx } from "../../lib/cx";
-import { FIELD_TYPES, ROLES, genToken, settings } from "../../mock/settings";
+import { FIELD_TYPE_LABEL, type DaemonRow, type FieldRow, newFieldKey, settingsApi, useDaemons, useFields, useRegistration, useUsers } from "../../lib/settingsApi";
+import { FIELD_TYPES as MOCK_FIELD_TYPES, ROLES, genToken, settings } from "../../mock/settings";
+
+const FIELD_TYPES = LIVE ? Object.values(FIELD_TYPE_LABEL) : MOCK_FIELD_TYPES;
+const CHOICE = ["单选", "多选"];
+/** Prototype-only tabs say so in real builds, where their saves would otherwise look real. */
+const NO_BACKEND = "这一页还没有后端，保存只在当前页面生效，不会写入面板。";
 
 const TABS = [
   ["form", "申请表单"],
@@ -28,9 +34,9 @@ const TABS = [
 ] as const;
 type TabKey = (typeof TABS)[number][0];
 
-/* Settings mutations remain prototype-only, including their local audit entries. */
+/* Prototype settings write local audit entries; real builds are audited by the server. */
 const ACTOR = { id: "00000000-0000-4000-8000-000000000001", name: "Tom_Chicken", role: "Builder" };
-const log = (action: string, obj: string) => settings.set((s) => ({
+const log = (action: string, obj: string) => !LIVE && settings.set((s) => ({
   ...s,
   audit: [{
     id: Math.max(0, ...s.audit.map((row) => row.id)) + 1, at: new Date().toISOString(),
@@ -65,28 +71,33 @@ const Actions = ({ children }: { children: ReactNode }) => <div className="flex 
 
 function FormTab() {
   const toast = useToast();
-  const { fields } = settings.use();
+  const { rows: fields, error } = useFields();
   const [open, setOpen] = useState(false);
   const [key, setKey] = useState(0);
   const [name, setName] = useState("");
   const [type, setType] = useState(FIELD_TYPES[0]);
+  const [opts, setOpts] = useState("");
+  const options = opts.split(/[,，、\n]/).map((x) => x.trim()).filter(Boolean);
+  const save = async (next: FieldRow[], msg: string) => {
+    const r = await settingsApi.saveFields(next);
+    toast(r.ok ? msg : r.error.message || "保存失败，请重试");
+    return r.ok;
+  };
   return (
     <Section title="申请表单" hint="选手提交订单时要填的信息。审核页会显示这些答案。">
+      {error && <div className="text-body-m text-error">加载失败：{error}</div>}
       <div>
         {fields.map((f) => (
-          <Row key={f.id}>
-            <RowText title={f.name} sub={f.type} />
+          <Row key={f.key}>
+            <RowText title={f.name} sub={f.options?.length ? `${f.type} · ${f.options.join(" / ")}` : f.type} />
             <div className="flex items-center gap-2">
               <Tag>{f.req ? "必填" : "选填"}</Tag>
-              <Switch checked={f.req} label={`${f.name} 必填`} onChange={(v) => settings.set((s) => ({ ...s, fields: s.fields.map((x) => (x.id === f.id ? { ...x, req: v } : x)) }))} />
+              <Switch checked={f.req} label={`${f.name} 必填`} onChange={(v) => void save(fields.map((x) => (x.key === f.key ? { ...x, req: v } : x)), v ? `${f.name} 改为必填` : `${f.name} 改为选填`)} />
               <IconButton
                 icon="delete"
                 label={`删除 ${f.name}`}
                 size={40}
-                onClick={() => {
-                  settings.set((s) => ({ ...s, fields: s.fields.filter((x) => x.id !== f.id) }));
-                  toast("已删除字段");
-                }}
+                onClick={() => void save(fields.filter((x) => x.key !== f.key), "已删除字段")}
               />
             </div>
           </Row>
@@ -99,6 +110,7 @@ function FormTab() {
           onClick={() => {
             setName("");
             setType(FIELD_TYPES[0]);
+            setOpts("");
             setKey((k) => k + 1);
             setOpen(true);
           }}
@@ -115,11 +127,10 @@ function FormTab() {
           <>
             <Button variant="text" onClick={() => setOpen(false)}>取消</Button>
             <Button
-              disabled={!name.trim()}
-              onClick={() => {
-                settings.set((s) => ({ ...s, fields: [...s.fields, { id: Date.now(), name: name.trim(), type, req: false }] }));
-                setOpen(false);
-                toast("已添加字段");
+              disabled={!name.trim() || (LIVE && CHOICE.includes(type) && !options.length)}
+              onClick={async () => {
+                const row: FieldRow = { id: Date.now(), key: newFieldKey(), name: name.trim(), type, req: false, options: CHOICE.includes(type) ? options : undefined };
+                if (await save([...fields, row], "已添加字段")) setOpen(false);
               }}
             >
               添加
@@ -133,6 +144,11 @@ function FormTab() {
         <Field label="类型" required>
           {(id, cls) => <Select id={id} className={cls} options={FIELD_TYPES} value={type} onChange={(e) => setType(e.target.value)} />}
         </Field>
+        {LIVE && CHOICE.includes(type) && (
+          <Field label="选项" required hint="用逗号或顿号分开，例如：比赛零件、调试测试、其他">
+            {(id, cls) => <TextInput id={id} className={cls} value={opts} onChange={(e) => setOpts(e.target.value)} />}
+          </Field>
+        )}
       </Sheet>
     </Section>
   );
@@ -144,25 +160,40 @@ const ROW_SELECT = "h-10 min-w-[120px] rounded-lg border-0 bg-transparent px-3 t
 
 function UsersTab() {
   const toast = useToast();
-  const { users } = settings.use();
+  const { rows: users, error } = useUsers();
+  const registration = useRegistration();
   return (
     <Section title="用户与角色" hint="账号来自登录系统，这里只分配角色。改角色会记入审计日志。">
+      {error && <div className="text-body-m text-error">加载失败：{error}</div>}
       <div>
-        {users.map((u, i) => (
-          <Row key={u.n}>
+        {registration !== null && (
+          <Row>
+            <RowText title="允许自行注册" sub="打开后，选手可以在登录页自己注册账号（得到 User 角色）" />
+            <Switch
+              checked={registration}
+              label="允许自行注册"
+              onChange={async (v) => {
+                const r = await settingsApi.setRegistration(v);
+                toast(r.ok ? (v ? "已允许自行注册" : "已关闭自行注册") : r.error.message || "保存失败");
+              }}
+            />
+          </Row>
+        )}
+        {users.map((u) => (
+          <Row key={u.id}>
             <div className="flex min-w-0 items-center gap-3">
               <Avatar name={u.n} size={40} />
-              <RowText title={u.n} sub={u.role} />
+              <RowText title={u.n} sub={u.username ? `${u.username} · ${u.role}` : u.role} />
             </div>
             <select
               aria-label={`${u.n} 的角色`}
               className={ROW_SELECT}
               value={u.role}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const role = e.target.value;
                 log("修改角色", `${u.n} ${u.role} → ${role}`);
-                settings.set((s) => ({ ...s, users: s.users.map((x, j) => (j === i ? { ...x, role } : x)) }));
-                toast(`${u.n} 已改为 ${role}`);
+                const r = await settingsApi.setRole(u, role);
+                toast(r.ok ? `${u.n} 已改为 ${role}` : r.error.message || "修改失败");
               }}
             >
               {ROLES.map((r) => (
@@ -184,7 +215,7 @@ function PolicyTab() {
   const [size, setSize] = useState(policy.size);
   const ok = +size > 0 && +size <= 2000;
   return (
-    <Section title="文件与排队">
+    <Section title="文件与排队" hint={LIVE ? NO_BACKEND : undefined}>
       <Field label="文件大小上限" error={ok ? undefined : "请输入 1 到 2000 之间的数字"}>
         {(id, cls) => (
           <div className="relative">
@@ -226,7 +257,7 @@ function NotifyTab() {
   const [n, setN] = useState(notify);
   const dirty = JSON.stringify(n) !== JSON.stringify(notify);
   return (
-    <Section title="通知" hint="可取件、审核驳回、打印失败等事件会通过这些渠道发给选手。">
+    <Section title="通知" hint={`可取件、审核驳回、打印失败等事件会通过这些渠道发给选手。${LIVE ? NO_BACKEND : ""}`}>
       <div>
         <Row>
           <RowText title="邮箱" sub="发到选手账号绑定的邮箱" />
@@ -267,7 +298,7 @@ function NotifyTab() {
 
 function DaemonTab() {
   const toast = useToast();
-  const { daemons } = settings.use();
+  const { rows: daemons, error } = useDaemons();
   const [gen, setGen] = useState(false);
   const [revoke, setRevoke] = useState<number | null>(null);
   const [lastRevoke, setLastRevoke] = useState<number | null>(null);
@@ -275,12 +306,13 @@ function DaemonTab() {
   const [name, setName] = useState("");
   const [net, setNet] = useState("");
   const [token, setToken] = useState("");
-  const target = daemons.find((d) => d.id === lastRevoke);
+  const target: DaemonRow | undefined = daemons.find((d) => d.id === lastRevoke);
 
-  const create = () => {
-    const tk = genToken();
-    setToken(tk);
-    settings.set((s) => ({ ...s, daemons: [...s.daemons, { id: Date.now(), name: name.trim(), net: net.trim() || "未填写", seen: "尚未连接", on: false, tail: tk.slice(-4) }] }));
+  /* The token is only ever on screen; it is never logged, stored or put in a URL. */
+  const create = async () => {
+    const r = await settingsApi.createDaemon(name.trim(), net.trim(), genToken);
+    if (!r.ok) return toast(r.error.message || "生成失败，请重试");
+    setToken(r.data);
     /* only the name goes into the audit log, never the token */
     log("生成守护进程 token", name.trim());
   };
@@ -293,10 +325,11 @@ function DaemonTab() {
 
   return (
     <Section title="守护进程" hint="守护进程部署在和打印机同一网段的机器上，负责连接打印机并向面板汇报。每个守护进程用一个 token 接入。">
+      {error && <div className="text-body-m text-error">加载失败：{error}</div>}
       <div>
         {daemons.length ? (
           daemons.map((d) => (
-            <Row key={d.id}>
+            <Row key={d.key}>
               <div className="min-w-0">
                 <b className="block text-label-l font-medium">{d.name}</b>
                 <small className="block text-body-s text-on-variant">
@@ -359,7 +392,7 @@ function DaemonTab() {
           ) : (
             <>
               <Button variant="text" onClick={() => setGen(false)}>取消</Button>
-              <Button disabled={!name.trim()} onClick={create}>生成</Button>
+              <Button disabled={!name.trim()} onClick={() => void create()}>生成</Button>
             </>
           )
         }
@@ -392,9 +425,10 @@ function DaemonTab() {
             <Button
               variant="text"
               className="text-error"
-              onClick={() => {
+              onClick={async () => {
                 if (!target) return;
-                settings.set((s) => ({ ...s, daemons: s.daemons.filter((d) => d.id !== target.id) }));
+                const r = await settingsApi.revokeDaemon(target);
+                if (!r.ok) return toast(r.error.message || "吊销失败，请重试");
                 log("吊销守护进程 token", target.name);
                 setRevoke(null);
                 toast(`已吊销 ${target.name}`);

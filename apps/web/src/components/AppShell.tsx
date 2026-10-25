@@ -4,8 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { cx } from "../lib/cx";
 import { canOpen, useMe } from "../lib/session";
 import { duration, easing } from "../lib/motion";
-import { adminOrders } from "../mock/adminOrders";
-import { tasks } from "../mock/todo";
+import { useCounts } from "../lib/ordersApi";
 import { Empty } from "./OrderBits";
 import { Page, PageHeader } from "./Page";
 import { FigmaIcon } from "./icons/FigmaIcon";
@@ -14,8 +13,7 @@ import { Icon } from "./icons/Icon";
 type Item = { to: string; label: string; icon: string; badge?: number; end?: boolean };
 
 function useNav(): (Item | string)[] {
-  const pending = adminOrders.use().filter((o) => o.st === "pending").length;
-  const todo = tasks.use().length;
+  const { pending, todo } = useCounts();
   const me = useMe();
   const all: (Item | string)[] = [
     { to: "/", label: "概况", icon: "dashboard", end: false },
