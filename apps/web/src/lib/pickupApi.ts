@@ -48,7 +48,7 @@ export interface PickupApi {
   redemptions(since: string): Promise<Redemption[]>;
 }
 
-export const CODE_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const CODE_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
 /** Bare 8-char code: uppercase, drop non-alphanumerics and a "PR1" prefix (a code itself never holds a 1). */
 export function bareCode(s: string) {
@@ -56,9 +56,6 @@ export function bareCode(s: string) {
   if (v.length > 8 && v.startsWith("PR1")) v = v.slice(3);
   return v.slice(0, 8);
 }
-
-/** True when the input holds a character no code has (0, O, 1, I, L). */
-export const hasForeignChars = (s: string) => /[01OIL]/.test(bareCode(s));
 
 /** What people type and read: "XXXX-XXXX" (partial input keeps its dash once past four characters). */
 export function showCode(s: string) {
@@ -72,7 +69,7 @@ export const qrPayload = (code: string) => `PR1-${showCode(code)}`;
 /** A scanned QR is a pickup code only if it is exactly "PR1-XXXX-XXXX" (dashes optional). */
 export function codeFromScan(text: string) {
   const t = text.trim().toUpperCase().replace(/-/g, "");
-  return /^PR1[2-9A-HJKMNP-Z]{8}$/.test(t) ? bareCode(t) : null;
+  return /^PR1[0-9A-Z]{8}$/.test(t) ? bareCode(t) : null;
 }
 
 const call = <T>(url: string, init?: { method: string }) => api<T, PickupError>(url, init) as Promise<Res<T>>;
