@@ -41,8 +41,10 @@ export function OrderBody({ thumb, name, meta }: { thumb: ReactNode; name: strin
   );
 }
 
-export function Thumb({ fil }: { fil: [string, string][] }) {
-  return <ModelThumb c1={fil[0][0]} c2={fil[1]?.[0]} />;
+/** The plate preview stored on submit, or the placeholder render when the file had none. */
+export function Thumb({ fil, url, alt = "打印板预览" }: { fil: [string, string][]; url?: string | null; alt?: string }) {
+  if (url) return <img src={url} alt={alt} className="block size-full object-contain" />;
+  return <ModelThumb c1={fil[0]?.[0] ?? "var(--md-outline)"} c2={fil[1]?.[0]} />;
 }
 
 export function PlateMeta({ parts, fil }: { parts: string[]; fil: [string, string][] }) {

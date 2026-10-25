@@ -3,7 +3,8 @@ import type { Fil } from "./myOrders";
 
 export type Task = {
   id: string;
-  kind: "stock" | "err";
+  /** clear: a bed to clear with nothing to store (failed, cancelled or external job). */
+  kind: "stock" | "err" | "clear";
   order: number;
   file: string;
   n: number;
@@ -17,6 +18,11 @@ export type Task = {
   since: string;
   err?: string;
   pct?: number;
+  /* from the server; the mock leaves them out */
+  printerId?: string;
+  thumb?: string | null;
+  /** Standard actions the printer allows for this error, STOP aside. */
+  actions?: string[];
 };
 
 export const tasks = createStore<Task[]>([

@@ -1,31 +1,54 @@
-import { session } from "../../lib/session";
 import { AnimatePresence, motion } from "motion/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Button, IconButton } from "../../components/Button";
 import { StatusChip } from "../../components/Chip";
-import { RowCheckbox } from "../../components/Checkbox";
+import { Checkbox, RowCheckbox } from "../../components/Checkbox";
 import { Field, Select, TextArea, TextInput } from "../../components/Field";
 import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
-import type { ParsedUpload, ParseErrorBody } from "@platerelay/shared";
+import type { FormView, OrderPreview, OrderView, ParsedUpload } from "@platerelay/shared";
 import { LinearIndeterminate } from "../../components/WavyProgress";
+import { useToast } from "../../components/Toast";
+import { LIVE, api } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
+import { fmtDur, live, shortModel } from "../../lib/ordersApi";
 import { PRINTERS } from "../../mock/printers";
 
-const QUEUE_AHEAD = 7, MAX_MB = 200;
+const MOCK_QUEUE_AHEAD = 7, MAX_MB = 200;
 
-/* Application form fields are configured by admins (系统设置 → 申请表单); these are the defaults. */
-const FIELDS = [
+type FieldDef = { id: string; label: string; type: "select" | "multi" | "text" | "number" | "textarea"; req: boolean; opts?: string[]; min?: number; ph?: string; wide?: boolean };
+type Answer = string | string[];
+
+/* Application form fields are configured by admins (系统设置 → 申请表单); the prototype uses these. */
+const MOCK_FIELDS: FieldDef[] = [
   { id: "purpose", label: "用途", type: "select", req: true, opts: ["比赛零件", "调试测试", "备件替换", "其他"] },
   { id: "team", label: "队伍 / 编号", type: "text", req: true, ph: "例如 T-014" },
   { id: "reason", label: "打印理由", type: "textarea", req: true, min: 10, ph: "说明这个零件的用途和为什么需要打印（至少 10 个字）", wide: true },
   { id: "note", label: "备注", type: "textarea", req: false, ph: "选填：给审核人的补充说明", wide: true },
-] as const;
-type FieldDef = (typeof FIELDS)[number];
+];
+
+const fromServer = (v: FormView): FieldDef[] =>
+  v.fields.map((f) => ({
+    id: f.id,
+    label: f.label,
+    type: f.type === "single" ? "select" : f.type,
+    req: f.required,
+    opts: f.options,
+    wide: f.type === "textarea" || f.type === "multi",
+  }));
+
+/** The request form as configured on the server, or the prototype's fields. */
+function useFields() {
+  const [fields, setFields] = useState<FieldDef[] | null>(LIVE ? null : MOCK_FIELDS);
+  useEffect(() => {
+    if (LIVE) void api<FormView>("/api/form").then((r) => setFields(r.ok ? fromServer(r.data) : []));
+  }, []);
+  return fields;
+}
 
 type Plate = { n: number; model: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; thumb?: string | null };
 
@@ -46,7 +69,31 @@ const mins = (s: string) => {
 };
 const fmt = (m: number) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 
-/* Availability still comes from the mock printer list until printer management has a backend. */
+function plateBase(r: ParsedUpload, p: ParsedUpload["plates"][number]): Plate {
+  return {
+    n: p.index,
+    model: shortModel(r.printerModel, p.printerModelId),
+    nozzle: [...new Set(p.nozzles.map((z) => z.diameter))].join(" / "),
+    time: fmt(Math.round(p.printSeconds / 60)),
+    g: Math.round(p.weightGrams),
+    fil: p.filaments.map((f) => [f.color, f.type]),
+    st: "ok",
+    thumb: p.thumbnailUrl,
+  };
+}
+
+/* Fleet availability comes from the server. Without a compatible printer the plate can still be
+   submitted: it waits in the queue like the server's 等待兼容的打印机, so it is a warning, not a block. */
+function previewPlates(r: OrderPreview): Plate[] {
+  return r.plates.map((p) => {
+    const plate = plateBase(r, p);
+    if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
+    if (p.availability.state !== "ok") return { ...plate, st: "warn", note: p.availability.message };
+    return plate;
+  });
+}
+
+/* Prototype: availability from the mock printer list. */
 function toPlates(r: ParsedUpload): Plate[] {
   const model = r.printerModel?.replace(/^Bambu Lab\s+/, "") ?? r.plates[0]?.printerModelId ?? "未知机型";
   const fleet = PRINTERS.filter((p) => p.model === r.printerModel);
@@ -67,22 +114,13 @@ function toPlates(r: ParsedUpload): Plate[] {
   });
 }
 
-async function parseOnServer(f: File): Promise<ParsedUpload> {
+/* Prototype builds still parse real files on the server, only availability is mocked. */
+async function parseOnServer<T>(url: string, f: File): Promise<T> {
   const body = new FormData();
   body.append("file", f);
-  let res: Response;
-  try {
-    res = await fetch("/api/gcode3mf/parse", { method: "POST", body });
-  } catch {
-    throw new Error("连不上解析服务，请稍后再试。");
-  }
-  const json: unknown = await res.json().catch(() => null);
-  /* A non-JSON answer comes from a proxy in front of a server that is down. */
-  if (json === null) throw new Error(`连不上解析服务，请稍后再试（HTTP ${res.status}）。`);
-  /* The session ran out: back to sign-in, which returns here afterwards. */
-  if (res.status === 401) session.set({ st: "out" });
-  if (!res.ok) throw new Error((json as Partial<ParseErrorBody>).message || `解析失败（HTTP ${res.status}）`);
-  return json as ParsedUpload;
+  const r = await api<T>(url, { method: "POST", body });
+  if (!r.ok) throw new Error(r.error.code === "network" ? "连不上解析服务，请稍后再试。" : r.error.message || "解析失败");
+  return r.data;
 }
 
 function Step({ n, title, right, done, children }: { n: number; title: string; right?: string; done?: boolean; children: React.ReactNode }) {
@@ -100,12 +138,17 @@ function Step({ n, title, right, done, children }: { n: number; title: string; r
 
 export function SubmitPage() {
   const navigate = useNavigate();
+  const toast = useToast();
+  const FIELDS = useFields() ?? [];
+  const [upload, setUpload] = useState<File | null>(null);
+  const [queue, setQueue] = useState({ length: MOCK_QUEUE_AHEAD, aheadSeconds: 0 });
+  const [sending, setSending] = useState(false);
   const [phase, setPhase] = useState<"idle" | "parsing" | "parsed">("idle");
   const [file, setFile] = useState<{ name: string; mb: number } | null>(null);
   const [parsed, setParsed] = useState<Plate[]>([]);
   const [error, setError] = useState("");
   const [pick, setPick] = useState<Record<number, boolean>>({});
-  const [form, setForm] = useState<Record<string, string>>({});
+  const [form, setForm] = useState<Record<string, Answer>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [all, setAll] = useState(false);
   const [done, setDone] = useState<{ id: string; n: number; model: string; time: string }[] | null>(null);
@@ -130,7 +173,12 @@ export function SubmitPage() {
     setPhase("parsing");
     if (!(f instanceof File)) return void setTimeout(() => show(f.plates), 1100);
     try {
-      show(toPlates(await parseOnServer(f)));
+      if (LIVE) {
+        const r = await parseOnServer<OrderPreview>("/api/orders/preview", f);
+        setUpload(f);
+        setQueue(r.queue);
+        show(previewPlates(r));
+      } else show(toPlates(await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f)));
     } catch (e) {
       setPhase("idle");
       setFile(null);
@@ -140,6 +188,7 @@ export function SubmitPage() {
   const reset = () => {
     setPhase("idle");
     setFile(null);
+    setUpload(null);
     setError("");
     setPick({});
     setForm({});
@@ -149,9 +198,12 @@ export function SubmitPage() {
   };
 
   const fieldErr = (f: FieldDef) => {
-    const v = (form[f.id] || "").trim();
+    const a = form[f.id];
+    if (Array.isArray(a)) return f.req && !a.length ? "必填" : "";
+    const v = (a || "").trim();
     if (f.req && !v) return "必填";
-    if ("min" in f && v && v.length < f.min) return `至少 ${f.min} 个字，现在 ${v.length}`;
+    if (f.min && v && v.length < f.min) return `至少 ${f.min} 个字，现在 ${v.length}`;
+    if (f.type === "number" && v && !Number.isFinite(Number(v))) return "要填数字";
     return "";
   };
   const formOk = FIELDS.every((f) => !fieldErr(f));
@@ -163,9 +215,22 @@ export function SubmitPage() {
     [formOk && phase === "parsed", "申请信息已填写"],
   ];
 
-  const submit = () => {
+  const submit = async () => {
     if (!canSubmit) return setAll(true);
-    setDone(sel.map((p, i) => ({ id: "#" + (1048 + i), n: p.n, model: p.model, time: p.time })));
+    if (!LIVE || !upload) return setDone(sel.map((p, i) => ({ id: "#" + (1048 + i), n: p.n, model: p.model, time: p.time })));
+    const body = new FormData();
+    body.append("file", upload);
+    body.append("answers", JSON.stringify(Object.fromEntries(FIELDS.map((f) => [f.id, f.type === "number" && form[f.id] ? Number(form[f.id]) : (form[f.id] ?? "")]))));
+    body.append("plates", JSON.stringify(sel.map((p) => p.n)));
+    setSending(true);
+    const r = await api<{ orders: OrderView[] }>("/api/orders", { method: "POST", body });
+    setSending(false);
+    if (!r.ok) {
+      const issues = (r.error as { issues?: { message: string }[] }).issues;
+      return toast(issues?.length ? issues.map((i) => i.message).join("；") : r.error.message || "提交失败，请重试");
+    }
+    void live.mine.refresh();
+    setDone(r.data.orders.map((o) => ({ id: "#" + o.id, n: o.plate.index, model: shortModel(o.printerModel, o.printerModelId), time: fmtDur(o.printSeconds) })));
   };
 
   const sumDetail = (
@@ -175,7 +240,7 @@ export function SubmitPage() {
           ["将生成", phase === "parsed" ? `${sel.length} 张订单` : "—"],
           ["预计总用时", sel.length ? fmt(total) : "—"],
           ["预计总用量", sel.length ? `${grams} g` : "—"],
-          ["队列前方", `${QUEUE_AHEAD} 项`],
+          ["队列前方", `${queue.length} 项`],
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between gap-3 text-body-m">
             <dt className="text-on-variant">{k}</dt>
@@ -257,15 +322,17 @@ export function SubmitPage() {
                       <div className="max-w-[420px] text-note text-on-variant">请自行切片后导出，选好目标机型、喷嘴和耗材；文件最大 {MAX_MB} MB。多个打印板会自动拆成各自独立的订单。</div>
                       <div className="mt-1 flex flex-wrap justify-center gap-2">
                         <Button variant="tonal">选择文件</Button>
-                        <Button
-                          variant="text"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void load(SAMPLE);
-                          }}
-                        >
-                          使用示例文件
-                        </Button>
+                        {!LIVE && (
+                          <Button
+                            variant="text"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void load(SAMPLE);
+                            }}
+                          >
+                            使用示例文件
+                          </Button>
+                        )}
                       </div>
                     </div>
                     {error && (
@@ -363,19 +430,31 @@ export function SubmitPage() {
                 <Step n={3} title="申请信息" right="字段由管理员配置">
                   <div className="grid gap-4 sm:grid-cols-2">
                     {FIELDS.map((f) => {
-                      const v = form[f.id] || "";
+                      const a = form[f.id];
+                      const v = typeof a === "string" ? a : "";
                       const err = all || touched[f.id] ? fieldErr(f) : "";
-                      const set = (val: string) => setForm({ ...form, [f.id]: val });
+                      const set = (val: Answer) => setForm({ ...form, [f.id]: val });
                       const blur = () => setTouched({ ...touched, [f.id]: true });
                       return (
-                        <Field key={f.id} label={f.label} required={f.req} error={err || undefined} counter={"min" in f ? `${v.trim().length} / ${f.min}+` : undefined} className={"wide" in f ? "sm:col-span-2" : ""}>
+                        <Field key={f.id} label={f.label} required={f.req} error={err || undefined} counter={f.min ? `${v.trim().length} / ${f.min}+` : undefined} className={f.wide ? "sm:col-span-2" : ""}>
                           {(id, cls) =>
                             f.type === "select" ? (
-                              <Select id={id} className={cls} options={f.opts} placeholder="请选择" value={v} onChange={(e) => (set(e.target.value), blur())} />
+                              <Select id={id} className={cls} options={f.opts ?? []} placeholder="请选择" value={v} onChange={(e) => (set(e.target.value), blur())} />
+                            ) : f.type === "multi" ? (
+                              <div id={id} className="flex flex-wrap gap-x-5 gap-y-1">
+                                {(f.opts ?? []).map((o) => {
+                                  const cur = Array.isArray(a) ? a : [];
+                                  return (
+                                    <Checkbox key={o} checked={cur.includes(o)} onChange={(on) => (set(on ? [...cur, o] : cur.filter((x) => x !== o)), blur())}>
+                                      {o}
+                                    </Checkbox>
+                                  );
+                                })}
+                              </div>
                             ) : f.type === "textarea" ? (
                               <TextArea id={id} className={cls} placeholder={f.ph} value={v} onChange={(e) => set(e.target.value)} onBlur={blur} />
                             ) : (
-                              <TextInput id={id} className={cls} placeholder={f.ph} value={v} onChange={(e) => set(e.target.value)} onBlur={blur} />
+                              <TextInput id={id} className={cls} placeholder={f.ph} inputMode={f.type === "number" ? "decimal" : undefined} value={v} onChange={(e) => set(e.target.value)} onBlur={blur} />
                             )
                           }
                         </Field>
@@ -399,7 +478,7 @@ export function SubmitPage() {
                 </b>
                 {sel.length ? `预计 ${fmt(total)}` : "点开查看订单预览"}
               </button>
-              <Button icon="send" disabled={!canSubmit} onClick={submit} className="w-full max-sm:w-auto">
+              <Button icon="send" disabled={!canSubmit || sending} onClick={() => void submit()} className="w-full max-sm:w-auto">
                 提交审核
               </Button>
               <div className="text-body-s text-on-variant max-sm:hidden">提交后进入「待审核」，Builder 审核通过才会排队。待审核期间可以自行取消。</div>

@@ -181,6 +181,8 @@ export interface OverviewStats {
   queued: number;
   /** Queued orders no available printer can take (等待兼容的打印机 and the like). */
   waitingCompatible: number;
+  /** Items on 待办 (same count as GET /api/todo), for the navigation badge without loading the orders. */
+  todo: number;
 }
 
 /* ---- settings ---- */

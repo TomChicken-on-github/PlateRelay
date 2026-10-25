@@ -17,6 +17,17 @@ export type AdminOrder = {
   printer?: string;
   pct?: number;
   note?: string;
+  /* from the server; the mock leaves them out */
+  thumb?: string | null;
+  /** Place in the queue, queued orders only. */
+  pos?: number;
+  attributed?: boolean;
+  retried?: number;
+  /** Filled in by the detail request. */
+  answers?: [string, string][];
+  log?: [string, string][];
+  /** Owner's own order: approving it is still allowed, the server checks permissions. */
+  mine?: boolean;
 };
 
 export const ADMIN_STATUS: Record<OrderStatus, [string, "neutral" | "ok" | "err"]> = {
@@ -46,13 +57,13 @@ export const CANCEL_WHY = ["选手要求", "文件有问题", "机器故障", "�
 export const ATTRIBUTION = ["机器故障（原优先级重新排队，不扣耗材）", "模型或切片问题（折算耗材后重打）"];
 
 const USE: Record<number, [string, string]> = { 1056: ["比赛机构件，齿轮箱外壳", "Team 07"], 1055: ["展台展示用轴承盖", "Team 03"] };
-export const answers = (o: AdminOrder): [string, string][] => [
+export const answers = (o: AdminOrder): [string, string][] => o.answers ?? [
   ["打印用途", (USE[o.id] ?? ["比赛机器人结构件"])[0]],
   ["所属队伍", USE[o.id]?.[1] ?? `Team 0${(o.id % 9) + 1}`],
   ["备注", "无"],
 ];
 
-export const auditFor = (o: AdminOrder): [string, string][] => [
+export const auditFor = (o: AdminOrder): [string, string][] => o.log ?? [
   [o.at, `${o.owner} 提交订单`],
   ...(o.st !== "pending" && o.st !== "rejected" ? [[o.at, "Builder 赵乐 审核通过"] as [string, string]] : []),
   ...(o.st === "rejected" ? [[o.at, "Builder 赵乐 驳回：" + o.note] as [string, string]] : []),

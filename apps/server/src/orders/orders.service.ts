@@ -162,9 +162,13 @@ export class OrdersService {
   async overview(): Promise<OverviewStats> {
     const counts = await this.db.select({ status: orders.status, n: count() }).from(orders).where(inArray(orders.status, ["PENDING_REVIEW", "QUEUED"])).groupBy(orders.status);
     const queued = await this.db.select({ printerModel: orders.printerModel, printerModelId: orders.printerModelId, nozzles: orders.nozzles }).from(orders).where(eq(orders.status, "QUEUED"));
-    const fleet = queued.length ? await this.db.select().from(printers) : [];
+    const fleet = await this.db.select().from(printers);
+    const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE"));
+    const awaitingIds = new Set(awaiting.map((o) => o.id));
+    /* same items as GET /todo: plates to store, beds to clear with nothing to store, errors */
+    const todo = awaiting.length + fleet.filter((p) => p.state === "ERROR_PAUSED" || (p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))).length;
     const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
-    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length };
+    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo };
   }
 
   /**

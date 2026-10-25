@@ -58,7 +58,7 @@ describe("submit page API", () => {
     const [a, b] = (await submit(other).expect(201)).body.orders;
     await builder.post(`/api/orders/${a.id}/approve`).expect(200);
     const stats = (await user.get("/api/overview").expect(200)).body as OverviewStats;
-    assert.deepEqual(stats, { pendingReview: 2, queued: 1, waitingCompatible: 0 });
+    assert.deepEqual(stats, { pendingReview: 2, queued: 1, waitingCompatible: 0, todo: 0 });
     const p = await preview(user);
     assert.equal(p.queue.length, 1);
     assert.equal(p.queue.aheadSeconds, a.printSeconds);

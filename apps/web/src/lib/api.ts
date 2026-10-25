@@ -11,7 +11,8 @@ let onUnauthenticated = () => {};
 /** Called when the server says the session is gone, so the app can send the user to sign in. */
 export const setUnauthenticatedHandler = (f: () => void) => (onUnauthenticated = f);
 
-export async function api<T, E = ApiErr>(url: string, init?: Omit<RequestInit, "body"> & { json?: unknown }): Promise<Res<T, E>> {
+/** `json` sends a JSON body; a FormData `body` goes as multipart. */
+export async function api<T, E = ApiErr>(url: string, init?: RequestInit & { json?: unknown }): Promise<Res<T, E>> {
   const { json, ...rest } = init ?? {};
   try {
     const r = await fetch(url, {
