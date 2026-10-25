@@ -135,20 +135,20 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
               <Row icon="chamber">{p.chamber ? temp(p.chamber[0], p.chamber[1]) : "— / —"}</Row>
               <Row icon="layers">{p.layer ? `${p.layer[0]} / ${p.layer[1]}` : "— / —"}</Row>
             </div>
-            <div className="flex flex-col justify-center gap-1.5 px-0.5 @max-[420px]:justify-start">
+            <div className="flex flex-col justify-center gap-1.5 px-0.5 @max-[420px]:justify-start @max-[420px]:px-0">
               {loaded.length ? (
                 loaded.slice(0, 4).map((x) => (
                   <div
                     key={x.label}
                     title={`${x.label} ${x.m}${x.r != null && x.r >= 0 ? " · 余 " + x.r + "%" : ""}`}
-                    className="flex h-5 items-center gap-1 whitespace-nowrap px-0.5 text-label-s font-medium text-strong"
+                    className="flex h-5 items-center gap-1 whitespace-nowrap px-0.5 text-label-s @max-[420px]:px-0 font-medium text-strong"
                   >
                     <Ring slot={x} />
                     <span className="min-w-[15px] whitespace-nowrap">{x.label}</span>
-                    <span className="relative min-w-8 @max-[420px]:min-w-0">
+                    <span className="relative">
                       {x.m}
-                      {/* out of flow so the active dot never widens the column that gets centred */}
-                      {x.active && <span className="absolute top-1.5 left-[calc(100%+4px)] size-1 rounded-full bg-active-dot" />}
+                      {/* out of flow so it never widens the column that gets centred; still 4px past a 32px type slot, as before */}
+                      {x.active && <span className="absolute top-1.5 left-[calc(max(100%,32px)+4px)] size-1 rounded-full bg-active-dot" />}
                     </span>
                   </div>
                 ))
