@@ -35,7 +35,7 @@ pnpm dev:server          # 在仓库根执行，监听 :3000，前端 vite 把 /
 pnpm --filter @platerelay/server user:create -- --username admin --name 管理员 --role coreteam
 ```
 
-之后选手可以在登录页自行注册（得到 User 角色）；角色修改接口要求 `user:manage`。系统设置中除审计以外的页面仍使用前端原型数据，不代表后端已保存。
+之后选手可以在登录页自行注册（得到 User 角色）；角色修改接口要求 `user:manage`。前端默认用原型数据；`VITE_API=http` 构建时各页面走这里的接口。系统设置里的「文件与排队」「通知」还没有后端，页面上会注明。
 
 ## 测试
 
