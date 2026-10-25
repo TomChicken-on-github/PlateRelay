@@ -182,7 +182,7 @@ describe("panel API", () => {
 
       await other.post(`/api/orders/${id}/pickup-code`).expect(404);
       const first = (await user.post(`/api/orders/${id}/pickup-code`).expect(200)).body;
-      assert.match(first.code, /^PR1-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+      assert.match(first.code, /^PR1-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
       const second = (await user.post(`/api/orders/${id}/pickup-code`).expect(200)).body;
       assert.equal((await staff.get(`/api/pickup/${first.code}`).expect(404)).body.code, "pickup-code-invalid");
       await user.get(`/api/pickup/${second.code}`).expect(403);

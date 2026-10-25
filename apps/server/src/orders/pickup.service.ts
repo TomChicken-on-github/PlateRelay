@@ -13,20 +13,23 @@ import { loadPeople, THUMB_TTL_S } from "./views.js";
 /** A code is good for ten minutes, so a screenshot passed to someone else soon stops working. */
 export const PICKUP_TTL_MS = 10 * 60 * 1000;
 
-/* Crockford base32: no I, L, O, U. */
-const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/* 31 characters: digits and letters without 0, O, 1, I and L, so nothing on the code can be misread. */
+export const PICKUP_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 
-/** "pr1-7k3q 92ab", "7K3Q92AB" … → "7K3Q92AB"; null when it cannot be a code. */
+/**
+ * "pr1-7k3q 92ab", "7K3Q92AB" … → "7K3Q92AB"; null when it cannot be a code.
+ * No look-alike mapping: a code never contains 0/O/1/I/L, so one that does is invalid.
+ * The PR1 prefix cannot clash with a code because codes have no 1.
+ */
 export function normalizeCode(input: string): string | null {
   let s = input.toUpperCase().replace(/[^0-9A-Z]/g, "");
-  if (s.length === 11 && s.startsWith("PR1")) s = s.slice(3);
-  s = s.replace(/O/g, "0").replace(/[IL]/g, "1");
-  return s.length === 8 && [...s].every((c) => ALPHABET.includes(c)) ? s : null;
+  if (s.length > 8 && s.startsWith("PR1")) s = s.slice(3);
+  return s.length === 8 && [...s].every((c) => PICKUP_ALPHABET.includes(c)) ? s : null;
 }
 
 export const formatCode = (c: string) => `PR1-${c.slice(0, 4)}-${c.slice(4)}`;
 
-const newCode = () => Array.from({ length: 8 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
+const newCode = () => Array.from({ length: 8 }, () => PICKUP_ALPHABET[randomInt(PICKUP_ALPHABET.length)]).join("");
 
 @Injectable()
 export class PickupService {
@@ -46,7 +49,7 @@ export class PickupService {
       await tx.update(pickupCodes).set({ revokedAt: now }).where(and(eq(pickupCodes.orderId, orderId), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt)));
       const expiresAt = new Date(now.getTime() + PICKUP_TTL_MS);
       let code = newCode();
-      /* 32^8 codes; a clash is practically impossible but cheap to rule out */
+      /* 31^8 codes; a clash is practically impossible but cheap to rule out */
       while ((await tx.select({ id: pickupCodes.id }).from(pickupCodes).where(eq(pickupCodes.code, code))).length) code = newCode();
       await tx.insert(pickupCodes).values({ code, orderId, issuedAt: now, expiresAt });
       await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, after: { expiresAt: expiresAt.toISOString() } }, tx);
