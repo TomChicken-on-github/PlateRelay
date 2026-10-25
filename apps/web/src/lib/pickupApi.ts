@@ -9,8 +9,9 @@ import { ME as SESSION } from "../mock/session";
  *   GET  /api/pickup/:code               look up, no state change (order:redeem, Staff+)
  *   POST /api/pickup/:code/redeem        STORED_READY_PICKUP -> COMPLETED, audit logged, re-checks expiry
  *   GET  /api/pickup/redemptions?since=  redemptions since an ISO time
- * Errors are {code, message, ...}. Codes are PR1-XXXX-XXXX, 8 Crockford base32 chars, case-insensitive;
- * the QR payload is the full "PR1-XXXX-XXXX", people type the XXXX-XXXX part.
+ * Errors are {code, message, ...}. Codes are PR1-XXXX-XXXX: 8 chars from CODE_CHARS, which leaves out
+ * 0/O/1/I/L so nothing on screen can be misread (user decision, 2026-10-25); case-insensitive.
+ * The QR payload is the full "PR1-XXXX-XXXX", people type the XXXX-XXXX part.
  *
  * Pages talk to `pickupApi`: the mock store, or the real endpoints when built with VITE_API=http.
  */
@@ -47,11 +48,13 @@ export interface PickupApi {
   redemptions(since: string): Promise<Redemption[]>;
 }
 
-/** Bare 8-char code: uppercase, drop non-alphanumerics and a "PR1" prefix, read O as 0 and I/L as 1. */
+const CODE_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/** Bare 8-char code: uppercase, drop non-alphanumerics and a "PR1" prefix (a code itself never holds a 1). */
 export function bareCode(s: string) {
   let v = s.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (v.length > 8 && v.startsWith("PR1")) v = v.slice(3);
-  return v.slice(0, 8).replace(/O/g, "0").replace(/[IL]/g, "1");
+  return v.slice(0, 8);
 }
 
 /** What people type and read: "XXXX-XXXX" (partial input keeps its dash once past four characters). */
@@ -83,15 +86,15 @@ const httpApi: PickupApi = {
 
 const ME = SESSION.name;
 const TTL = 10 * 60e3;
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const mockApi: PickupApi = {
   async issue(orderId) {
     const o = pickupOrders.get()[orderId];
     if (!o) return { ok: false, error: { code: "network", message: "没有这个订单" } };
     if (o.status !== "STORED_READY_PICKUP") return { ok: false, error: { code: "order-not-ready", orderId, status: o.status } };
-    const rnd = crypto.getRandomValues(new Uint8Array(8));
-    const code = Array.from(rnd, (b) => CROCKFORD[b & 31]).join("");
+    let code = "";
+    /* bytes 248-255 are dropped so every character is equally likely */
+    while (code.length < 8) for (const b of crypto.getRandomValues(new Uint8Array(8))) if (b < 248 && code.length < 8) code += CODE_CHARS[b % 31];
     const expiresAt = new Date(Date.now() + TTL).toISOString();
     pickupCodes.set((s) => ({ ...s, [code]: { orderId, expiresAt } }));
     liveCode.set((s) => ({ ...s, [orderId]: code }));
