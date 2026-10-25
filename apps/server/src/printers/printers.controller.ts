@@ -5,14 +5,19 @@ import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, ReqCtx, RequirePerm } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
 import { parse } from "../common/zod.js";
+import { DaemonsService } from "../daemons/daemons.service.js";
 import { PrintersService } from "./printers.service.js";
 
-/* No access code here: it goes to the daemon, never to the panel (brief §5.1). */
+/*
+ * The access code only arrives encrypted with the daemon's public key (brief §0.9 #10); the panel stores
+ * the ciphertext and cannot read it. null removes the stored code.
+ */
 const Printer = z.object({
   name: z.string().trim().min(1).max(40),
   ip: z.string().trim().refine((s) => isIP(s) !== 0, "IP 地址格式不对"),
   serial: z.string().trim().regex(/^[A-Za-z0-9]{6,32}$/, "序列号格式不对"),
   daemonId: z.uuid().nullish(),
+  accessCode: z.object({ keyId: z.string().regex(/^[0-9a-f]{16}$/), ciphertext: z.string().min(1).max(2048) }).nullish(),
 });
 const Maintenance = z.object({ on: z.boolean(), reason: z.string().trim().max(200).nullish() }).refine((b) => !b.on || !!b.reason, "下线维护要填原因");
 const Resolve = z.object({ action: z.string().regex(/^[A-Z_]{2,40}$/), reason: z.string().trim().max(500).nullish() });
@@ -22,7 +27,18 @@ const Id = new ParseUUIDPipe();
 
 @Controller()
 export class PrintersController {
-  constructor(private readonly printers: PrintersService, private readonly audit: AuditService) {}
+  constructor(
+    private readonly printers: PrintersService,
+    private readonly daemons: DaemonsService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Daemons to put a printer under, with the public key the browser encrypts the access code with. */
+  @Get("daemon-keys")
+  @RequirePerm("printer:manage")
+  daemonKeys() {
+    return this.daemons.keys();
+  }
 
   @Get("printers")
   @RequirePerm("overview:view")

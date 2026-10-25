@@ -1,7 +1,10 @@
+import type { AccessCodeState } from "@platerelay/shared";
 import { createStore } from "../lib/store";
 
 export type FleetStatus = "printing" | "idle" | "clear" | "error" | "maint" | "offline";
-export type FleetPrinter = { id: string; /** display name when it differs from id (server rows use UUID ids) */ name?: string; model: string; ip: string; sn: string; nozzle: string; st: FleetStatus; job: string; why?: string };
+export type FleetPrinter = { id: string; /** display name when it differs from id (server rows use UUID ids) */ name?: string; model: string; ip: string; sn: string; nozzle: string; st: FleetStatus; job: string; why?: string;
+  /** Server rows only: the daemon it is under and whether an access code is stored. */
+  daemonId?: string | null; code?: AccessCodeState | null };
 
 export const FLEET_STATUS: Record<FleetStatus, [string, "neutral" | "ok" | "err" | "warn"]> = {
   printing: ["打印中", "ok"], idle: ["空闲", "ok"], clear: ["待清台", "neutral"], error: ["需要处理", "err"], maint: ["维护中", "warn"], offline: ["离线", "neutral"],

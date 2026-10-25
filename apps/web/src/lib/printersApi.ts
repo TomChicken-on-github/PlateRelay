@@ -1,4 +1,4 @@
-import type { PrinterView } from "@platerelay/shared";
+import { type DaemonKeyView, type EncryptedAccessCode, encryptAccessCode, type PrinterView } from "@platerelay/shared";
 import { FLEET_STATUS, type FleetPrinter, type FleetStatus, fleet } from "../mock/fleet";
 import { detailFor, type Printer, type PrinterDetail, PRINTERS, starStore } from "../mock/printers";
 import { LIVE, type Res, api } from "./api";
@@ -66,6 +66,8 @@ export function toFleet(v: PrinterView): FleetPrinter {
     st,
     job: v.job ? `#${v.job.orderId} ${v.job.fileName.replace(/\.gcode\.3mf$/i, "")}` : st === "maint" ? (v.maintenanceReason ?? "维护中") : st === "offline" ? (v.lastSeenAt ? "连接断开" : "daemon 尚未连接") : "—",
     why: v.maintenanceReason ?? undefined,
+    daemonId: v.daemonId,
+    code: v.accessCode,
   };
 }
 
@@ -90,6 +92,33 @@ export function useFleet(): Rows<FleetPrinter> {
 
 export { FLEET_STATUS };
 
+/* Daemons to put a printer under and the public key its access code is encrypted with; loaded with the form. */
+const daemonKeys = resource(() => api<DaemonKeyView[]>("/api/daemon-keys"));
+export function useDaemonKeys(): Rows<DaemonKeyView> {
+  const s = LIVE ? daemonKeys.use() : null;
+  return s ? { rows: s.data ?? [], loading: s.loading && !s.data, error: s.error } : { rows: [], loading: false, error: null };
+}
+export const refreshDaemonKeys = () => daemonKeys.refresh();
+
+/** Web Crypto only exists on HTTPS pages and localhost. */
+export const canEncrypt = () => typeof window !== "undefined" && window.isSecureContext && !!window.crypto?.subtle;
+
+/**
+ * Encrypts the code in this browser with the daemon's public key. The panel gets only the ciphertext
+ * and cannot read it (brief §0.9 #10); the serial is inside so the daemon refuses it for another printer.
+ */
+export async function sealAccessCode(d: DaemonKeyView, serial: string, code: string): Promise<Res<EncryptedAccessCode>> {
+  if (!canEncrypt()) return { ok: false, error: { code: "insecure-context", message: "当前页面不是 HTTPS 或 localhost，浏览器不能加密访问码" } };
+  if (!d.keyId || !d.publicKey) return { ok: false, error: { code: "no-key", message: "这个 daemon 还没连上面板，连上后才能设置访问码" } };
+  try {
+    return { ok: true, data: await encryptAccessCode({ keyId: d.keyId, publicKey: d.publicKey }, serial, code) };
+  } catch {
+    return { ok: false, error: { code: "encrypt-failed", message: "访问码加密失败，请刷新页面后重试" } };
+  }
+}
+
+export type PrinterInput = { name?: string; ip?: string; serial?: string; daemonId?: string | null; accessCode?: EncryptedAccessCode | null };
+
 type Done = Res<null>;
 const ok: Done = { ok: true, data: null };
 const refreshed = async <T,>(r: Res<T>): Promise<Res<T>> => (await printersLive.refresh(), r);
@@ -100,12 +129,12 @@ export const printersApi = {
     return refreshed(await api<null>(`/api/printers/${id}/star`, { method: "POST", json: { starred } }));
   },
 
-  async create(input: { name: string; ip: string; serial: string }): Promise<Done> {
+  async create(input: PrinterInput): Promise<Done> {
     if (!LIVE) return ok;
     return refreshed(await api<null>("/api/printers", { method: "POST", json: input }));
   },
 
-  async update(id: string, input: { name?: string; ip?: string; serial?: string }): Promise<Done> {
+  async update(id: string, input: PrinterInput): Promise<Done> {
     if (!LIVE) return ok;
     return refreshed(await api<null>(`/api/printers/${id}`, { method: "PATCH", json: input }));
   },

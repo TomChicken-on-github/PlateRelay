@@ -119,6 +119,13 @@ export const daemons = pgTable("daemons", {
   createdBy: uuid("created_by").references(() => users.id),
   createdAt: createdAt(),
   lastSeenAt: ts("last_seen_at"),
+  /**
+   * The daemon's RSA public key (SPKI DER, base64) that browsers encrypt printer access codes with.
+   * The daemon makes the key pair and reports the public half; a new key makes stored codes unreadable.
+   */
+  publicKey: text("public_key"),
+  keyId: text("key_id"),
+  keySetAt: ts("key_set_at"),
 });
 
 /* ---- printers ---- */
@@ -144,6 +151,14 @@ export const printers = pgTable("printers", {
   starred: boolean("starred").notNull().default(false),
   lastSeenAt: ts("last_seen_at"),
   createdAt: createdAt(),
+  /**
+   * Access code encrypted in the browser with the daemon's public key (RSA-OAEP, base64). The panel
+   * cannot read it and never sends it back to a browser; only the daemon holding the key can.
+   */
+  accessCodeCipher: text("access_code_cipher"),
+  accessCodeKeyId: text("access_code_key_id"),
+  accessCodeSetAt: ts("access_code_set_at"),
+  accessCodeDeliveredAt: ts("access_code_delivered_at"),
 });
 
 /* ---- request form ---- */

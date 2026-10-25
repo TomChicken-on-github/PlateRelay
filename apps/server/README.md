@@ -75,7 +75,7 @@ pnpm --filter @platerelay/server test
 | 扫码取件 | `GET /pickup/:code`、`POST /pickup/:code/redeem`、`GET /pickup/redemptions?since=` |
 | 审核队列 | `GET /review`、`POST /orders/:id/approve`、`POST /orders/:id/reject` |
 | 订单管理 | `GET /orders?status=&q=&limit=&offset=`、`GET /orders/:id/file`、`POST /orders/:id/attribute`、`POST /queue/reorder` |
-| 打印机管理 | `POST /printers`、`PATCH /printers/:id`、`DELETE /printers/:id`、`POST /printers/:id/maintenance`、`POST /printers/:id/star` |
+| 打印机管理 | `GET /daemon-keys`（可选的 daemon 及其公钥）、`POST /printers`、`PATCH /printers/:id`（`accessCode: {keyId, ciphertext}` 为浏览器加密后的访问码，`null` 清除）、`DELETE /printers/:id`、`POST /printers/:id/maintenance`、`POST /printers/:id/star` |
 | 系统设置 | `GET/PUT /form`、`GET /users`、`GET /roles`、`PUT /users/:id/role`、`PUT /users/:id/disabled`、`GET/POST /daemons`、`PATCH/DELETE /daemons/:id`、`GET /settings`、`PUT /settings/registration`、`GET /audit` |
 
 ### 审计日志
@@ -96,5 +96,6 @@ pnpm --filter @platerelay/server test
 
 ## 还没做
 
+- 打印机访问码（简报 §0.9 第 10 条）：面板只存浏览器用 daemon 公钥加密的密文，接口只返回 `accessCode: {setAt, delivered, current}`，不返回密文；审计只记"已设置/已清除"。给 daemon 用的三步已写好但还没接到连接上：`DaemonsService.setPublicKey`（上报公钥）、`PrintersService.accessCodesFor`（拉取能解开的密文）、`PrintersService.markAccessCodeDelivered`（回报送达）。迁移 `0003_access_code_keys` 加了对应的列。
 - daemon 连接（WebSocket）。现在 `PrinterCommands` 的实现是"连不上任何打印机"，所以不会派单，也不会向真实打印机发任何命令；打印机状态上报的入口（`PrintersService.onStarted` 等）已写好，只在测试里调用。
 - 实时推送（SSE）、通知（邮件 / 飞书）、OIDC 登录、头像。
