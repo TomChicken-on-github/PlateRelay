@@ -30,14 +30,14 @@ export const liveCode = createStore<Record<number, string>>({});
  * 我的订单 live only in that browser tab, so a phone cannot scan them from another device.
  */
 const soon = new Date(Date.now() + 24 * 3600e3).toISOString();
-export const DEMO_CODES = { ok: "DEM0-0K44", expired: "DEM0-EXP1", redeemed: "DEM0-D0NE", notReady: "DEM0-PR1N" };
+export const DEMO_CODES = { ok: "DEMA-REDY", expired: "DEMA-EXPD", redeemed: "DEMA-USED", notReady: "DEMA-PRNT" };
 pickupCodes.set({
-  DEM00K44: { orderId: 1044, expiresAt: soon },
-  DEM0EXP1: { orderId: 1043, expiresAt: "2026-10-24T08:00:00+08:00" },
-  DEM0D0NE: { orderId: 1041, expiresAt: soon },
-  DEM0PR1N: { orderId: 1048, expiresAt: soon },
+  DEMAREDY: { orderId: 1044, expiresAt: soon },
+  DEMAEXPD: { orderId: 1043, expiresAt: "2026-10-24T08:00:00+08:00" },
+  DEMAUSED: { orderId: 1041, expiresAt: soon },
+  DEMAPRNT: { orderId: 1048, expiresAt: soon },
 });
-liveCode.set({ 1044: "DEM00K44", 1043: "DEM0EXP1", 1041: "DEM0D0NE", 1048: "DEM0PR1N" });
+liveCode.set({ 1044: "DEMAREDY", 1043: "DEMAEXPD", 1041: "DEMAUSED", 1048: "DEMAPRNT" });
 
 export const redeemed = createStore([
   { orderId: 1041, fileName: "电机固定板.gcode.3mf", owner: { name: "周浩然" }, redeemedAt: "2026-10-24T09:41:00+08:00" },

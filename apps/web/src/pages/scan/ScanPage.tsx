@@ -8,7 +8,7 @@ import { ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
 import { t } from "../../lib/motion";
-import { type PickupError, type PickupOrder, type Redemption, codeFromScan, pickupApi, showCode } from "../../lib/pickupApi";
+import { type PickupError, type PickupOrder, type Redemption, codeFromScan, hasForeignChars, pickupApi, showCode } from "../../lib/pickupApi";
 import { type CamState, useQrScanner } from "../../lib/useQrScanner";
 
 type Result = { k: "bad"; t: string; s: string } | { k: "ok" | "done"; code: string; o: PickupOrder } | null;
@@ -245,7 +245,8 @@ export function ScanPage() {
             autoComplete="off"
             onSubmit={(e) => {
               e.preventDefault();
-              if (code.length === 9) lookup(code);
+              if (hasForeignChars(code)) setRes({ k: "bad", t: "取件码里没有 0、O、1、I、L", s: "请对照对方手机上的取件码重新输入。" });
+              else if (code.length === 9) lookup(code);
               else if (code) setRes({ k: "bad", t: "取件码不完整", s: "取件码是 8 位字母和数字，如 7K3Q-92XM。" });
             }}
           >
