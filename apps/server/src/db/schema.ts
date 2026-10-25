@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { uuidv7 } from "../common/uuid.js";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 const createdAt = () => ts("created_at").notNull().defaultNow();
@@ -41,7 +42,7 @@ export const roles = pgTable("roles", {
 export const users = pgTable(
   "users",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
     username: text("username").notNull(),
     displayName: text("display_name").notNull(),
     /** null for accounts that only sign in through an external provider. */
@@ -69,7 +70,7 @@ export const userRoles = pgTable(
 export const externalIdentities = pgTable(
   "external_identities",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     issuer: text("issuer").notNull(),
     subject: text("subject").notNull(),
@@ -94,7 +95,7 @@ export const sessions = pgTable(
 
 /** Daemon connection tokens. Shown once; only the hash and the last four characters are kept. */
 export const daemons = pgTable("daemons", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: uuid("id").primaryKey().$defaultFn(uuidv7),
   name: text("name").notNull(),
   network: text("network"),
   tokenHash: text("token_hash").notNull().unique(),
@@ -131,7 +132,7 @@ export interface PrinterError {
 }
 
 export const printers = pgTable("printers", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: uuid("id").primaryKey().$defaultFn(uuidv7),
   name: text("name").notNull().unique(),
   serial: text("serial").notNull().unique(),
   ip: text("ip").notNull(),
@@ -179,7 +180,7 @@ export const formVersions = pgTable("form_versions", {
 export const orderQueueSeq = pgSequence("order_queue_seq");
 
 export const files = pgTable("files", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: uuid("id").primaryKey().$defaultFn(uuidv7),
   sha256: text("sha256").notNull(),
   key: text("key").notNull(),
   fileName: text("file_name").notNull(),
@@ -268,7 +269,7 @@ export const orders = pgTable(
 export const pickupCodes = pgTable(
   "pickup_codes",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: uuid("id").primaryKey().$defaultFn(uuidv7),
     /** Normalized, without the PR1 prefix or dashes. */
     code: text("code").notNull(),
     orderId: integer("order_id").notNull().references(() => orders.id),

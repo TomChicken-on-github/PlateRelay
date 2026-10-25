@@ -64,7 +64,8 @@ let n = 0;
 
 export async function startApp(): Promise<TestApp> {
   const dataDir = await mkdtemp(join(tmpdir(), "platerelay-test-"));
-  const handle = await openDb("memory");
+  /* PLATERELAY_TEST_DATABASE_URL runs the suite against a real, empty PostgreSQL database instead of in-memory PGlite. */
+  const handle = await openDb(process.env.PLATERELAY_TEST_DATABASE_URL || "memory");
   const commands = new FakeCommands();
   const mod = await Test.createTestingModule({
     imports: [AppModule.forRoot({ databaseUrl: null, dataDir, secret: Buffer.from("test-secret"), secureCookies: false, storage: { kind: "local" } }, handle)],

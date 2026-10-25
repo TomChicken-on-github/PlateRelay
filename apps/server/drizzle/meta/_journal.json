@@ -15,6 +15,13 @@
       "when": 1792856793008,
       "tag": "0001_audit_append_only_and_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792894783928,
+      "tag": "0002_uuid_v7_in_app",
+      "breakpoints": true
     }
   ]
 }

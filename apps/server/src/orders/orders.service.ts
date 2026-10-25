@@ -6,6 +6,7 @@ import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import { sha256 } from "../auth/tokens.js";
 import { ApiError, notFound } from "../common/errors.js";
+import { uuidv7 } from "../common/uuid.js";
 import { DB, type Db } from "../db/db.js";
 import { files, orderEvents, orders, pickupCodes, printers } from "../db/schema.js";
 import { FormsService } from "../forms/forms.service.js";
@@ -143,7 +144,7 @@ export class OrdersService {
     const info = this.gcode3mf.read(fileName, data);
     const form = await this.forms.current();
     const answers = this.forms.answer(form, rawAnswers);
-    const fileId = randomUUID();
+    const fileId = uuidv7();
     const fileKey = `uploads/${fileId}.gcode.3mf`;
     const written: string[] = [];
     try {

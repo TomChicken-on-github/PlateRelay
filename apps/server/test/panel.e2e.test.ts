@@ -49,6 +49,7 @@ describe("panel API", () => {
       const a = request.agent(t.app.getHttpServer());
       const me = await a.post("/api/auth/register").send({ username: "newbie", displayName: "新人", password: "longpassword" }).expect(201);
       assert.equal(me.body.role.name, "User");
+      assert.match(me.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-7/, "ids are UUID v7");
       assert.deepEqual(me.body.permissions, [...PRESET_ROLES.user.permissions].sort());
       await a.post("/api/auth/register").send({ username: "NEWBIE", displayName: "x", password: "longpassword" }).expect(409);
       await request(t.app.getHttpServer()).post("/api/auth/login").send({ username: "newbie", password: "wrong" }).expect(401);
