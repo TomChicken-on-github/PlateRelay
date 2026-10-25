@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
@@ -34,10 +34,27 @@ export async function openDb(url: string): Promise<DbHandle> {
   const { PGlite } = await import("@electric-sql/pglite");
   const { drizzle } = await import("drizzle-orm/pglite");
   const { migrate } = await import("drizzle-orm/pglite/migrator");
-  if (url !== "memory") new Logger("Db").warn(`DATABASE_URL is not set: using the embedded development database in ${url}`);
+  const logger = new Logger("Db");
+  if (url !== "memory") logger.warn(`DATABASE_URL is not set: using the embedded development database in ${url}`);
   if (url !== "memory") await mkdir(url, { recursive: true });
-  const client = url === "memory" ? new PGlite() : new PGlite(url);
-  const db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: MIGRATIONS });
-  return { db: db as unknown as Db, close: () => client.close() };
+
+  const init = async (targetPath: string) => {
+    const client = targetPath === "memory" ? new PGlite() : new PGlite(targetPath);
+    const db = drizzle(client, { schema });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    return { db: db as unknown as Db, close: () => client.close() };
+  };
+
+  try {
+    return await init(url);
+  } catch (err) {
+    // If an embedded disk database was corrupted by an unclean shutdown or killed process (WAL panic abort), recreate it cleanly.
+    const isWasmAbort = err instanceof Error && (/aborted/i.test(err.message) || (err.cause instanceof Error && /aborted/i.test(err.cause.message)));
+    if (url === "memory" || !isWasmAbort) throw err;
+
+    logger.error(`Embedded development database at ${url} was corrupted by an unclean shutdown. Resetting...`);
+    await rm(url, { recursive: true, force: true });
+    await mkdir(url, { recursive: true });
+    return await init(url);
+  }
 }
