@@ -21,7 +21,7 @@ pnpm dev:web
 
 打开终端输出的地址，默认是 http://localhost:5173/。按 `Ctrl+C` 停止。
 
-目前只有前端原型，使用本地模拟数据，不需要启动后端或 daemon，也不会连接打印机。
+默认运行前端原型，使用本地模拟数据，不需要启动后端或 daemon，也不会连接打印机。设置 `VITE_API=http` 后，已接通的页面（包括审计日志）改用后端；后端启动与接口说明见 [apps/server/README.md](apps/server/README.md)。审计以外的设置页面仍是模拟操作，不会持久化到后端。
 
 ### 环境要求
 

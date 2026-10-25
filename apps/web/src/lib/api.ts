@@ -1,6 +1,6 @@
 /*
  * Panel API client. The pages run on mock stores until built with VITE_API=http; then sign-in and the
- * pages wired so far (pickup) talk to apps/server. Errors from the server are {code, message, ...}.
+ * pages wired so far (including audit) talk to apps/server. Errors from the server are {code, message, ...}.
  */
 export const LIVE = import.meta.env.VITE_API === "http";
 

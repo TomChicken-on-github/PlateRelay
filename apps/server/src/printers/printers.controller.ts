@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from "@nestjs/common";
 import { isIP } from "node:net";
 import { z } from "zod";
+import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, ReqCtx, RequirePerm } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
 import { parse } from "../common/zod.js";
@@ -21,7 +22,7 @@ const Id = new ParseUUIDPipe();
 
 @Controller()
 export class PrintersController {
-  constructor(private readonly printers: PrintersService) {}
+  constructor(private readonly printers: PrintersService, private readonly audit: AuditService) {}
 
   @Get("printers")
   @RequirePerm("overview:view")
@@ -73,10 +74,11 @@ export class PrintersController {
   @Post("printers/:id/resolve")
   @HttpCode(200)
   @RequirePerm("printer:operate", "printer:stop")
-  resolve(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string, @Body() body: unknown) {
+  async resolve(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string, @Body() body: unknown) {
     const b = parse(Resolve, body);
     const need = b.action === "STOP" ? "printer:stop" : "printer:operate";
     if (ctx.actor.type !== "user" || !ctx.actor.permissions.has(need)) {
+      await this.audit.record(ctx, { action: b.action === "STOP" ? "printer.stop" : "printer.error.resolve", targetType: "printer", targetId: id, after: { action: b.action }, result: "denied", reason: "missing-permission" });
       throw new ApiError(HttpStatus.FORBIDDEN, "forbidden", "没有权限执行这个操作");
     }
     return this.printers.resolve(ctx, id, b.action, b.reason ?? null);

@@ -60,7 +60,13 @@ const PAGE_PERMS: [prefix: string, perms: string[]][] = [
   ["/review", ["order:review"]],
   ["/manage/orders", ["order:view:any"]],
   ["/manage/printers", ["printer:manage"]],
-  ["/settings", ["settings:manage", "form:configure", "user:manage", "daemon:manage"]],
+  ["/settings/form", ["form:configure"]],
+  ["/settings/users", ["user:manage"]],
+  ["/settings/policy", ["settings:manage"]],
+  ["/settings/notify", ["settings:manage"]],
+  ["/settings/daemon", ["daemon:manage"]],
+  ["/settings/audit", ["audit:view"]],
+  ["/settings", ["settings:manage", "form:configure", "user:manage", "daemon:manage", "audit:view"]],
 ];
 
 /** Mock accounts carry no permission list and can open everything. */

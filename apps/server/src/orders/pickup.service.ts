@@ -41,20 +41,30 @@ export class PickupService {
 
   /** Issued to the order's owner on demand; a new code revokes the previous one at once. */
   async issue(ctx: Ctx, orderId: number): Promise<{ code: string; expiresAt: string }> {
-    return this.db.transaction(async (tx) => {
-      const [o] = await tx.select({ ownerId: orders.ownerId, status: orders.status }).from(orders).where(eq(orders.id, orderId)).for("update");
-      if (!o || o.ownerId !== userId(ctx)) throw notFound("订单");
-      if (o.status !== "STORED_READY_PICKUP") throw new ApiError(HttpStatus.CONFLICT, "order-not-ready", "订单还不能取件", { orderId, status: o.status });
-      const now = new Date();
-      await tx.update(pickupCodes).set({ revokedAt: now }).where(and(eq(pickupCodes.orderId, orderId), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt)));
-      const expiresAt = new Date(now.getTime() + PICKUP_TTL_MS);
-      let code = newCode();
-      /* 31^8 codes; a clash is practically impossible but cheap to rule out */
-      while ((await tx.select({ id: pickupCodes.id }).from(pickupCodes).where(eq(pickupCodes.code, code))).length) code = newCode();
-      await tx.insert(pickupCodes).values({ code, orderId, issuedAt: now, expiresAt });
-      await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, after: { expiresAt: expiresAt.toISOString() } }, tx);
-      return { code: formatCode(code), expiresAt: expiresAt.toISOString() };
-    });
+    let notOwner = false;
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [o] = await tx.select({ ownerId: orders.ownerId, status: orders.status }).from(orders).where(eq(orders.id, orderId)).for("update");
+        if (!o) throw notFound("订单");
+        if (o.ownerId !== userId(ctx)) {
+          notOwner = true;
+          throw notFound("订单");
+        }
+        if (o.status !== "STORED_READY_PICKUP") throw new ApiError(HttpStatus.CONFLICT, "order-not-ready", "订单还不能取件", { orderId, status: o.status });
+        const now = new Date();
+        await tx.update(pickupCodes).set({ revokedAt: now }).where(and(eq(pickupCodes.orderId, orderId), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt)));
+        const expiresAt = new Date(now.getTime() + PICKUP_TTL_MS);
+        let code = newCode();
+        /* 31^8 codes; a clash is practically impossible but cheap to rule out */
+        while ((await tx.select({ id: pickupCodes.id }).from(pickupCodes).where(eq(pickupCodes.code, code))).length) code = newCode();
+        await tx.insert(pickupCodes).values({ code, orderId, issuedAt: now, expiresAt });
+        await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, after: { expiresAt: expiresAt.toISOString() } }, tx);
+        return { code: formatCode(code), expiresAt: expiresAt.toISOString() };
+      });
+    } catch (e) {
+      if (notOwner) await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, result: "denied", reason: "not-owner" });
+      throw e;
+    }
   }
 
   /**
@@ -84,12 +94,12 @@ export class PickupService {
     return { pc, o };
   }
 
-  async lookup(raw: string) {
+  async lookup(ctx: Ctx, raw: string) {
     const { o } = await this.check(this.db, raw, false);
     const [f] = await this.db.select({ name: files.fileName }).from(files).where(eq(files.id, o.fileId));
     const people = await loadPeople(this.db, [o.ownerId]);
     const owner = people.get(o.ownerId)!;
-    return {
+    const view = {
       orderId: o.id,
       fileName: f.name,
       plateIndex: o.plateIndex,
@@ -102,6 +112,8 @@ export class PickupService {
       storedAt: o.storedAt?.toISOString() ?? null,
       thumbUrl: o.thumbnailKey ? await this.storage.signedUrl(o.thumbnailKey, THUMB_TTL_S) : null,
     };
+    if (o.ownerId !== userId(ctx) && view.thumbUrl) await this.audit.record(ctx, { action: "order.preview.view", targetType: "order", targetId: o.id });
+    return view;
   }
 
   async redeem(ctx: Ctx, raw: string) {

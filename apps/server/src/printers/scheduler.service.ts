@@ -63,6 +63,7 @@ export class SchedulerService {
         const p = await lockPrinter(tx, printerId);
         await transition(tx, SYSTEM, picked.order.id, "requeue", { set: { printerId: null, startedAt: null }, data: { why: "send-failed" } });
         if (p.currentOrderId === picked.order.id) await movePrinter(tx, p, "prepareFailed", { currentOrderId: null });
+        await this.audit.record(SYSTEM, { action: "order.dispatch.failed", targetType: "order", targetId: picked.order.id, before: { status: "PRINTING", printerId }, after: { status: "QUEUED", printerId: null }, result: "failed", reason: "send-failed" }, tx);
       });
       return null;
     }

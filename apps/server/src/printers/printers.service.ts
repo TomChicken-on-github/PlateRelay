@@ -156,9 +156,12 @@ export class PrintersService {
   }
 
   async star(ctx: Ctx, id: string, starred: boolean) {
-    const [p] = await this.db.update(printers).set({ starred }).where(eq(printers.id, id)).returning();
-    if (!p) throw notFound("打印机");
-    await this.audit.record(ctx, { action: "printer.star", targetType: "printer", targetId: id, after: { starred } });
+    const p = await this.db.transaction(async (tx) => {
+      const cur = await lockPrinter(tx, id);
+      const [next] = await tx.update(printers).set({ starred }).where(eq(printers.id, id)).returning();
+      await this.audit.record(ctx, { action: "printer.star", targetType: "printer", targetId: id, before: { starred: cur.starred }, after: { starred } }, tx);
+      return next;
+    });
     return (await this.views(ctx, [p]))[0];
   }
 
@@ -182,6 +185,7 @@ export class PrintersService {
     try {
       await this.commands.resolveError(id, action, cur.error?.errorId ?? null);
     } catch (e) {
+      await this.audit.record(ctx, { action: "printer.error.resolve", targetType: "printer", targetId: id, after: { action, errorId: cur.error?.errorId ?? null }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
       if (e instanceof PrinterUnreachable) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "printer-unreachable", "连不上这台打印机的 daemon，请在打印机屏幕上处理");
       throw e;
     }
@@ -208,7 +212,7 @@ export class PrintersService {
       await this.audit.record(ctx, { action: "printer.stop", targetType: "printer", targetId: id, after: { orderId: p.currentOrderId, status: "FAILED" }, reason }, tx);
       return p.currentOrderId;
     });
-    const commandSent = await this.orders.sendStop(id);
+    const commandSent = await this.orders.sendStop(ctx, id);
     return { printer: await this.get(ctx, id), orderId, commandSent };
   }
 
@@ -256,6 +260,7 @@ export class PrintersService {
       const p = await lockPrinter(tx, id);
       await movePrinter(tx, p, "started");
       if (p.currentOrderId != null) await orderEvent(tx, ctx, p.currentOrderId, "printing-started");
+      await this.audit.record(ctx, { action: "printer.started", targetType: "printer", targetId: id, before: { state: p.state }, after: { state: "PRINTING", orderId: p.currentOrderId } }, tx);
     });
   }
 
@@ -291,6 +296,7 @@ export class PrintersService {
       if (p.currentOrderId == null) throw new ApiError(HttpStatus.CONFLICT, "printer-state-conflict", "打印机上没有订单", { printerId: id });
       await transition(tx, ctx, p.currentOrderId, "finish", { set: { printedAt: new Date() } });
       await movePrinter(tx, p, "finished");
+      await this.audit.record(ctx, { action: "printer.finished", targetType: "printer", targetId: id, before: { state: p.state }, after: { state: "CLEARING_REQUIRED", orderId: p.currentOrderId } }, tx);
     });
   }
 

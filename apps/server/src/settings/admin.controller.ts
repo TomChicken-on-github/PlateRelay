@@ -1,13 +1,13 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Put, Query } from "@nestjs/common";
-import { ROLE_IDS } from "@platerelay/shared";
+import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, ROLE_IDS, type AuditLogView } from "@platerelay/shared";
 import { z } from "zod";
 import { AuditService } from "../audit/audit.service.js";
+import { auditViews } from "../audit/views.js";
 import { type Ctx, ReqCtx, RequirePerm } from "../auth/actor.js";
 import { parse } from "../common/zod.js";
 import { DaemonsService } from "../daemons/daemons.service.js";
 import { DB, type Db } from "../db/db.js";
 import { FieldsSchema, FormsService } from "../forms/forms.service.js";
-import { loadPeople } from "../orders/views.js";
 import { UsersService } from "../users/users.service.js";
 import { SettingsService } from "./settings.service.js";
 
@@ -15,13 +15,17 @@ const Id = new ParseUUIDPipe();
 const Daemon = z.object({ name: z.string().trim().min(1).max(40), network: z.string().trim().max(60).nullish() });
 const AuditQuery = z.object({
   actorId: z.uuid().optional(),
+  actorName: z.string().trim().min(1).max(80).optional(),
+  actorType: z.enum(AUDIT_ACTOR_TYPES).optional(),
+  action: z.string().trim().min(1).max(160).optional(),
+  result: z.enum(AUDIT_RESULTS).optional(),
   targetType: z.string().max(40).optional(),
   targetId: z.string().max(80).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
-  beforeId: z.coerce.number().int().positive().optional(),
-});
+  beforeId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+}).refine((q) => !q.from || !q.to || q.from <= q.to, { message: "开始时间不得晚于结束时间", path: ["to"] });
 
 /** 系统设置: request form, users and roles, daemon tokens, policy, audit log. */
 @Controller()
@@ -127,11 +131,25 @@ export class AdminController {
   /** Reading the audit log is itself audited (brief §0.7). */
   @Get("audit")
   @RequirePerm("audit:view")
-  async auditLog(@ReqCtx() ctx: Ctx, @Query() q: unknown) {
+  async auditLog(@ReqCtx() ctx: Ctx, @Query() q: unknown): Promise<AuditLogView[]> {
     const query = parse(AuditQuery, q);
     const rows = await this.audit.list(query);
-    await this.audit.record(ctx, { action: "audit.view", after: { ...query, from: query.from?.toISOString(), to: query.to?.toISOString() } });
-    const people = await loadPeople(this.db, rows.map((r) => r.actorId));
-    return rows.map((r) => ({ ...r, at: r.at.toISOString(), actor: r.actorType === "user" ? people.get(r.actorId) : { id: r.actorId, name: r.actorType, role: null } }));
+    await this.audit.record(ctx, {
+      action: "audit.view",
+      after: {
+        actorId: query.actorId,
+        actorNameFiltered: query.actorName ? true : undefined,
+        actorType: query.actorType,
+        action: query.action,
+        result: query.result,
+        targetType: query.targetType,
+        targetId: query.targetId,
+        from: query.from?.toISOString(),
+        to: query.to?.toISOString(),
+        limit: query.limit,
+        beforeId: query.beforeId,
+      },
+    });
+    return auditViews(this.db, rows);
   }
 }

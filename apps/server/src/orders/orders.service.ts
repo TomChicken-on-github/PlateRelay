@@ -11,7 +11,7 @@ import { DB, type Db } from "../db/db.js";
 import { files, orderEvents, orders, pickupCodes, printers } from "../db/schema.js";
 import { FormsService } from "../forms/forms.service.js";
 import { Gcode3mfService } from "../gcode3mf/gcode3mf.service.js";
-import { PRINTER_COMMANDS, type PrinterCommands } from "../printers/commands.js";
+import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "../printers/commands.js";
 import { waitReason } from "../printers/compat.js";
 import { lockPrinter, movePrinter, pausedMs } from "../printers/printer-state.js";
 import { SchedulerService } from "../printers/scheduler.service.js";
@@ -63,7 +63,14 @@ export class OrdersService {
       const fleet = await this.db.select().from(printers);
       for (const r of queued) waitReasons.set(r.id, waitReason(r, fleet));
     }
-    return orderViews(this.db, this.storage, ctx, rows, { queue, waitReasons });
+    const views = await orderViews(this.db, this.storage, ctx, rows, { queue, waitReasons });
+    const previewIds = new Set(views.filter((v) => !v.isMine && v.thumbUrl).map((v) => v.id));
+    if (previewIds.size) {
+      await this.db.transaction(async (tx) => {
+        for (const id of previewIds) await this.audit.record(ctx, { action: "order.preview.view", targetType: "order", targetId: id }, tx);
+      });
+    }
+    return views;
   }
 
   async mine(ctx: Ctx): Promise<OrderView[]> {
@@ -132,9 +139,13 @@ export class OrdersService {
     const [r] = await this.db.select({ ownerId: orders.ownerId, key: files.key, name: files.fileName }).from(orders).innerJoin(files, eq(files.id, orders.fileId)).where(eq(orders.id, id));
     if (!r) throw notFound("订单");
     const mine = r.ownerId === userId(ctx);
-    if (!mine && !can(ctx, "order:view:any") && !can(ctx, "order:review")) throw notFound("订单");
+    if (!mine && !can(ctx, "order:view:any") && !can(ctx, "order:review")) {
+      await this.audit.record(ctx, { action: "order.file.download", targetType: "order", targetId: id, result: "denied", reason: "missing-permission" });
+      throw notFound("订单");
+    }
+    const url = await this.storage.signedUrl(r.key, 300, r.name);
     if (!mine) await this.audit.record(ctx, { action: "order.file.download", targetType: "order", targetId: id });
-    return this.storage.signedUrl(r.key, 300, r.name);
+    return url;
   }
 
   /* ---------- submitting ---------- */
@@ -262,19 +273,21 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.cancel", targetType: "order", targetId: id, before: { status: from }, after: { status: "CANCELLED" }, reason }, tx);
       return row;
     });
-    if (stopPrinter) await this.sendStop(stopPrinter);
+    if (stopPrinter) await this.sendStop(ctx, stopPrinter);
     return (await this.views(ctx, [row]))[0];
   }
 
   /** Best effort: the decision is already recorded; someone at the printer can still stop it by hand. */
-  async sendStop(printerId: string): Promise<boolean> {
+  async sendStop(ctx: Ctx, printerId: string): Promise<boolean> {
     try {
       await this.commands.stop(printerId);
-      return true;
     } catch (e) {
       this.log.warn(`stop not sent to ${printerId}: ${(e as Error).message}`);
+      await this.audit.record(ctx, { action: "printer.stop.command", targetType: "printer", targetId: printerId, after: { command: "STOP" }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
       return false;
     }
+    await this.audit.record(ctx, { action: "printer.stop.command", targetType: "printer", targetId: printerId, after: { command: "STOP" } });
+    return true;
   }
 
   /* ---------- failure attribution ---------- */
@@ -347,8 +360,9 @@ export class OrdersService {
     if (!type) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, "bad-photo", "入库照片只收 JPEG、PNG、WebP");
     const key = `store-photos/${id}-${randomUUID()}.${type[0]}`;
     await this.storage.put(key, photo, type[2]);
+    let row: OrderRow;
     try {
-      const row = await this.db.transaction(async (tx) => {
+      row = await this.db.transaction(async (tx) => {
         const [o] = await tx.select({ printerId: orders.printerId }).from(orders).where(eq(orders.id, id));
         if (!o) throw notFound("订单");
         const printer = o.printerId ? await lockPrinter(tx, o.printerId) : null;
@@ -361,12 +375,12 @@ export class OrdersService {
         await this.audit.record(ctx, { action: "order.store", targetType: "order", targetId: id, after: { status: "STORED_READY_PICKUP", slot, printerReleased: released ? printer!.id : null } }, tx);
         return row;
       });
-      void this.scheduler.kick();
-      return (await this.views(ctx, [row]))[0];
     } catch (e) {
       await this.storage.delete(key).catch(() => undefined);
       throw e;
     }
+    void this.scheduler.kick();
+    return (await this.views(ctx, [row]))[0];
   }
 
 }

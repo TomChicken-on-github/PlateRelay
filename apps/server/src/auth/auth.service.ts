@@ -47,20 +47,24 @@ export class AuthService {
       throw new ApiError(HttpStatus.UNAUTHORIZED, "bad-credentials", "用户名或密码错误");
     }
     const token = newToken();
-    await this.db.insert(sessions).values({
-      tokenHash: sha256(token),
-      userId: actor.id,
-      expiresAt: new Date(Date.now() + SESSION_TTL_MS),
-      ip: ctx.ip,
-      userAgent: ctx.device,
+    await this.db.transaction(async (tx) => {
+      await tx.insert(sessions).values({
+        tokenHash: sha256(token),
+        userId: actor.id,
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+        ip: ctx.ip,
+        userAgent: ctx.device,
+      });
+      await this.audit.record({ ...ctx, actor }, { action: "auth.login", targetType: "user", targetId: actor.id }, tx);
     });
-    await this.audit.record({ ...ctx, actor }, { action: "auth.login", targetType: "user", targetId: actor.id });
     return { token, actor };
   }
 
   async logout(ctx: Ctx, token: string) {
-    await this.db.delete(sessions).where(eq(sessions.tokenHash, sha256(token)));
-    await this.audit.record(ctx, { action: "auth.logout", targetType: "user", targetId: ctx.actor.id ?? null });
+    await this.db.transaction(async (tx) => {
+      await tx.delete(sessions).where(eq(sessions.tokenHash, sha256(token)));
+      await this.audit.record(ctx, { action: "auth.logout", targetType: "user", targetId: ctx.actor.id ?? null }, tx);
+    });
   }
 
   async actorForSession(token: string): Promise<UserActor | null> {

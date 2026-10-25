@@ -1,3 +1,4 @@
+import type { AuditLogView } from "@platerelay/shared";
 import { createStore } from "../lib/store";
 
 export const ROLES = ["User", "Staff", "Builder", "Coreteam"] as const;
@@ -25,9 +26,13 @@ export const settings = createStore({
   notify: { mail: true, fs: true, fsMode: "直接调用飞书机器人", hook: "https://open.feishu.cn/open-apis/bot/v2/hook/••••••••" },
   /* audit entries never carry a token, access code or other secret */
   audit: [
-    ["10-24 12:31", "赵乐", "下线打印机", "X2D-02 · 日常保养"], ["10-24 11:58", "赵乐", "驳回订单", "#1056 · 壁厚过薄"], ["10-24 11:40", "陈一帆", "铲件入库", "#1045 · A-2-3"],
-    ["10-24 11:12", "赵乐", "调整排队顺序", "#1052 从第 3 位到第 1 位"], ["10-24 10:55", "Admin", "修改角色", "周浩然 User → Staff"], ["10-24 10:20", "陈一帆", "核销取件", "#1046 · Tom_Chicken"],
-  ] as [string, string, string, string][],
+    { id: 6, at: "2026-10-24T04:31:00.000Z", actorId: "00000000-0000-4000-8000-000000000002", actor: { id: "00000000-0000-4000-8000-000000000002", name: "赵乐", role: "Builder" }, action: "printer.maintenance.on", targetType: "printer", targetId: null, target: { name: "X2D-02" }, after: { description: "日常保养" } },
+    { id: 5, at: "2026-10-24T03:58:00.000Z", actorId: "00000000-0000-4000-8000-000000000002", actor: { id: "00000000-0000-4000-8000-000000000002", name: "赵乐", role: "Builder" }, action: "order.reject", targetType: "order", targetId: "1056", target: { name: "订单 #1056" }, after: { description: "壁厚过薄" } },
+    { id: 4, at: "2026-10-24T03:40:00.000Z", actorId: "00000000-0000-4000-8000-000000000003", actor: { id: "00000000-0000-4000-8000-000000000003", name: "陈一帆", role: "Staff" }, action: "order.store", targetType: "order", targetId: "1045", target: { name: "订单 #1045" }, after: { slot: "A-2-3" } },
+    { id: 3, at: "2026-10-24T03:12:00.000Z", actorId: "00000000-0000-4000-8000-000000000002", actor: { id: "00000000-0000-4000-8000-000000000002", name: "赵乐", role: "Builder" }, action: "queue.reorder", targetType: "order", targetId: "1052", target: { name: "订单 #1052" }, before: { position: 3 }, after: { position: 1 } },
+    { id: 2, at: "2026-10-24T02:55:00.000Z", actorId: "00000000-0000-4000-8000-000000000004", actor: { id: "00000000-0000-4000-8000-000000000004", name: "Admin", role: "Coreteam" }, action: "user.role", targetType: "user", targetId: null, target: { name: "周浩然" }, before: { role: "user" }, after: { role: "staff" } },
+    { id: 1, at: "2026-10-24T02:20:00.000Z", actorId: "00000000-0000-4000-8000-000000000003", actor: { id: "00000000-0000-4000-8000-000000000003", name: "陈一帆", role: "Staff" }, action: "order.redeem", targetType: "order", targetId: "1046", target: { name: "订单 #1046" }, after: { description: "Tom_Chicken 已取件" } },
+  ].map((row): AuditLogView => ({ ...row, actorType: "user", before: row.before ?? null, reason: null, result: "ok", ip: null, device: null })),
 });
 
 /* Shown once. Only the last four characters are kept afterwards. */

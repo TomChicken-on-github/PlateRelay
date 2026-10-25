@@ -381,9 +381,9 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
             <div className="text-note text-on-variant">仅管理员可见</div>
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0 text-note">
               {auditFor(o).map(([a, b], i) => (
-                <li key={i} className="flex gap-3">
-                  <time className="w-[92px] flex-none font-num text-body-s leading-[18px] text-on-variant">{a}</time>
-                  <span>{b}</span>
+                <li key={i} className="flex items-start gap-3">
+                  <time className="w-[104px] shrink-0 font-num text-body-s leading-5 text-on-variant">{a}</time>
+                  <span className="min-w-0 flex-1 leading-5 [overflow-wrap:anywhere]">{b}</span>
                 </li>
               ))}
             </ul>

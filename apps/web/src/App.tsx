@@ -35,7 +35,7 @@ const router = createBrowserRouter([
       { path: "/manage/orders", element: <OrderAdminPage mode="manage" /> },
       { path: "/manage/orders/:id", element: <OrderAdminPage mode="manage" /> },
       { path: "/manage/printers", element: <PrintersPage /> },
-      { path: "/settings", element: <Navigate to="/settings/form" replace /> },
+      { path: "/settings", element: <SettingsPage /> },
       { path: "/settings/:tab", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

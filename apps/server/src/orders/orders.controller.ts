@@ -144,8 +144,8 @@ export class OrdersController {
 
   @Get("pickup/:code")
   @RequirePerm("order:redeem")
-  lookup(@Param("code") code: string) {
-    return this.pickup.lookup(code);
+  lookup(@ReqCtx() ctx: Ctx, @Param("code") code: string) {
+    return this.pickup.lookup(ctx, code);
   }
 
   @Post("pickup/:code/redeem")
