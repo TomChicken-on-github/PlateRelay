@@ -116,8 +116,8 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
           style={{ zoom }}
         >
           <div className="cam-ph relative aspect-[220/123] w-full overflow-hidden rounded-lg" role="img" aria-label={`${name} 摄像头画面`} />
-          <div className={cx("grid grid-cols-[104px_84px] self-stretch @max-[420px]:grid-cols-2", off && "opacity-48 blur-[3px]")}>
-            <div className="flex flex-col justify-center gap-1.5">
+          <div className={cx("grid grid-cols-[104px_84px] self-stretch @max-[420px]:grid-cols-[auto_auto] @max-[420px]:justify-evenly", off && "opacity-48 blur-[3px]")}>
+            <div className="flex flex-col justify-center gap-1.5 @max-[420px]:justify-start">
               {p.nozzles.length > 1 ? (
                 p.nozzles.map((n, i) => (
                   <Row key={i} icon="nozzle" tone="nz">
@@ -135,7 +135,7 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
               <Row icon="chamber">{p.chamber ? temp(p.chamber[0], p.chamber[1]) : "— / —"}</Row>
               <Row icon="layers">{p.layer ? `${p.layer[0]} / ${p.layer[1]}` : "— / —"}</Row>
             </div>
-            <div className="flex flex-col justify-center gap-1.5 px-0.5">
+            <div className="flex flex-col justify-center gap-1.5 px-0.5 @max-[420px]:justify-start">
               {loaded.length ? (
                 loaded.slice(0, 4).map((x) => (
                   <div
