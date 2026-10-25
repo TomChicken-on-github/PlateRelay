@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { Button, IconButton } from "../../components/Button";
@@ -9,9 +9,10 @@ import { Page, PageHeader } from "../../components/Page";
 import { Switch } from "../../components/Switch";
 import { useToast } from "../../components/Toast";
 import { WavyProgress } from "../../components/WavyProgress";
+import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { duration, easing } from "../../lib/motion";
-import { detailFor, PRINTERS, starStore } from "../../mock/printers";
+import { detailOf, printersApi, usePrinters } from "../../lib/printersApi";
 import { StateChip } from "../overview/PrinterCard";
 import { AmsPanel } from "./AmsPanel";
 import { DrySheet, FanSheet, SPEEDS, SpeedSheet, StopSheet, TempSheet } from "./DetailSheets";
@@ -56,10 +57,18 @@ export function PrinterDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const p = PRINTERS.find((x) => x.id === id);
-  const stars = starStore.use();
-  const [d] = useState(() => (p ? structuredClone(detailFor(p)) : null));
+  const { rows, loading } = usePrinters();
+  const p = rows.find((x) => x.id === id);
+  const [d, setD] = useState(() => (p ? structuredClone(detailOf(p)) : null));
   const [temps, setTemps] = useState(d?.temps ?? []);
+  /* live rows arrive after the first render */
+  useEffect(() => {
+    if (p && !d) {
+      const x = structuredClone(detailOf(p));
+      setD(x);
+      setTemps(x.temps);
+    }
+  }, [p, d]);
   const [speed, setSpeed] = useState(1);
   const [light, setLight] = useState(true);
   const [fans, setFans] = useState<[string, number][]>([["部件", 80], ["辅助", 40], ["机箱", 30]]);
@@ -74,9 +83,12 @@ export function PrinterDetailPage() {
   };
   const close = () => setSheet(null);
 
-  if (!p || !d || p.state === "OFFLINE") return <Navigate to="/" replace />;
+  if (LIVE && loading) return null;
+  if (!p || p.state === "OFFLINE") return <Navigate to="/" replace />;
+  if (!d) return null;
+  const name = p.name ?? p.id;
   const printing = ["PRINTING", "PREPARING", "ERROR_PAUSED", "UNMANAGED_PRINTING"].includes(p.state);
-  const starred = !!stars[p.id];
+  const starred = !!p.star;
   const job = d.job;
   const ti = sheet?.type === "temp" ? sheet.i : -1;
 
@@ -84,7 +96,7 @@ export function PrinterDetailPage() {
     <Page className="max-w-[1360px] max-sm:pb-24">
       <PageHeader
         lead={<IconButton icon="arrow_back" label="返回概况" onClick={() => navigate("/")} />}
-        title={<span className="font-sans">{p.id}</span>}
+        title={<span className="font-sans">{name}</span>}
         after={
           <>
             <StateChip state={p.state} />
@@ -94,7 +106,10 @@ export function PrinterDetailPage() {
               label={starred ? "取消星标" : "设为星标"}
               aria-pressed={starred}
               className="text-primary"
-              onClick={() => starStore.set((s) => ({ ...s, [p.id]: !starred }))}
+              onClick={async () => {
+                const r = await printersApi.star(p.id, !starred);
+                if (!r.ok) toast(r.error.message || "星标没有保存");
+              }}
             />
             <span className="text-body-m text-on-variant">{p.model}</span>
           </>
@@ -103,7 +118,12 @@ export function PrinterDetailPage() {
           printing ? (
             /* below 640px the two actions become a bar fixed to the bottom */
             <div className="flex gap-3 max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-40 max-sm:bg-sc max-sm:px-4 max-sm:pt-3 max-sm:pb-[calc(12px+env(safe-area-inset-bottom,0px))] max-sm:shadow-[0_-1px_0_var(--md-outline-variant)] max-sm:[&>button]:h-12 max-sm:[&>button]:flex-1">
-              <Button variant="tonal" icon={paused ? "play_arrow" : "pause"} iconFill onClick={() => (setPaused(!paused), toast(paused ? `原型：${p.id} 已继续` : `原型：${p.id} 已暂停`))}>
+              <Button
+                variant="tonal"
+                icon={paused ? "play_arrow" : "pause"}
+                iconFill
+                onClick={() => (LIVE ? toast("暂停和继续要经过 daemon，daemon 还没接上") : (setPaused(!paused), toast(paused ? `原型：${name} 已继续` : `原型：${name} 已暂停`)))}
+              >
                 {paused ? "继续" : "暂停"}
               </Button>
               <Button variant="error-outlined" icon="stop_circle" onClick={() => open({ type: "stop" })}>
@@ -117,7 +137,7 @@ export function PrinterDetailPage() {
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,1fr)] min-[1281px]:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           <section className={cx(panel, "overflow-hidden")}>
-            <div className="cam-ph relative aspect-video w-full overflow-hidden" role="img" aria-label={`${p.id} 摄像头画面`}>
+            <div className="cam-ph relative aspect-video w-full overflow-hidden" role="img" aria-label={`${name} 摄像头画面`}>
               <span className="absolute top-3 left-3 z-[1] rounded bg-black/50 px-2 py-0.5 font-num text-body-s text-[#e6e0e9]">2026-10-18 14:23:41</span>
             </div>
             <div className="flex h-[52px] items-center gap-2 pr-2 pl-5 text-label-l font-medium">
@@ -258,8 +278,8 @@ export function PrinterDetailPage() {
                 ["序列号", d.serial],
                 ["固件版本", d.fw],
                 ["局域网 IP", d.ip],
-                ["MQTT 连接", <span className="text-ok">已连接 · 延迟 {d.mqtt}ms</span>],
-                ["运行时长", `1h 36m（本次）· 累计 ${d.upAll}`],
+                ["MQTT 连接", LIVE ? <span className="text-on-variant">{p.lastSeen === "从未连接" ? "daemon 尚未连接" : `最后上报 ${p.lastSeen}`}</span> : <span className="text-ok">已连接 · 延迟 {d.mqtt}ms</span>],
+                ["运行时长", LIVE ? "—" : `1h 36m（本次）· 累计 ${d.upAll}`],
               ].map(([k, v], i) => (
                 <div key={i} className="flex justify-between gap-4 border-b border-solid border-outline-variant py-3 text-body-m">
                   <dt className="text-on-variant">{k}</dt>
@@ -315,11 +335,17 @@ export function PrinterDetailPage() {
       <StopSheet
         key={`s${sheetKey}`}
         open={sheet?.type === "stop"}
-        id={p.id}
+        id={name}
         onClose={close}
-        onStop={(why) => {
+        onStop={async (why) => {
+          if (!LIVE) {
+            close();
+            return toast(`原型：${name} 已停止（${why}），订单记为打印失败`);
+          }
+          const r = await printersApi.stop(p.id, why);
+          if (!r.ok) return toast(r.error.message || "停止失败，请重试");
           close();
-          toast(`原型：${p.id} 已停止（${why}），订单记为打印失败`);
+          toast(r.data.commandSent ? `${name} 已停止，订单记为打印失败` : `订单已记为打印失败；停止命令没发到 ${name}，请在打印机屏幕上停止`);
         }}
       />
     </Page>

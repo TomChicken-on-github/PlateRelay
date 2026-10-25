@@ -65,7 +65,8 @@ const temp = (c: number | null, t: number | null) => (c == null ? "— / —" : 
 export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
   const navigate = useNavigate();
   const off = p.state === "OFFLINE";
-  const o = p.order ? OWNERS[p.order] : null;
+  const o: [string, string] | null = p.order ? (p.file ? [p.who ?? "", p.file] : (OWNERS[p.order] ?? null)) : null;
+  const name = p.name ?? p.id;
 
   const loaded = p.ams.filter((x) => !isEmptySlot(x)).map((x) => ({ ...x, label: x.s! })).concat(p.ext ? [{ ...p.ext, label: "外挂" }] : []);
   /* keep four rows so the AMS column lines up with the telemetry rows */
@@ -96,7 +97,7 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
       transition={{ layout: { duration: duration.medium4, ease: easing.emphasized } }}
       role={off ? undefined : "link"}
       tabIndex={off ? undefined : 0}
-      aria-label={off ? undefined : `${p.id} 详情`}
+      aria-label={off ? undefined : `${name} 详情`}
       onClick={(e) => !(e.target as HTMLElement).closest("button,a") && open()}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), open())}
       className={cx("@container relative flex flex-col overflow-hidden rounded-xl bg-sc", !off && "cursor-pointer transition-colors duration-150 ease-standard hover:bg-[color-mix(in_srgb,var(--md-on-surface)_4%,var(--md-sc))]")}
@@ -104,7 +105,7 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
       <div className="flex flex-col gap-3.5 p-5 @max-[420px]:p-4">
         <div className="flex h-8 items-center gap-2">
           <FigmaIcon name="printer" className="size-5 text-primary" />
-          <b className="text-title-m font-semibold">{p.id}</b>
+          <b className="text-title-m font-semibold">{name}</b>
           <span className="ml-auto">
             <StateChip state={p.state} />
           </span>
@@ -114,7 +115,7 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
           className="grid w-[424px] grid-cols-[220px_188px] items-center gap-4 @max-[420px]:w-auto! @max-[420px]:grid-cols-[minmax(0,1fr)] @max-[420px]:gap-3 @max-[420px]:[zoom:1]!"
           style={{ zoom }}
         >
-          <div className="cam-ph relative aspect-[220/123] w-full overflow-hidden rounded-lg" role="img" aria-label={`${p.id} 摄像头画面`} />
+          <div className="cam-ph relative aspect-[220/123] w-full overflow-hidden rounded-lg" role="img" aria-label={`${name} 摄像头画面`} />
           <div className={cx("grid grid-cols-[104px_84px] self-stretch @max-[420px]:grid-cols-2", off && "opacity-48 blur-[3px]")}>
             <div className="flex flex-col justify-center gap-1.5">
               {p.nozzles.length > 1 ? (
