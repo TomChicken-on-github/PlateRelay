@@ -25,6 +25,10 @@ export const TRANSITIONS = {
   fail: { from: ["PRINTING"], to: "FAILED" },
   store: { from: ["PRINTED_AWAITING_STORAGE"], to: "STORED_READY_PICKUP" },
   redeem: { from: ["STORED_READY_PICKUP"], to: "COMPLETED" },
+  /** A new file replaces the plate; it waits for re-review frozen in its place (rules doc §3). A PRINTING one was dispatched but not started and is recalled. */
+  revise: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "PENDING_REVIEW" },
+  /** Same, when 轻微修改自动审核 lets it skip the re-review. */
+  reviseApproved: { from: ["QUEUED", "PRINTING"], to: "QUEUED" },
   cancelOwn: { from: ["PENDING_REVIEW", "QUEUED"], to: "CANCELLED" },
   cancelAny: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING", "PRINTED_AWAITING_STORAGE", "STORED_READY_PICKUP"], to: "CANCELLED" },
 } as const satisfies Record<string, { from: readonly OrderStatus[]; to: OrderStatus }>;

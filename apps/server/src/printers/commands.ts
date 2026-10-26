@@ -20,6 +20,8 @@ export interface PrinterCommands {
   /** A standard error action (driver draft §6), e.g. RESUME or STOP. */
   resolveError(printerId: string, action: string, errorId: string | null): Promise<void>;
   stop(printerId: string): Promise<void>;
+  /** Takes back a dispatched job that has not started printing; the printer stays clean and free. */
+  recall(printerId: string, orderId: number): Promise<void>;
 }
 
 export const PRINTER_COMMANDS = Symbol("PRINTER_COMMANDS");
@@ -42,6 +44,9 @@ export class NoDaemonCommands implements PrinterCommands {
     throw new PrinterUnreachable(printerId);
   }
   async stop(printerId: string): Promise<void> {
+    throw new PrinterUnreachable(printerId);
+  }
+  async recall(printerId: string): Promise<void> {
     throw new PrinterUnreachable(printerId);
   }
 }

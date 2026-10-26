@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, UploadedFile, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { FileFieldsInterceptor, FileInterceptor } from "@nestjs/platform-express";
-import { FAILURE_ATTRIBUTIONS, MAX_UPLOAD_BYTES, ORDER_STATUSES } from "@platerelay/shared";
+import { BED_TYPES, COLOUR_PREFS, DEFAULT_COLOUR_PREF, FAILURE_ATTRIBUTIONS, MAX_UPLOAD_BYTES, ORDER_STATUSES } from "@platerelay/shared";
 import { z } from "zod";
 import { type Ctx, ReqCtx, RequirePerm } from "../auth/actor.js";
 import { parse } from "../common/zod.js";
@@ -25,6 +25,13 @@ const ListQuery = z.object({
 /** 1-based plate numbers, as a JSON array in the multipart body. */
 const Plates = z.array(z.number().int().positive()).max(64);
 
+/** Multipart text fields that come with a submission besides the form answers. */
+const Choices = z.object({
+  colour: z.enum(COLOUR_PREFS).default(DEFAULT_COLOUR_PREF),
+  bedType: z.enum(BED_TYPES).optional(),
+});
+const Revise = z.object({ plate: z.coerce.number().int().positive().optional() });
+
 const PHOTO_MAX = 15 * 1024 * 1024;
 
 function json(text: string, field: string): unknown {
@@ -42,14 +49,28 @@ export class OrdersController {
     private readonly pickup: PickupService,
   ) {}
 
-  /** Submit: multipart with "file" (.gcode.3mf) and "answers" (JSON of the request form). */
+  /**
+   * Submit: multipart with "file" (.gcode.3mf), "answers" (JSON of the request form), optional "plates",
+   * "colour" (颜色要求, exact / similar / any) and "bedType" (only when 自选板 is allowed).
+   */
   @Post("orders")
   @RequirePerm("order:submit")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
-  async submit(@ReqCtx() ctx: Ctx, @UploadedFile() file: Express.Multer.File | undefined, @Body("answers") answers: string | undefined, @Body("plates") plates: string | undefined) {
+  async submit(@ReqCtx() ctx: Ctx, @UploadedFile() file: Express.Multer.File | undefined, @Body() body: Record<string, string | undefined>) {
     if (!file) throw new BadRequestException("缺少文件字段 file");
-    const picked = plates ? parse(Plates, json(plates, "plates")) : undefined;
-    return { orders: await this.orders.submit(ctx, file.originalname, file.buffer, answers ? json(answers, "answers") : {}, picked) };
+    const picked = body.plates ? parse(Plates, json(body.plates, "plates")) : undefined;
+    const c = parse(Choices, { colour: body.colour || undefined, bedType: body.bedType || undefined });
+    return { orders: await this.orders.submit(ctx, file.originalname, file.buffer, body.answers ? json(body.answers, "answers") : {}, picked, { colourPref: c.colour, bedType: c.bedType ?? null }) };
+  }
+
+  /** 修改文件: the owner uploads a new version of one plate; multipart with "file" and optional "plate" (1-based, in the new file). */
+  @Post("orders/:id/revise")
+  @HttpCode(200)
+  @RequirePerm("order:submit")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
+  revise(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @UploadedFile() file: Express.Multer.File | undefined, @Body() body: unknown) {
+    if (!file) throw new BadRequestException("缺少文件字段 file");
+    return this.orders.revise(ctx, id, file.originalname, file.buffer, parse(Revise, body ?? {}).plate);
   }
 
   /** The submit page's preview: parse result, per-plate availability and the queue. Nothing is stored. */

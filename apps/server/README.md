@@ -35,7 +35,7 @@ pnpm dev:server          # 在仓库根执行，监听 :3000，前端 vite 把 /
 pnpm --filter @platerelay/server user:create -- --username admin --name 管理员 --role coreteam
 ```
 
-之后选手可以在登录页自行注册（得到 User 角色）；角色修改接口要求 `user:manage`。前端默认用原型数据；`VITE_API=http` 构建时各页面走这里的接口。系统设置里的「文件与排队」「通知」还没有后端，页面上会注明。
+之后选手可以在登录页自行注册（得到 User 角色）；角色修改接口要求 `user:manage`。前端默认用原型数据；`VITE_API=http` 构建时各页面走这里的接口。系统设置里的「通知」还没有后端，页面上会注明。
 
 ## 测试
 
@@ -57,6 +57,7 @@ pnpm --filter @platerelay/server test
 | `src/storage` | 对象存储接口，本地磁盘和 S3 兼容（阿里云 OSS）两个实现 |
 | `src/orders` | 订单状态机、审核、排队、取消、失败归因、铲件入库、取件码 |
 | `src/printers` | 打印机管理、报错处理、调度（FIFO + 兼容性过滤），以及给 daemon 用的状态上报入口 |
+| `src/rules` | 打印规则：参数在系统设置里（`queue.rules`、`resources`），排队和修改文件的决定都经过 `QueuePolicy` 接口（现在只有按参数运行的 `ParamPolicy`），本场可用资源与上传校验 |
 | `src/forms`、`src/users`、`src/daemons`、`src/settings` | 申请表单（带版本）、用户与角色、daemon 令牌、系统设置 |
 
 权限只按节点检查（`packages/shared/src/auth/permissions.ts`），四个角色是预置的节点组合，每次启动按 `PRESET_ROLES` 重写。
@@ -69,14 +70,26 @@ pnpm --filter @platerelay/server test
 | --- | --- |
 | 登录 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`GET /auth/me` |
 | 概况 / 打印机详情 | `GET /overview`（排队、待审核、等待兼容打印机的数量）、`GET /printers`、`GET /printers/:id` |
-| 提交订单 | `GET /form`、`POST /orders/preview`（multipart `file`：解析结果、每盘有没有兼容的打印机、队列长度，不存任何东西）、`POST /orders`（multipart：`file` + `answers` JSON，可选 `plates` JSON 数组只提交其中几盘） |
-| 我的订单 | `GET /orders/mine`、`GET /orders/:id`（含 `storePhotoUrl` 入库照片签名链接，仅本人和 `order:view:any`）、`POST /orders/:id/cancel`、`POST /orders/:id/pickup-code` |
-| 待办 | `GET /todo`、`POST /orders/:id/store`（multipart：`photo`、`slot`、`bedCleared=true`）、`POST /printers/:id/resolve`、`POST /printers/:id/stop`、`POST /printers/:id/clear-bed` |
+| 提交订单 | `GET /form`、`GET /rules`、`GET /resources`（本场可用资源，`resource:view`；预计等待只给区间，另需 `queue:wait:view`）、`POST /orders/preview`（multipart `file`：解析结果、每盘有没有兼容的打印机、按可用资源的校验 `check`、队列长度，不存任何东西）、`POST /orders`（multipart：`file` + `answers` JSON，可选 `plates` JSON 数组只提交其中几盘，`colour` 颜色要求 exact/similar/any，默认 similar，`bedType` 仅在允许自选板时可传；校验不过返回 422 `plate-blocked`） |
+| 我的订单 | `GET /orders/mine`、`GET /orders/:id`（含 `storePhotoUrl` 入库照片签名链接，仅本人和 `order:view:any`）、`POST /orders/:id/cancel`、`POST /orders/:id/pickup-code`、`POST /orders/:id/revise`（multipart `file`，可选 `plate`：提交后修改文件） |
+| 待办 | `GET /todo`（含跳单提醒 `skipped`）、`POST /orders/:id/store`（multipart：`photo`、`slot`、`bedCleared=true`）、`POST /printers/:id/resolve`、`POST /printers/:id/stop`、`POST /printers/:id/clear-bed` |
 | 扫码取件 | `GET /pickup/:code`、`POST /pickup/:code/redeem`、`GET /pickup/redemptions?since=` |
 | 审核队列 | `GET /review`、`POST /orders/:id/approve`、`POST /orders/:id/reject` |
 | 订单管理 | `GET /orders?status=&q=&limit=&offset=`、`GET /orders/:id/file`、`POST /orders/:id/attribute`、`POST /queue/reorder` |
-| 打印机管理 | `GET /daemon-keys`（可选的 daemon 及其公钥）、`POST /printers`、`PATCH /printers/:id`（`accessCode: {keyId, ciphertext}` 为浏览器加密后的访问码，`null` 清除）、`DELETE /printers/:id`、`POST /printers/:id/maintenance`、`POST /printers/:id/star` |
-| 系统设置 | `GET/PUT /form`、`GET /users`、`GET /roles`、`PUT /users/:id/role`、`PUT /users/:id/disabled`、`GET/POST /daemons`、`PATCH/DELETE /daemons/:id`、`GET /settings`、`PUT /settings/registration`、`GET /audit` |
+| 打印机管理 | `GET /daemon-keys`（可选的 daemon 及其公钥）、`POST /printers`、`PATCH /printers/:id`（`accessCode: {keyId, ciphertext}` 为浏览器加密后的访问码，`null` 清除）、`DELETE /printers/:id`、`POST /printers/:id/maintenance`、`POST /printers/:id/star`、`POST /printers/:id/open`（开放给选手；新加的打印机默认关闭，只有开放的接选手的单） |
+| 系统设置 | `GET/PUT /form`、`GET /users`、`GET /roles`、`PUT /users/:id/role`、`PUT /users/:id/disabled`、`GET/POST /daemons`、`PATCH/DELETE /daemons/:id`、`GET /settings`、`PUT /settings/registration`、`PUT /settings/rules`（文件与排队）、`GET/PUT /settings/resources`（可用资源，`resource:configure`）、`GET /audit` |
+
+### 打印规则
+
+参数和默认值见 `packages/shared/src/rules/rules.ts`，对应《通用打印规则》里标了已定的条目。
+
+- 提交后修改文件：默认重新审核，审核期间订单冻结在原位（仍占队列位置，派单跳过它），审核队列里排在最前，带上一版的时长、克数、耗材供对比。通过后按时长规则后移：比较基准默认是第一版（参数，文档里还没定），多出不超过阈值不动，之后每多一个步长后移若干位，也可以设成不变、固定后移或排到队尾。驳回修改版和驳回普通订单一样，订单结束。
+- 已派单但还没开始打的：撤回这次打印（`PrinterCommands.recall`，daemon 连上之前只记审计），打印机回到空闲，订单冻结等重审；也可以设成不允许修改。已经开打的不能改。
+- 「轻微修改自动审核」默认关：打开后机型、耗材不变且时长变化在阈值内的修改直接回到原位。
+- 换机型：按原提交时间排位（同一个全局队列，保留原来的排队序号），次数有上限，计入修改次数；双头改单头不计入修改次数，但算一次换机型。
+- 跳单提醒：排在前面的单被后面的单越过时记下时间，超过设定分钟数出现在待办里。
+- 可用资源：只统计开放给选手的打印机。机型或喷嘴不在表里的盘不能提交；材质只在已经知道有哪些耗材（打印机上报或手动添加库存）时检查；颜色要求「一致」而本场没有这个颜色时，默认可以提交、审核队列里列出缺的颜色，也可以设成拦下。
+- 每次按规则后移都写审计 `queue.revision-penalty`，记录策略、参数和前后位置；修改文件本身记 `order.revise`。
 
 ### 审计日志
 
@@ -97,5 +110,6 @@ pnpm --filter @platerelay/server test
 ## 还没做
 
 - 打印机访问码（简报 §0.9 第 10 条）：面板只存浏览器用 daemon 公钥加密的密文，接口只返回 `accessCode: {setAt, delivered, current}`，不返回密文；审计只记"已设置/已清除"。给 daemon 用的三步已写好但还没接到连接上：`DaemonsService.setPublicKey`（上报公钥）、`PrintersService.accessCodesFor`（拉取能解开的密文）、`PrintersService.markAccessCodeDelivered`（回报送达）。迁移 `0003_access_code_keys` 加了对应的列。
+- 打印机上报的已装耗材（`printers.trays`）和当前热床板（`printers.bed_type`）：列已加，daemon 连上后填。自选板只记录选手的选择，派单还不看热床板（关闭自选板时怎么处理还没定）。
 - daemon 连接（WebSocket）。现在 `PrinterCommands` 的实现是"连不上任何打印机"，所以不会派单，也不会向真实打印机发任何命令；打印机状态上报的入口（`PrintersService.onStarted` 等）已写好，只在测试里调用。
 - 实时推送（SSE）、通知（邮件 / 飞书）、OIDC 登录、头像。

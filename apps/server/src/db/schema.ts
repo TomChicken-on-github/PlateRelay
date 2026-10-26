@@ -1,5 +1,6 @@
 import {
   type AnswerSnapshot,
+  COLOUR_PREFS,
   FAILURE_ATTRIBUTIONS,
   type FormField,
   type FormFieldType,
@@ -10,6 +11,8 @@ import {
   type PrinterError,
   type ReportedNozzle,
   type ReportedStorage,
+  type ReportedTray,
+  type RevisionInfo,
 } from "@platerelay/shared";
 import { sql } from "drizzle-orm";
 import {
@@ -40,9 +43,10 @@ export const printerState = pgEnum("printer_state", PRINTER_STATES);
 export const failureAttribution = pgEnum("failure_attribution", FAILURE_ATTRIBUTIONS);
 export const actorType = pgEnum("actor_type", ["user", "system", "daemon", "printer"]);
 export const auditResult = pgEnum("audit_result", ["ok", "failed", "denied"]);
+export const colourPref = pgEnum("colour_pref", COLOUR_PREFS);
 
 /* JSON column shapes live in @platerelay/shared because the API sends them as they are. */
-export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, PrinterError, ReportedNozzle, ReportedStorage };
+export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, PrinterError, ReportedNozzle, ReportedStorage, ReportedTray, RevisionInfo };
 
 /* ---- accounts ---- */
 
@@ -141,6 +145,12 @@ export const printers = pgTable("printers", {
   modelId: text("model_id"),
   nozzles: jsonb("nozzles").$type<ReportedNozzle[]>(),
   storage: jsonb("storage").$type<ReportedStorage[]>(),
+  /** Loaded spools, reported like the nozzles; feeds 本场可用资源. */
+  trays: jsonb("trays").$type<ReportedTray[]>(),
+  /** Build plate on the printer, reported or set by hand. */
+  bedType: text("bed_type"),
+  /** 开放给选手. New printers start closed; only open ones take queued orders (rules doc §1.5). */
+  openToContestants: boolean("open_to_contestants").notNull().default(false),
   /** Latest telemetry snapshot (temperatures, AMS, progress). Not audited. */
   telemetry: jsonb("telemetry").$type<Record<string, unknown>>(),
   state: printerState("state").notNull().default("OFFLINE"),
@@ -233,6 +243,17 @@ export const orders = pgTable(
     attributedBy: uuid("attributed_by").references(() => users.id),
     attributedAt: ts("attributed_at"),
     retryOf: integer("retry_of"),
+    colourPref: colourPref("colour_pref").notNull().default("similar"),
+    /** Plate the submitter picked when 自选板 is allowed; null prints on the plate the file was sliced for. */
+    bedType: text("bed_type"),
+    /** Print time of the first version, the baseline for revision penalties. */
+    originalPrintSeconds: integer("original_print_seconds"),
+    revisionCount: integer("revision_count").notNull().default(0),
+    modelSwitchCount: integer("model_switch_count").notNull().default(0),
+    /** Revision waiting for re-review (frozen in its place), cleared on approval. */
+    revision: jsonb("revision").$type<RevisionInfo>(),
+    /** First time a later order was dispatched while this one stayed queued; cleared on dispatch. */
+    skippedSince: ts("skipped_since"),
   },
   (t) => [
     index("orders_status_queue").on(t.status, t.queueSeq, t.id),

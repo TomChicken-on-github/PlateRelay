@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
-import { type FailureAttribution, type OrderDetail, type OrderPreview, type OrderStatus, type OrderView, type OverviewStats, OWNER_CANCELLABLE } from "@platerelay/shared";
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, type SQL } from "drizzle-orm";
+import {
+  type ColourPref,
+  type FailureAttribution,
+  type OrderDetail,
+  type OrderPreview,
+  type OrderStatus,
+  type OrderView,
+  type OverviewStats,
+  OWNER_CANCELLABLE,
+  type PlateInfo,
+  type RevisionInfo,
+} from "@platerelay/shared";
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import { sha256 } from "../auth/tokens.js";
@@ -15,9 +26,21 @@ import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "../p
 import { availability, waitReason } from "../printers/compat.js";
 import { lockPrinter, movePrinter, pausedMs } from "../printers/printer-state.js";
 import { SchedulerService } from "../printers/scheduler.service.js";
+import { QUEUE_POLICY, type QueuePolicy } from "../rules/queue-policy.js";
+import { type Offer, ResourcesService } from "../rules/resources.service.js";
+import { SettingsService } from "../settings/settings.service.js";
 import { STORAGE, type ObjectStorage } from "../storage/storage.js";
+import { lockQueue, moveInQueue } from "./queue.js";
 import { type OrderRow, orderEvent, transition } from "./transition.js";
-import { loadPeople, orderViews, THUMB_TTL_S } from "./views.js";
+import { loadPeople, orderViews, THUMB_TTL_S, type ViewExtras } from "./views.js";
+
+/** Submit-page choices besides the form: 颜色要求 and, when allowed, the build plate. */
+export interface SubmitChoices {
+  colourPref: ColourPref;
+  bedType: string | null;
+}
+
+type Plate = Pick<PlateInfo, "index" | "printerModelId" | "nozzles" | "filaments">;
 
 export interface OrderQuery {
   status?: OrderStatus[];
@@ -45,19 +68,23 @@ export class OrdersService {
     private readonly forms: FormsService,
     private readonly gcode3mf: Gcode3mfService,
     private readonly scheduler: SchedulerService,
+    private readonly settings: SettingsService,
+    private readonly resources: ResourcesService,
+    @Inject(QUEUE_POLICY) private readonly policy: QueuePolicy,
   ) {}
 
   /* ---------- reading ---------- */
 
-  async views(ctx: Ctx, rows: OrderRow[]): Promise<OrderView[]> {
+  async views(ctx: Ctx, rows: OrderRow[], extra: Pick<ViewExtras, "missingColours"> = {}): Promise<OrderView[]> {
     const queue = await this.scheduler.queuePositions();
+    const rules = await this.settings.get("queue.rules");
     const queued = rows.filter((r) => r.status === "QUEUED");
     const waitReasons = new Map<number, string | null>();
     if (queued.length) {
-      const fleet = await this.db.select().from(printers);
+      const fleet = await this.openFleet();
       for (const r of queued) waitReasons.set(r.id, waitReason(r, fleet));
     }
-    const views = await orderViews(this.db, this.storage, ctx, rows, { queue, waitReasons });
+    const views = await orderViews(this.db, this.storage, ctx, rows, { queue, waitReasons, rules, ...extra });
     const previewIds = new Set(views.filter((v) => !v.isMine && v.thumbUrl).map((v) => v.id));
     if (previewIds.size) {
       await this.db.transaction(async (tx) => {
@@ -72,10 +99,28 @@ export class OrdersService {
     return this.views(ctx, rows);
   }
 
-  /** Shared review pool, oldest first like the queue (brief §0.9 #6). */
+  /** Printers that take queued orders: the ones open to submitters (开放给选手). */
+  private openFleet() {
+    return this.db.select().from(printers).where(eq(printers.openToContestants, true));
+  }
+
+  /**
+   * Shared review pool (brief §0.9 #6): revisions first, since they hold a place in the queue (rules doc
+   * §3.3), then oldest first like the queue.
+   */
   async reviewPool(ctx: Ctx): Promise<OrderDetail[]> {
-    const rows = await this.db.select().from(orders).where(eq(orders.status, "PENDING_REVIEW")).orderBy(asc(orders.submittedAt), asc(orders.id));
-    const views = await this.views(ctx, rows);
+    const rows = await this.db
+      .select()
+      .from(orders)
+      .where(eq(orders.status, "PENDING_REVIEW"))
+      .orderBy(sql`${orders.revision} is null`, asc(orders.submittedAt), asc(orders.id));
+    const exact = rows.filter((r) => r.colourPref === "exact");
+    const missingColours = new Map<number, string[]>();
+    if (exact.length) {
+      const offer = await this.resources.offer();
+      for (const r of exact) missingColours.set(r.id, this.resources.check(offer, r).missingColours);
+    }
+    const views = await this.views(ctx, rows, { missingColours });
     return views.map((v, i) => ({ ...v, answers: rows[i].answers.map((a) => ({ label: a.label, value: a.value })), timeline: [] }));
   }
 
@@ -149,11 +194,15 @@ export class OrdersService {
   /** What the submit page shows before anything is stored: plates, whether the fleet can print them, the queue. */
   async preview(fileName: string, data: Buffer): Promise<OrderPreview> {
     const parsed = this.gcode3mf.parse(fileName, data);
-    const fleet = await this.db.select().from(printers);
+    const offer = await this.resources.offer();
     const queued = await this.db.select({ s: orders.printSeconds }).from(orders).where(eq(orders.status, "QUEUED"));
     return {
       ...parsed,
-      plates: parsed.plates.map((p) => ({ ...p, availability: availability({ printerModel: parsed.printerModel, printerModelId: p.printerModelId, nozzles: p.nozzles }, fleet) })),
+      plates: parsed.plates.map((p) => ({
+        ...p,
+        availability: availability({ printerModel: parsed.printerModel, printerModelId: p.printerModelId, nozzles: p.nozzles }, offer.open),
+        check: this.resources.check(offer, { ...p, printerModel: parsed.printerModel }),
+      })),
       queue: { length: queued.length, aheadSeconds: queued.reduce((a, o) => a + o.s, 0) },
     };
   }
@@ -162,25 +211,31 @@ export class OrdersService {
   async overview(): Promise<OverviewStats> {
     const counts = await this.db.select({ status: orders.status, n: count() }).from(orders).where(inArray(orders.status, ["PENDING_REVIEW", "QUEUED"])).groupBy(orders.status);
     const queued = await this.db.select({ printerModel: orders.printerModel, printerModelId: orders.printerModelId, nozzles: orders.nozzles }).from(orders).where(eq(orders.status, "QUEUED"));
-    const fleet = await this.db.select().from(printers);
+    const fleet = await this.openFleet();
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE"));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
-    /* same items as GET /todo: plates to store, beds to clear with nothing to store, errors */
+    /* same items as GET /todo: plates to store, beds to clear with nothing to store, errors, passed-over orders */
     const todo = awaiting.length + fleet.filter((p) => p.state === "ERROR_PAUSED" || (p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))).length;
+    const rules = await this.settings.get("queue.rules");
+    const now = new Date();
+    const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)))).filter((o) => this.policy.remindSkipped(rules, o, now)).length;
     const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
-    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo };
+    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped };
   }
 
   /**
    * One order per plate, all PENDING_REVIEW (brief §5.3). `plates` picks which
    * plates of the file to submit (1-based, as in the slicer); all of them when absent.
    */
-  async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown, plates?: number[]): Promise<OrderView[]> {
+  async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown, plates: number[] | undefined, choices: SubmitChoices): Promise<OrderView[]> {
     const parsed = this.gcode3mf.read(fileName, data);
     const unknown = plates?.filter((n) => !parsed.plates.some((p) => p.index === n)) ?? [];
     if (unknown.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${unknown.join("、")} 盘`, { plates: unknown });
     if (plates && !plates.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "至少要选一盘");
     const info = plates ? { ...parsed, plates: parsed.plates.filter((p) => plates.includes(p.index)) } : parsed;
+    const rules = await this.settings.get("queue.rules");
+    if (choices.bedType && !rules.allowPlateChoice) throw new ApiError(HttpStatus.BAD_REQUEST, "plate-choice-disabled", "本场不能自选热床板");
+    await this.assertOnOffer(await this.resources.offer(), info.printerModel, info.plates, choices.colourPref);
     const form = await this.forms.current();
     const answers = this.forms.answer(form, rawAnswers);
     const fileId = uuidv7();
@@ -219,6 +274,9 @@ export class OrdersService {
               thumbnailKey: thumbs.get(p.index) ?? null,
               formVersionId: form.id,
               answers,
+              colourPref: choices.colourPref,
+              bedType: choices.bedType,
+              originalPrintSeconds: Math.round(p.printSeconds),
             })
             .returning();
           await orderEvent(tx, ctx, o.id, "submit", { plate: p.index, of: parsed.plates.length });
@@ -234,17 +292,179 @@ export class OrdersService {
     }
   }
 
+  /** Refuses plates the event cannot print (本场可用资源, rules doc §1.5): 422 plate-blocked with the reasons per plate. */
+  private async assertOnOffer(offer: Offer, printerModel: string | null, plates: Plate[], colourPref: ColourPref) {
+    const blocked: { plate: number; reasons: string[] }[] = [];
+    for (const p of plates) {
+      const c = this.resources.check(offer, { ...p, printerModel });
+      const reasons = [...c.block];
+      if (colourPref === "exact" && c.missingColours.length && offer.settings.colourMissing === "block") reasons.push(`本场没有这些颜色：${c.missingColours.join("、")}`);
+      if (reasons.length) blocked.push({ plate: p.index, reasons });
+    }
+    if (!blocked.length) return;
+    const msg = blocked.map((b) => `第 ${b.plate} 盘：${b.reasons.join("；")}`).join("\n");
+    throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, "plate-blocked", msg, { plates: blocked });
+  }
+
+  /* ---------- revising ---------- */
+
+  /**
+   * 提交后修改文件 (rules doc §3, §4): the owner replaces one plate's file. By default it goes back to
+   * review frozen in its place, and on approval moves back by the time rule. A job dispatched but not
+   * started is recalled first. What is allowed and how far it moves is the queue policy's call.
+   * `plateIndex` picks the plate in the new file: when absent, the only plate or the same number.
+   */
+  async revise(ctx: Ctx, id: number, fileName: string, data: Buffer, plateIndex?: number): Promise<OrderView> {
+    const [cur] = await this.db.select().from(orders).where(eq(orders.id, id));
+    if (!cur || cur.ownerId !== userId(ctx)) {
+      if (cur) await this.audit.record(ctx, { action: "order.revise", targetType: "order", targetId: id, result: "denied", reason: "not-owner" });
+      throw notFound("订单");
+    }
+    const parsed = this.gcode3mf.read(fileName, data);
+    const want = plateIndex ?? (parsed.plates.length === 1 ? parsed.plates[0].index : cur.plateIndex);
+    const plate = parsed.plates.find((p) => p.index === want);
+    if (!plate) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${want} 盘`, { plates: [want] });
+    const printer = cur.status === "PRINTING" && cur.printerId ? (await this.db.select().from(printers).where(eq(printers.id, cur.printerId)))[0] : undefined;
+    const dispatched = !!printer && printer.state === "PREPARING" && printer.currentOrderId === id;
+    if (!["PENDING_REVIEW", "QUEUED"].includes(cur.status) && !dispatched) {
+      throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "已经开始打印的订单不能修改，只能取消后重新提交", { orderId: id, status: cur.status });
+    }
+    const rules = await this.settings.get("queue.rules");
+    const next = {
+      printerModelId: plate.printerModelId,
+      nozzles: plate.nozzles.map((n) => ({ extruder: n.extruder, side: n.side, diameter: n.diameter })),
+      filaments: plate.filaments.map((f) => ({ slot: f.slot, type: f.type, color: f.color, usedGrams: f.usedGrams, extruder: f.extruder })),
+      printSeconds: Math.round(plate.printSeconds),
+    };
+    const d = this.policy.revise(rules, cur, next, dispatched);
+    if (!d.allowed) throw new ApiError(HttpStatus.CONFLICT, d.code, d.message, { orderId: id });
+    await this.assertOnOffer(await this.resources.offer(), parsed.printerModel, [plate], cur.colourPref);
+
+    const fileId = uuidv7();
+    const fileKey = `uploads/${fileId}.gcode.3mf`;
+    const thumbKey = plate.thumbnail ? `plates/${fileId}/${plate.index}.png` : null;
+    const written: string[] = [];
+    let recalled: string | null = null;
+    try {
+      await this.storage.put(fileKey, data, "application/vnd.bambulab-gcode-3mf");
+      written.push(fileKey);
+      if (thumbKey) {
+        await this.storage.put(thumbKey, plate.thumbnail!, "image/png");
+        written.push(thumbKey);
+      }
+      const row = await this.db.transaction(async (tx) => {
+        const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");
+        if (o.status !== cur.status || o.fileId !== cur.fileId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
+        if (dispatched) {
+          const p = await lockPrinter(tx, printer!.id);
+          if (p.state !== "PREPARING" || p.currentOrderId !== id) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "这张单已经开始打印，不能再改", { orderId: id });
+          await movePrinter(tx, p, "recalled", { currentOrderId: null });
+          recalled = p.id;
+        }
+        const [f] = await tx.select({ fileName: files.fileName }).from(files).where(eq(files.id, o.fileId));
+        const [{ n }] = await tx.select({ n: count() }).from(orderEvents).where(and(eq(orderEvents.orderId, id), eq(orderEvents.kind, "revise")));
+        const info: RevisionInfo = {
+          n: n + 1,
+          kind: d.kind,
+          at: new Date().toISOString(),
+          prev: { fileName: f.fileName, printerModel: o.printerModel, printerModelId: o.printerModelId, nozzles: o.nozzles, filaments: o.filaments, printSeconds: o.printSeconds, weightGrams: o.weightGrams },
+          deltaSeconds: d.deltaSeconds,
+          placesBack: d.placesBack,
+          recalled: dispatched,
+        };
+        await tx.insert(files).values({ id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
+        const set = {
+          fileId,
+          plateIndex: plate.index,
+          plateCount: parsed.plates.length,
+          plateName: plate.name,
+          printerModel: parsed.printerModel,
+          ...next,
+          weightGrams: plate.weightGrams,
+          thumbnailKey: thumbKey,
+          originalPrintSeconds: o.originalPrintSeconds ?? o.printSeconds,
+          revisionCount: o.revisionCount + (d.counts ? 1 : 0),
+          modelSwitchCount: o.modelSwitchCount + (d.isSwitch ? 1 : 0),
+          printerId: null,
+          startedAt: null,
+          skippedSince: null,
+          revision: d.review ? info : null,
+        };
+        const data_ = { n: info.n, kind: d.kind, file: fileName, plate: plate.index, deltaSeconds: d.deltaSeconds, placesBack: d.placesBack, recalled: dispatched, review: d.review };
+        const { row, from } = d.review
+          ? await transition(tx, ctx, id, "revise", { set: { ...set, reviewedBy: null, reviewedAt: null }, data: data_ })
+          : await transition(tx, ctx, id, "reviseApproved", { set, data: data_ });
+        await this.audit.record(
+          ctx,
+          {
+            action: "order.revise",
+            targetType: "order",
+            targetId: id,
+            before: { status: from, fileId: o.fileId, printSeconds: o.printSeconds, printerModelId: o.printerModelId },
+            after: { status: row.status, fileId, printSeconds: next.printSeconds, printerModelId: next.printerModelId, kind: d.kind, recalled: dispatched ? recalled : null },
+            reason: JSON.stringify({ policy: this.policy.id, deltaSeconds: d.deltaSeconds, placesBack: d.placesBack, review: d.review, rules: { revisions: rules.revisions, modelSwitch: rules.modelSwitch } }),
+          },
+          tx,
+        );
+        return row;
+      });
+      if (recalled) await this.sendRecall(ctx, recalled, id);
+      if (recalled || !d.review) void this.scheduler.kick();
+      return (await this.views(ctx, [row]))[0];
+    } catch (e) {
+      for (const k of written) await this.storage.delete(k).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  /** Best effort, like sendStop: the recall is recorded; the daemon link will deliver it once it exists. */
+  private async sendRecall(ctx: Ctx, printerId: string, orderId: number) {
+    try {
+      await this.commands.recall(printerId, orderId);
+    } catch (e) {
+      this.log.warn(`recall not sent to ${printerId}: ${(e as Error).message}`);
+      await this.audit.record(ctx, { action: "printer.recall.command", targetType: "printer", targetId: printerId, after: { orderId }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
+      return;
+    }
+    await this.audit.record(ctx, { action: "printer.recall.command", targetType: "printer", targetId: printerId, after: { orderId } });
+  }
+
   /* ---------- review ---------- */
 
+  /**
+   * Approval queues the order. A revision keeps its place and then moves back as the policy decided
+   * when it was uploaded; the move is in the audit log with the rule and its numbers (rules doc §7).
+   */
   async approve(ctx: Ctx, id: number): Promise<OrderView> {
     const row = await this.db.transaction(async (tx) => {
+      const [pending] = await tx.select({ revision: orders.revision }).from(orders).where(eq(orders.id, id)).for("update");
+      const rev = pending?.revision ?? null;
       const { row } = await transition(tx, ctx, id, "approve", {
-        set: { reviewedBy: userId(ctx), reviewedAt: new Date(), queueSeq: this.scheduler.nextQueueSeq() },
+        set: { reviewedBy: userId(ctx), reviewedAt: new Date(), queueSeq: sql`coalesce(${orders.queueSeq}, nextval('order_queue_seq'))`, revision: null },
+        data: rev ? { revision: rev.n, placesBack: rev.placesBack } : undefined,
         conflictCode: "already-reviewed",
         conflictMessage: "这张单已被他人审核",
       });
       await this.audit.record(ctx, { action: "order.approve", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "QUEUED" } }, tx);
-      return row;
+      if (!rev || rev.placesBack === 0) return row;
+      {
+        const q = await lockQueue(tx);
+        const from = q.findIndex((o) => o.id === id);
+        const to = await moveInQueue(tx, q, id, rev.placesBack === "tail" ? q.length - 1 : from + rev.placesBack);
+        await this.audit.record(
+          ctx,
+          {
+            action: "queue.revision-penalty",
+            targetType: "order",
+            targetId: id,
+            before: { position: from + 1 },
+            after: { position: to + 1 },
+            reason: JSON.stringify({ policy: this.policy.id, revision: rev.n, kind: rev.kind, deltaSeconds: rev.deltaSeconds, placesBack: rev.placesBack }),
+          },
+          tx,
+        );
+      }
+      return (await tx.select().from(orders).where(eq(orders.id, id)))[0];
     });
     void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
@@ -363,16 +583,11 @@ export class OrdersService {
    */
   async reorder(ctx: Ctx, id: number, toPosition: number, reason: string | null) {
     await this.db.transaction(async (tx) => {
-      const q = await tx.select({ id: orders.id, seq: orders.queueSeq }).from(orders).where(eq(orders.status, "QUEUED")).orderBy(asc(orders.queueSeq), asc(orders.id)).for("update");
+      const q = await lockQueue(tx);
       const from = q.findIndex((o) => o.id === id);
       if (from < 0) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只能调整排队中的订单", { orderId: id });
-      const to = Math.min(Math.max(toPosition, 1), q.length) - 1;
+      const to = await moveInQueue(tx, q, id, toPosition - 1);
       if (to === from) return;
-      const seqs = q.map((o) => o.seq!).sort((a, b) => a - b);
-      const ids = q.map((o) => o.id);
-      ids.splice(to, 0, ...ids.splice(from, 1));
-      /* reuse the same keys in the new order, so new approvals still land at the end */
-      for (let i = 0; i < ids.length; i++) if (q[i].id !== ids[i] || q[i].seq !== seqs[i]) await tx.update(orders).set({ queueSeq: seqs[i] }).where(eq(orders.id, ids[i]));
       await this.audit.record(ctx, { action: "queue.reorder", targetType: "order", targetId: id, before: { position: from + 1 }, after: { position: to + 1 }, reason }, tx);
     });
   }
@@ -439,5 +654,7 @@ function blank(o: Omit<OrderRow, "id" | "status" | "submittedAt">) {
     attribution: null,
     attributedBy: null,
     attributedAt: null,
+    revision: null,
+    skippedSince: null,
   };
 }
