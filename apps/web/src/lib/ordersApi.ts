@@ -207,7 +207,8 @@ function toTasks(t: TodoView): Task[] {
         since: fmtSince(x.since),
         err: x.printer.error?.message ?? x.printer.error?.vendorCode ?? "打印机报错，已暂停",
         pct: x.order?.progress ?? undefined,
-        actions: x.printer.error?.actions.filter((a) => a !== "STOP"),
+        hms: x.printer.error?.vendorCode,
+        actions: x.printer.error?.actions,
         ...base(x.order, x.printer),
       }),
     ),
@@ -239,7 +240,8 @@ const rows = <T,>(s: { data: T[] | null; loading: boolean; error: string | null 
 export const useMyOrders = (): Rows<MyOrder> => (LIVE ? rows(live.mine.use(20e3)) : { rows: myOrders.use(), loading: false, error: null });
 export const useReviewOrders = (): Rows<AdminOrder> => (LIVE ? rows(live.review.use()) : { rows: adminOrders.use().filter((o) => o.st === "pending").sort((a, b) => a.at.localeCompare(b.at)), loading: false, error: null });
 export const useManageOrders = (): Rows<AdminOrder> => (LIVE ? rows(live.manage.use()) : { rows: adminOrders.use(), loading: false, error: null });
-export const useTasks = (): Rows<Task> => (LIVE ? rows(live.todo.use()) : { rows: tasks.use(), loading: false, error: null });
+/** `pollMs` keeps 报错处理 fresh: an error clears when the printer reports it recovered, not when someone clicks. */
+export const useTasks = (pollMs?: number): Rows<Task> => (LIVE ? rows(live.todo.use(pollMs)) : { rows: tasks.use(), loading: false, error: null });
 
 /** Navigation badges and 概况 numbers; cheap and not audited, so it polls. */
 export function useCounts(): { pending: number; todo: number; stats: OverviewStats | null } {
@@ -324,9 +326,10 @@ export const ordersApi = {
     return after(await upload(`/api/orders/${t.order}/store`, body), "todo");
   },
 
-  async resume(t: Task): Promise<Done> {
-    if (!LIVE) return tasks.set((s) => s.filter((x) => x.id !== t.id)), ok;
-    const action = t.actions?.find((a) => a.startsWith("RESUME")) ?? t.actions?.[0] ?? "RESUME";
+  /** Sends one of the error's own actions; the task stays until the printer reports it recovered. */
+  async resolve(t: Task, action: string): Promise<Done> {
+    /* the mock printer recovers a moment later */
+    if (!LIVE) return setTimeout(() => tasks.set((s) => s.filter((x) => x.id !== t.id)), 2400), ok;
     return after(await api<null>(`/api/printers/${t.printerId}/resolve`, json("POST", { action })), "todo");
   },
 
