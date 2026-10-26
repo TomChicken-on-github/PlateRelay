@@ -1,4 +1,4 @@
-import type { FailureAttribution, OrderDetail, OrderList, OrderTimelineEntry, OrderView, OverviewStats, PersonView, PrinterView, TodoView } from "@platerelay/shared";
+import { COLOUR_PREF_LABEL, type FailureAttribution, type OrderDetail, type OrderList, type OrderTimelineEntry, type OrderView, type OverviewStats, type PersonView, type PrinterView, type TodoView } from "@platerelay/shared";
 import { type AdminOrder, adminOrders } from "../mock/adminOrders";
 import { type MyOrder, myOrders, type OrderStatus } from "../mock/myOrders";
 import { type Task, tasks } from "../mock/todo";
@@ -37,10 +37,10 @@ const fil = (v: Pick<OrderView, "filaments">): [string, string][] => [...v.filam
 const person = (p: PersonView | null | undefined) => (p ? (p.role ? `${p.role} ${p.name}` : p.name) : undefined);
 const thumb = (v: OrderView) => stableLink(`order:${v.id}`, v.thumbUrl);
 
-export function pageStatus(v: Pick<OrderView, "status" | "waitingForHandler">): OrderStatus {
+export function pageStatus(v: Pick<OrderView, "status" | "waitingForHandler"> & { revision?: OrderView["revision"] }): OrderStatus {
   switch (v.status) {
     case "PENDING_REVIEW":
-      return "pending";
+      return v.revision ? "revising" : "pending";
     case "QUEUED":
       return "queued";
     case "PRINTING":
@@ -93,6 +93,14 @@ export function toMyOrder(v: OrderView): MyOrder {
     storer: person(v.stored?.by),
     redeemer: person(v.redeemed?.by),
     canceller: v.cancel?.by?.name,
+    canRevise: v.canRevise,
+    revs: v.revisions.count,
+    revMax: v.revisions.max,
+    switches: v.revisions.switches,
+    maxSwitches: v.revisions.maxSwitches,
+    baseSec: v.revisions.baselineSeconds,
+    modelId: v.printerModelId,
+    dual: v.nozzles.length > 1,
   };
 }
 
@@ -129,6 +137,20 @@ export function toAdminOrder(v: OrderView): AdminOrder {
     attributed: !!v.failure?.attribution,
     retried: v.retriedAs ?? undefined,
     mine: v.isMine,
+    colour: COLOUR_PREF_LABEL[v.colourPref],
+    missing: v.missingColours?.length ? v.missingColours.map((c): [string, string] => [c, v.filaments.find((f) => f.color.slice(0, 7).toLowerCase() === c)?.type ?? ""]) : undefined,
+    rev: v.revision
+      ? {
+          n: v.revision.n,
+          file: v.revision.prev.fileName,
+          model: shortModel(v.revision.prev.printerModel, v.revision.prev.printerModelId),
+          time: fmtDur(v.revision.prev.printSeconds),
+          g: Math.round(v.revision.prev.weightGrams),
+          fil: fil(v.revision.prev),
+          pos: v.queue?.position,
+          back: v.revision.placesBack,
+        }
+      : undefined,
   };
 }
 
@@ -211,6 +233,7 @@ function toTasks(t: TodoView): Task[] {
         ...base(x.order, x.printer),
       }),
     ),
+    ...t.skipped.map((x): Task => ({ id: `k${x.order.id}`, kind: "skip", since: fmtSince(x.since), why: x.order.waitReason ?? undefined, ...base(x.order, null), printer: x.order.queue ? `队列第 ${x.order.queue.position} 位` : "—" })),
   ];
 }
 
@@ -237,14 +260,14 @@ const rows = <T,>(s: { data: T[] | null; loading: boolean; error: string | null 
 
 /* Own orders change as printers work, and reading them is not audited, so they poll; staff lists reload on focus and after actions. */
 export const useMyOrders = (): Rows<MyOrder> => (LIVE ? rows(live.mine.use(20e3)) : { rows: myOrders.use(), loading: false, error: null });
-export const useReviewOrders = (): Rows<AdminOrder> => (LIVE ? rows(live.review.use()) : { rows: adminOrders.use().filter((o) => o.st === "pending").sort((a, b) => a.at.localeCompare(b.at)), loading: false, error: null });
+export const useReviewOrders = (): Rows<AdminOrder> => (LIVE ? rows(live.review.use()) : { rows: adminOrders.use().filter((o) => o.st === "pending" || o.st === "revising").sort((a, b) => +!!b.rev - +!!a.rev || a.at.localeCompare(b.at)), loading: false, error: null });
 export const useManageOrders = (): Rows<AdminOrder> => (LIVE ? rows(live.manage.use()) : { rows: adminOrders.use(), loading: false, error: null });
 export const useTasks = (): Rows<Task> => (LIVE ? rows(live.todo.use()) : { rows: tasks.use(), loading: false, error: null });
 
 /** Navigation badges and 概况 numbers; cheap and not audited, so it polls. */
 export function useCounts(): { pending: number; todo: number; stats: OverviewStats | null } {
   if (!LIVE) {
-    const pending = adminOrders.use().filter((o) => o.st === "pending").length;
+    const pending = adminOrders.use().filter((o) => o.st === "pending" || o.st === "revising").length;
     return { pending, todo: tasks.use().length, stats: null };
   }
   const s = live.overview.use(30e3).data;
@@ -278,8 +301,17 @@ export const ordersApi = {
     return after(await api<null>(`/api/orders/${id}/cancel`, json("POST", { reason })), "mine");
   },
 
+  /** 修改文件: a new version of the order's plate; `plate` picks it in a multi-plate file. */
+  async revise(id: number, file: File, plate?: number): Promise<Res<OrderView>> {
+    const body = new FormData();
+    body.append("file", file);
+    if (plate != null) body.append("plate", String(plate));
+    const r = await api<OrderView>(`/api/orders/${id}/revise`, { method: "POST", body });
+    return after(r, "mine", "review", "manage");
+  },
+
   async approve(id: number): Promise<Done> {
-    if (!LIVE) return updateAdmin(id, () => ({ st: "queued", note: "" })), ok;
+    if (!LIVE) return updateAdmin(id, () => ({ st: "queued", note: "", rev: undefined })), ok;
     return after(await api<null>(`/api/orders/${id}/approve`, json("POST")), "review", "manage");
   },
 

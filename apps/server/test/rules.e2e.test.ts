@@ -171,7 +171,7 @@ describe("print rules", () => {
       assert.equal(v.revision!.deltaSeconds, 1200);
       assert.equal(v.revision!.placesBack, 1);
       assert.equal(v.revision!.prev.printSeconds, PLATE1_SECONDS);
-      assert.deepEqual(v.revisions, { count: 1, max: 3, switches: 0, maxSwitches: 1 });
+      assert.deepEqual(v.revisions, { count: 1, max: 3, switches: 0, maxSwitches: 1, baselineSeconds: PLATE1_SECONDS });
       assert.equal((await positions()).get(a), 1, "frozen in its place");
 
       const pool = (await builder.get("/api/review").expect(200)).body as OrderDetail[];
@@ -263,7 +263,7 @@ describe("print rules", () => {
       const v = (await revise(user, a, x2dTwoPlates(P2S)).expect(200)).body as OrderView;
       assert.equal(v.revision!.kind, "model-switch");
       assert.equal(v.printerModelId, "N7");
-      assert.deepEqual(v.revisions, { count: 1, max: 3, switches: 1, maxSwitches: 1 });
+      assert.deepEqual(v.revisions, { count: 1, max: 3, switches: 1, maxSwitches: 1, baselineSeconds: PLATE1_SECONDS });
       await builder.post(`/api/orders/${a}/approve`).expect(200);
       const pos = await positions();
       assert.ok(pos.get(a)! < pos.get(b)!, "original submit time");
@@ -272,7 +272,7 @@ describe("print rules", () => {
       const c = await queued(user);
       const d = (await revise(user, c, x2dTwoPlates(singleN7)).expect(200)).body as OrderView;
       assert.equal(d.revision!.kind, "dual-to-single");
-      assert.deepEqual(d.revisions, { count: 0, max: 3, switches: 1, maxSwitches: 1 });
+      assert.deepEqual(d.revisions, { count: 0, max: 3, switches: 1, maxSwitches: 1, baselineSeconds: PLATE1_SECONDS });
     });
   });
 

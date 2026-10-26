@@ -1,10 +1,10 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditListQuery, type AuditLogView } from "@platerelay/shared";
+import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditListQuery, type AuditLogView, BED_TYPE_LABEL, MAX_UPLOAD_BYTES, type QueueRules, type ResourceSettings, type ResourcesView, WAIT_BUCKETS, WAIT_BUCKET_LABEL, type WaitBucket } from "@platerelay/shared";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { Button, IconButton } from "../../components/Button";
-import { FilterTabs, StatusChip } from "../../components/Chip";
-import { Field, Select, TextInput } from "../../components/Field";
+import { FilterTabs, SelectChip, StatusChip } from "../../components/Chip";
+import { Field, Select, TextArea, TextInput } from "../../components/Field";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
 import { Switch } from "../../components/Switch";
@@ -14,6 +14,8 @@ import { Icon } from "../../components/icons/Icon";
 import { LIVE } from "../../lib/api";
 import { auditApi } from "../../lib/auditApi";
 import { AUDIT_ACTIONS, AUDIT_TARGETS, auditAction, auditActor, auditChanges, auditNote, auditReason, auditRole, auditTarget } from "../../lib/auditPresentation";
+import { saveResourceSettings, useResourceSettings, useResources } from "../../lib/resourcesApi";
+import { saveRules, useRules } from "../../lib/rulesApi";
 import { canOpen, useMe } from "../../lib/session";
 import { cx } from "../../lib/cx";
 import { FIELD_TYPE_LABEL, type DaemonRow, type FieldRow, newFieldKey, settingsApi, useDaemons, useFields, useRegistration, useUsers } from "../../lib/settingsApi";
@@ -28,6 +30,7 @@ const TABS = [
   ["form", "申请表单"],
   ["users", "用户与角色"],
   ["policy", "文件与排队"],
+  ["resources", "可用资源"],
   ["notify", "通知"],
   ["daemon", "守护进程"],
   ["audit", "审计日志"],
@@ -210,42 +213,329 @@ function UsersTab() {
 /* ---------- 文件与排队 ---------- */
 
 function PolicyTab() {
+  const rules = useRules();
+  return rules ? <PolicyForm key={JSON.stringify(rules)} rules={rules} /> : <Section title="文件"><StatusBlock icon="hourglass_top" title="正在加载" /></Section>;
+}
+
+const PENALTIES: [QueueRules["revisions"]["penalty"], string][] = [["none", "不变"], ["fixed", "固定后移"], ["per-step", "每多一段时间后移"], ["tail", "排到队尾"]];
+
+type Draft = Record<"size" | "revMax" | "thr" | "places" | "step" | "swMax" | "swExtra" | "skip", string>;
+const draftOf = (r: QueueRules, size: string): Draft => ({
+  size, revMax: String(r.revisions.max), thr: String(r.revisions.thresholdMinutes), places: String(r.revisions.places), step: String(r.revisions.stepMinutes),
+  swMax: String(r.modelSwitch.max), swExtra: String(r.modelSwitch.extraPlaces), skip: String(r.skipReminderMinutes),
+});
+
+function PolicyForm({ rules }: { rules: QueueRules }) {
   const toast = useToast();
   const { policy } = settings.use();
-  const [size, setSize] = useState(policy.size);
-  const ok = +size > 0 && +size <= 2000;
-  return (
-    <Section title="文件与排队" hint={LIVE ? NO_BACKEND : undefined}>
-      <Field label="文件大小上限" error={ok ? undefined : "请输入 1 到 2000 之间的数字"}>
-        {(id, cls) => (
-          <div className="relative">
-            <TextInput id={id} className={cx(cls, "pr-14")} inputMode="numeric" value={size} onChange={(e) => setSize(e.target.value.replace(/\D/g, ""))} />
-            <span className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-label-l text-on-variant">MB</span>
-          </div>
-        )}
-      </Field>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-note font-medium tracking-[0.1px] text-on-variant">允许的文件类型</span>
-        <div>
-          <Tag>.gcode.3mf</Tag>
+  const [r, setR] = useState(rules);
+  const [d, setD] = useState(() => draftOf(rules, policy.size));
+  const [busy, setBusy] = useState(false);
+  const rev = <K extends keyof QueueRules["revisions"]>(k: K, v: QueueRules["revisions"][K]) => setR({ ...r, revisions: { ...r.revisions, [k]: v } });
+  const sw = <K extends keyof QueueRules["modelSwitch"]>(k: K, v: QueueRules["modelSwitch"][K]) => setR({ ...r, modelSwitch: { ...r.modelSwitch, [k]: v } });
+  const LIMITS: Record<keyof Draft, [number, number]> = { size: [1, 2000], revMax: [0, 99], thr: [0, 1440], places: [0, 999], step: [1, 1440], swMax: [0, 99], swExtra: [0, 999], skip: [1, 1440] };
+  const bad = (k: keyof Draft) => d[k] === "" || +d[k] < LIMITS[k][0] || +d[k] > LIMITS[k][1];
+  const next: QueueRules = {
+    ...r,
+    revisions: { ...r.revisions, max: +d.revMax, thresholdMinutes: +d.thr, places: +d.places, stepMinutes: +d.step },
+    modelSwitch: { ...r.modelSwitch, max: +d.swMax, extraPlaces: +d.swExtra },
+    skipReminderMinutes: +d.skip,
+  };
+  const shown: (keyof Draft)[] = ["skip", "swMax", ...(LIVE ? [] : ["size" as const]), ...(r.revisions.enabled ? (["revMax", "thr"] as const) : []),
+    ...(r.revisions.enabled && r.revisions.penalty === "per-step" ? (["step", "places"] as const) : []), ...(r.revisions.enabled && r.revisions.penalty === "fixed" ? (["places"] as const) : []),
+    ...(r.modelSwitch.position === "original" ? (["swExtra"] as const) : [])];
+  const ok = shown.every((k) => !bad(k));
+  const dirty = JSON.stringify(next) !== JSON.stringify(rules) || d.size !== policy.size;
+
+  const num = (k: keyof Draft, label: string, unit: string) => (
+    <Field label={label} error={bad(k) ? `请输入 ${LIMITS[k][0]} 到 ${LIMITS[k][1]} 之间的整数` : undefined}>
+      {(id, cls) => (
+        <div className="relative">
+          <TextInput id={id} className={cx(cls, "pr-14")} inputMode="numeric" value={d[k]} onChange={(e) => setD({ ...d, [k]: e.target.value.replace(/\D/g, "") })} />
+          <span className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-label-l text-on-variant">{unit}</span>
         </div>
+      )}
+    </Field>
+  );
+  const sel = <V extends string>(label: string, opts: [V, string][], value: V, set: (v: V) => void) => (
+    <Field label={label}>
+      {(id, cls) => (
+        <select id={id} className={cls} value={value} onChange={(e) => set(e.target.value as V)}>
+          {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      )}
+    </Field>
+  );
+  const row = (label: string, checked: boolean, set: (v: boolean) => void) => (
+    <Row>
+      <RowText title={label} />
+      <Switch checked={checked} label={label} onChange={set} />
+    </Row>
+  );
+
+  async function save() {
+    setBusy(true);
+    const res = await saveRules(next);
+    setBusy(false);
+    if (!res.ok) return toast(res.error.message);
+    if (!LIVE) {
+      settings.set((s) => ({ ...s, policy: { ...s.policy, size: d.size } }));
+      log("修改文件与排队规则", `文件上限 ${d.size} MB`);
+    }
+    toast("已保存");
+  }
+
+  return (
+    <>
+      <Section title="文件">
+        {LIVE ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-note font-medium tracking-[0.1px] text-on-variant">文件大小上限</span>
+            <div><Tag>{MAX_UPLOAD_BYTES / 1048576} MB</Tag></div>
+          </div>
+        ) : num("size", "文件大小上限", "MB")}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-note font-medium tracking-[0.1px] text-on-variant">允许的文件类型</span>
+          <div><Tag>.gcode.3mf</Tag></div>
+        </div>
+        <div>{row("允许自选热床板", r.allowPlateChoice, (v) => setR({ ...r, allowPlateChoice: v }))}</div>
+      </Section>
+      <Section title="排队">
+        <Field label="排队规则" hint="人工调整顺序只对管理员可见，选手看不到">
+          {(id, cls) => <Select id={id} className={cls} options={["FIFO（先到先得）"]} value="FIFO（先到先得）" onChange={() => {}} />}
+        </Field>
+        {num("skip", "跳单提醒：队头等待超过", "分钟")}
+      </Section>
+      <Section title="提交后修改">
+        <div>{row("允许提交后修改文件", r.revisions.enabled, (v) => rev("enabled", v))}</div>
+        {r.revisions.enabled && (
+          <>
+            {num("revMax", "最多修改次数", "次")}
+            {sel("已派单、还没开始打时修改", [["recall", "撤回打印并冻结"], ["refuse", "不允许修改"]], r.revisions.whenDispatched, (v) => rev("whenDispatched", v))}
+            <h3 className="m-0 mt-1 -mb-2 text-label-l font-medium text-on-variant">排队位置</h3>
+            {num("thr", "时长增加不超过", "分钟")}
+            {sel("超过后", PENALTIES, r.revisions.penalty, (v) => rev("penalty", v))}
+            {(r.revisions.penalty === "fixed" || r.revisions.penalty === "per-step") && (
+              <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
+                {r.revisions.penalty === "per-step" && num("step", "每多", "分钟")}
+                {num("places", "后移", "位")}
+              </div>
+            )}
+            {sel("时长比较基准", [["original", "第一版"], ["previous", "上一版"]], r.revisions.baseline, (v) => rev("baseline", v))}
+            <div>{row("轻微修改自动审核", r.revisions.autoApproveMinor, (v) => rev("autoApproveMinor", v))}</div>
+          </>
+        )}
+      </Section>
+      <Section title="换机型">
+        {num("swMax", "最多换机型次数", "次")}
+        {sel("进新机型队列的位置", [["original", "按原提交时间"], ["tail", "队尾"]], r.modelSwitch.position, (v) => sw("position", v))}
+        {r.modelSwitch.position === "original" && num("swExtra", "额外后移", "位")}
+        <div>
+          {row("换机型计入修改次数", r.modelSwitch.countsAsRevision, (v) => sw("countsAsRevision", v))}
+          {row("双头改单头计入修改次数", r.modelSwitch.dualToSingleCounts, (v) => sw("dualToSingleCounts", v))}
+        </div>
+        <Actions>
+          <Button disabled={!dirty || !ok || busy} onClick={save}>保存</Button>
+        </Actions>
+      </Section>
+    </>
+  );
+}
+
+/* ---------- 可用资源 ---------- */
+
+const WAIT_OPTIONS: [WaitBucket | "", string][] = [["", "自动"], ...WAIT_BUCKETS.map((w): [WaitBucket, string] => [w, WAIT_BUCKET_LABEL[w]])];
+const MATERIAL_TYPES = ["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF", "PA", "PC"];
+
+/** "2 台 · 0.4 mm 双喷嘴 · 纹理 PEI 板" */
+export const modelSummary = (m: ResourcesView["models"][number]) =>
+  [`${m.count} 台`, `${m.nozzles.join(" / ")} mm ${m.dual ? "双" : "单"}喷嘴`, m.bedTypes.map((b) => BED_TYPE_LABEL[b] ?? b).join(" / ")].filter((x) => x && x !== " mm 单喷嘴").join(" · ");
+
+export function ColourDot({ color, name, stock }: { color: string; name: string | null; stock?: boolean }) {
+  return (
+    <span className={cx("inline-flex h-6 items-center gap-1.5 rounded-lg pr-2 pl-1.5 text-body-s font-medium", stock ? "text-on-variant shadow-[inset_0_0_0_1px_var(--md-outline-variant)]" : "bg-sc-high text-on-surface")}>
+      <i className="size-3 rounded-full shadow-[0_0_0_1px_var(--md-outline-variant)]" style={{ background: color }} />
+      {name ?? color.toUpperCase()}
+    </span>
+  );
+}
+
+type ResSheet = { kind: "model"; id: string; note: string; wait: WaitBucket | "" } | { kind: "material"; id: string; note: string } | { kind: "stock"; type: string; color: string; name: string; on: string[] };
+
+function ResourcesTab() {
+  const toast = useToast();
+  const view = useResources();
+  const cfg = useResourceSettings();
+  const [form, setForm] = useState<Pick<ResourceSettings, "show" | "showWait" | "colourMissing" | "bulletin"> | null>(null);
+  const [sheet, setSheet] = useState<ResSheet | null>(null);
+  const s = cfg.data;
+  const v = view.data;
+  if (!s || !v) return <Section title="提交页展示">{(cfg.error || view.error) && <StatusBlock tone="err" icon="error" title={cfg.error ?? view.error} />}</Section>;
+  const f = form ?? { show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bulletin: s.bulletin };
+  const dirty = JSON.stringify(f) !== JSON.stringify({ show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bulletin: s.bulletin });
+  const openModels = v.models.filter((m) => !m.hidden);
+
+  async function save(next: ResourceSettings, msg: string) {
+    const r = await saveResourceSettings(next);
+    if (!r.ok) return toast(r.error.message), false;
+    if (!LIVE) log("修改可用资源", msg);
+    toast(msg);
+    return true;
+  }
+  const setModel = (id: string, p: ResourceSettings["models"][string]) => ({ ...s, models: { ...s.models, [id]: { ...s.models[id], ...p } } });
+  const setMaterial = (id: string, p: ResourceSettings["materials"][string]) => ({ ...s, materials: { ...s.materials, [id]: { ...s.materials[id], ...p } } });
+
+  const row = (key: string, title: string, sub: ReactNode, hidden: boolean, extra: ReactNode, onEdit: () => void, onShow: (v: boolean) => void) => (
+    <Row key={key} className="grid-cols-[minmax(0,1fr)_auto]">
+      <div className={cx("min-w-0", hidden && "opacity-50")}>
+        <b className="block text-label-l font-medium">{title}</b>
+        <small className="block text-body-s text-on-variant">{sub}</small>
+        {extra}
       </div>
-      <Field label="排队规则" hint="人工调整顺序只对管理员可见，选手看不到">
-        {(id, cls) => <Select id={id} className={cls} options={[policy.rule]} value={policy.rule} onChange={() => {}} />}
-      </Field>
-      <Actions>
-        <Button
-          disabled={size === policy.size || !ok}
-          onClick={() => {
-            settings.set((s) => ({ ...s, policy: { ...s.policy, size } }));
-            log("修改策略", `文件上限 ${size} MB`);
-            toast("策略已保存");
-          }}
-        >
-          保存
-        </Button>
-      </Actions>
-    </Section>
+      <div className="flex items-center gap-1">
+        {hidden && <span className="inline-flex h-6 items-center rounded-lg bg-secondary-container px-2 text-body-s font-medium text-on-secondary-container">已隐藏</span>}
+        <IconButton icon="edit" size={40} label={`编辑 ${title}`} onClick={onEdit} />
+        <Switch checked={!hidden} label={`在提交页显示 ${title}`} onChange={onShow} />
+      </div>
+    </Row>
+  );
+  const note = (n: string, label = "备注") => n && <div className="mt-1 text-body-s text-on-variant">{label}：<span className="text-on-surface">{n}</span></div>;
+
+  return (
+    <>
+      <Section title="提交页展示">
+        <div>
+          <Row>
+            <RowText title="在提交页显示可用资源" />
+            <Switch checked={f.show} label="在提交页显示可用资源" onChange={(x) => setForm({ ...f, show: x })} />
+          </Row>
+          <Row>
+            <RowText title="显示预计等待时间" />
+            <Switch checked={f.showWait} label="显示预计等待时间" onChange={(x) => setForm({ ...f, showWait: x })} />
+          </Row>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-note font-medium tracking-[0.1px] text-on-variant">机型、喷嘴或材质不在表里</span>
+          <div><Tag>拦下，不能提交这一盘</Tag></div>
+        </div>
+        <Field label="选手要求颜色「一致」，但本场没有这个颜色">
+          {(id, cls) => (
+            <select id={id} className={cls} value={f.colourMissing} onChange={(e) => setForm({ ...f, colourMissing: e.target.value as "warn" | "block" })}>
+              <option value="warn">提示，可以提交</option>
+              <option value="block">拦下，不能提交</option>
+            </select>
+          )}
+        </Field>
+        <Field label="顶部说明（选填）" counter={`${f.bulletin.length}/200`}>
+          {(id, cls) => <TextArea id={id} className={cls} maxLength={200} placeholder="例如：现场换料约 10 分钟" value={f.bulletin} onChange={(e) => setForm({ ...f, bulletin: e.target.value })} />}
+        </Field>
+        <Actions>
+          <Button disabled={!dirty} onClick={async () => (await save({ ...s, ...f }, "已保存")) && setForm(null)}>保存</Button>
+        </Actions>
+      </Section>
+      <Section title="机型">
+        <div>
+          {v.models.length ? v.models.map((m) =>
+            row(m.modelId, m.model, modelSummary(m), m.hidden, <>{note(m.note)}{m.waitManual && m.wait && note(`${WAIT_BUCKET_LABEL[m.wait]}（手动）`, "预计等待")}</>,
+              () => setSheet({ kind: "model", id: m.modelId, note: s.models[m.modelId]?.note ?? "", wait: s.models[m.modelId]?.wait ?? "" }),
+              (x) => save(setModel(m.modelId, { hidden: !x }), `${m.model} 已${x ? "显示" : "隐藏"}`)),
+          ) : <Empty icon="print_disabled" title="没有开放给选手的打印机" />}
+        </div>
+      </Section>
+      <Section title="耗材">
+        <div>
+          {v.materials.map((m) => {
+            const on = [...new Set(m.colors.flatMap((c) => c.modelIds))];
+            const names = openModels.filter((x) => on.includes(x.modelId)).map((x) => x.model);
+            const src = [m.colors.some((c) => !c.stock) && "打印机上报", m.colors.some((c) => c.stock) && "手动添加"].filter(Boolean).join(" + ");
+            const sub = [names.length && names.length === openModels.length ? "全部开放机型" : names.join(" · "), src].filter(Boolean).join(" · ");
+            return row(m.type, m.type, sub, m.hidden,
+              <>{!!m.colors.length && <div className="mt-1.5 flex flex-wrap gap-1.5">{m.colors.map((c) => <ColourDot key={c.color + c.stock} {...c} />)}</div>}{note(m.note)}</>,
+              () => setSheet({ kind: "material", id: m.type, note: s.materials[m.type]?.note ?? "" }),
+              (x) => save(setMaterial(m.type, { hidden: !x }), `${m.type} 已${x ? "显示" : "隐藏"}`));
+          })}
+        </div>
+        <Actions>
+          <Button variant="tonal" icon="add" onClick={() => setSheet({ kind: "stock", type: v.materials[0]?.type ?? "PLA", color: "#ff8d28", name: "", on: openModels.map((m) => m.modelId) })}>添加库存耗材</Button>
+        </Actions>
+      </Section>
+      <Sheet
+        open={!!sheet}
+        onClose={() => setSheet(null)}
+        title={sheet?.kind === "stock" ? "添加库存耗材" : sheet?.kind === "model" ? `编辑 ${v.models.find((m) => m.modelId === sheet.id)?.model ?? ""}` : `${sheet?.id ?? ""} 的备注`}
+        footer={
+          <>
+            <Button variant="text" onClick={() => setSheet(null)}>取消</Button>
+            <Button
+              disabled={sheet?.kind === "stock" && (!sheet.name.trim() || !sheet.on.length)}
+              onClick={async () => {
+                if (!sheet) return;
+                const next =
+                  sheet.kind === "model" ? setModel(sheet.id, { note: sheet.note.trim(), wait: sheet.wait || null })
+                  : sheet.kind === "material" ? setMaterial(sheet.id, { note: sheet.note.trim() })
+                  : { ...s, stock: [...s.stock, { id: `s${Date.now().toString(36)}`, type: sheet.type, color: sheet.color, name: sheet.name.trim(), modelIds: sheet.on }] };
+                if (await save(next, sheet.kind === "stock" ? "已添加库存耗材" : "已保存")) setSheet(null);
+              }}
+            >
+              {sheet?.kind === "stock" ? "添加" : "保存"}
+            </Button>
+          </>
+        }
+      >
+        {sheet && sheet.kind !== "stock" && (
+          <>
+            <Field label="备注" counter={`${sheet.note.length}/40`}>
+              {(id, cls) => <TextInput id={id} className={cls} maxLength={40} placeholder="例如 只有 0.4 mm 喷嘴" value={sheet.note} onChange={(e) => setSheet({ ...sheet, note: e.target.value })} />}
+            </Field>
+            {sheet.kind === "model" && (
+              <Field label="预计等待">
+                {(id, cls) => (
+                  <select id={id} className={cls} value={sheet.wait} onChange={(e) => setSheet({ ...sheet, wait: e.target.value as WaitBucket | "" })}>
+                    {WAIT_OPTIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                )}
+              </Field>
+            )}
+            {sheet.kind === "material" && s.stock.some((x) => x.type === sheet.id) && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-note font-medium tracking-[0.1px] text-on-variant">库存耗材</span>
+                <div>
+                  {s.stock.filter((x) => x.type === sheet.id).map((x) => (
+                    <Row key={x.id}>
+                      <ColourDot color={x.color} name={x.name} stock />
+                      <IconButton icon="delete" label={`删除 ${x.name}`} onClick={async () => { await save({ ...s, stock: s.stock.filter((y) => y.id !== x.id) }, "已删除库存耗材"); }} />
+                    </Row>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {sheet?.kind === "stock" && (
+          <>
+            <Field label="材料" required>
+              {(id, cls) => <Select id={id} className={cls} options={[...new Set([...v.materials.map((m) => m.type), ...MATERIAL_TYPES])]} value={sheet.type} onChange={(e) => setSheet({ ...sheet, type: e.target.value })} />}
+            </Field>
+            <div className="grid grid-cols-[56px_minmax(0,1fr)] items-end gap-3">
+              <input type="color" aria-label="颜色" value={sheet.color} onChange={(e) => setSheet({ ...sheet, color: e.target.value })} className="h-[50px] w-14 cursor-pointer rounded-lg border-0 bg-transparent p-1 shadow-[inset_0_0_0_1px_var(--md-outline)]" />
+              <Field label="颜色名称" required>
+                {(id, cls) => <TextInput id={id} className={cls} maxLength={20} placeholder="例如 橙" value={sheet.name} onChange={(e) => setSheet({ ...sheet, name: e.target.value })} />}
+              </Field>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-note font-medium tracking-[0.1px] text-on-variant">可用机型<em className="not-italic text-error"> *</em></span>
+              <div className="flex flex-wrap gap-2">
+                {openModels.map((m) => (
+                  <SelectChip key={m.modelId} selected={sheet.on.includes(m.modelId)} onClick={() => setSheet({ ...sheet, on: sheet.on.includes(m.modelId) ? sheet.on.filter((x) => x !== m.modelId) : [...sheet.on, m.modelId] })}>
+                    {m.model}
+                  </SelectChip>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </Sheet>
+    </>
   );
 }
 
@@ -780,7 +1070,7 @@ function AuditTab() {
   );
 }
 
-const BODY: Record<TabKey, () => ReactNode> = { form: FormTab, users: UsersTab, policy: PolicyTab, notify: NotifyTab, daemon: DaemonTab, audit: AuditTab };
+const BODY: Record<TabKey, () => ReactNode> = { form: FormTab, users: UsersTab, policy: PolicyTab, resources: ResourcesTab, notify: NotifyTab, daemon: DaemonTab, audit: AuditTab };
 
 export function SettingsPage() {
   const { tab } = useParams();

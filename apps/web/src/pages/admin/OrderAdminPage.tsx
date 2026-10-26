@@ -20,7 +20,7 @@ import { ADMIN_STATUS, ATTRIBUTION, type AdminOrder, CANCEL_WHY, adminOrders, an
 type Mode = "review" | "manage";
 type TabKey = "all" | "pending" | "queued" | "printing" | "pick" | "bad" | "end";
 const TABS: [TabKey, string][] = [["all", "全部"], ["pending", "待审核"], ["queued", "排队中"], ["printing", "打印中"], ["pick", "入库取件"], ["bad", "异常"], ["end", "已结束"]];
-const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
+const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", revising: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
 
 const ATTR_IDS = ["machine", "model"] as const;
 
@@ -120,7 +120,7 @@ function ReviewQueue({ onReject }: { onReject: (id: number) => void }) {
   return (
     <>
       <PageHeader title="审核队列" />
-      <div className="text-note text-on-variant">共享审核池：有审核权限的人都能审，最早提交的排在最前。{list.length} 单待审核。</div>
+      <div className="text-note text-on-variant">共享审核池：有审核权限的人都能审，修改版排在最前，其余按提交先后。{list.length} 单待审核。</div>
       {list.length ? (
         <OrderGrid>
           <AnimatePresence initial={false} mode="popLayout">
@@ -130,8 +130,23 @@ function ReviewQueue({ onReject }: { onReject: (id: number) => void }) {
               return (
                 <motion.div key={o.id} layout className="flex" exit={{ opacity: 0, scale: 0.96, transition: t("short4", "emphasizedAccelerate") }}>
                   <OrderCard className="flex-1" tabIndex={0} role="button" aria-label={`订单 ${o.id}`} onClick={() => navigate(`/review/${o.id}`)} onKeyDown={(e) => e.target === e.currentTarget && e.key === "Enter" && navigate(`/review/${o.id}`)}>
-                    <OrderHead id={o.id} chip={<StatusChip>待审核</StatusChip>} right={o.at} />
+                    <OrderHead
+                      id={o.id}
+                      chip={
+                        <>
+                          <StatusChip tone={o.rev ? "warn" : "neutral"}>{o.rev ? `修改版 · 第 ${o.rev.n} 次` : "待审核"}</StatusChip>
+                          {o.missing && <StatusChip tone="err">缺色</StatusChip>}
+                        </>
+                      }
+                      right={o.at}
+                    />
                     <OrderBody thumb={<Preview o={o} />} name={o.file} meta={<PlateMeta parts={[`${o.model} · ${o.nozzle} mm`, `${o.time} · ${o.g} g`]} fil={o.fil} />} />
+                    {o.rev && (
+                      <StatusBlock icon="replay" title="上一版" right={o.rev.pos ? `保留第 ${o.rev.pos} 位${o.rev.back === "tail" ? " · 通过后排到队尾" : o.rev.back ? ` · 通过后后移 ${o.rev.back} 位` : ""}` : undefined}>
+                        <s>{o.rev.time} · {o.rev.g} g</s> → {o.time} · {o.g} g
+                        {o.rev.model !== o.model && <> · <s>{o.rev.model}</s> → {o.model}</>}
+                      </StatusBlock>
+                    )}
                     <StatusBlock title={first} right={second}>申请人：{o.owner}</StatusBlock>
                     <OrderActions>
                       <Button variant="outlined" icon="cancel" onClick={(e) => (e.stopPropagation(), onReject(o.id))}>驳回</Button>
@@ -345,7 +360,7 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
   const back = () => navigate(mode === "review" ? "/review" : "/manage/orders");
   const acts = (
     <>
-      {mode === "review" && o.st === "pending" && (
+      {mode === "review" && (o.st === "pending" || o.st === "revising") && (
         <>
           <Button variant="outlined" icon="cancel" onClick={onReject}>驳回</Button>
           <Button
@@ -414,9 +429,23 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
                 </Small>
               </Tile>
               <Tile label="打印机"><Small>{o.printer || "尚未派单"}</Small></Tile>
+              {o.colour && <Tile label="颜色要求" wide={!o.missing}><Small>{o.colour}</Small></Tile>}
+              {o.missing && <Tile label="本场缺少"><Small><FilamentDots fil={o.missing} /></Small></Tile>}
               <Tile label="提交时间" wide><Small>{o.at}</Small></Tile>
             </div>
           </Box>
+          {o.rev && (
+            <Box title="与上一版对比">
+              <div className="grid grid-cols-2 gap-3">
+                <Tile label="上一版文件" wide><Small>{o.rev.file}</Small></Tile>
+                <Tile label="预计耗时"><Small><s className="font-normal text-on-variant">{o.rev.time}</s> → {o.time}</Small></Tile>
+                <Tile label="耗材用量"><Small><s className="font-normal text-on-variant">{o.rev.g} g</s> → {o.g} g</Small></Tile>
+                <Tile label="目标机型"><Small>{o.rev.model === o.model ? o.model : <><s className="font-normal text-on-variant">{o.rev.model}</s> → {o.model}</>}</Small></Tile>
+                <Tile label="排队位置"><Small>{!o.rev.pos ? "—" : o.rev.back === "tail" ? `第 ${o.rev.pos} 位 → 队尾` : o.rev.back ? `第 ${o.rev.pos} 位 → 第 ${o.rev.pos + o.rev.back} 位` : `第 ${o.rev.pos} 位`}</Small></Tile>
+                <Tile label="耗材" wide><Small><span className="inline-flex flex-wrap items-center gap-2"><FilamentDots fil={o.rev.fil} /> → <FilamentDots fil={o.fil} /></span></Small></Tile>
+              </div>
+            </Box>
+          )}
           <Box title="申请表答案">
             <div className="grid grid-cols-2 gap-3">
               {!answers(o).length && <Tile label="申请表" wide><Small>{LIVE && !o.answers ? "正在加载…" : "没有填写项"}</Small></Tile>}

@@ -124,8 +124,8 @@ export interface OrderView {
   colourPref: ColourPref;
   /** Build plate the submitter picked (only when 自选板 is allowed); null = as sliced. */
   bedType: string | null;
-  /** Revisions used and allowed (0 = no limit), model switches likewise. */
-  revisions: { count: number; max: number; switches: number; maxSwitches: number };
+  /** Revisions used and allowed (0 = no limit), model switches likewise; baselineSeconds is what a new version's print time is compared with. */
+  revisions: { count: number; max: number; switches: number; maxSwitches: number; baselineSeconds: number };
   /** Owner only: a new file can replace this one now (rules, state and limits allow it). */
   canRevise: boolean;
   /** A revision waiting for re-review; the order keeps its place in the queue meanwhile (frozen). */

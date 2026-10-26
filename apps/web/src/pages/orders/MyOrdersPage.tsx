@@ -18,7 +18,9 @@ import { t } from "../../lib/motion";
 import { ordersApi, useMyOrders } from "../../lib/ordersApi";
 import { useMe } from "../../lib/session";
 import { type MyOrder, type OrderGroup, STATUS, myOrders } from "../../mock/myOrders";
+import { useRules } from "../../lib/rulesApi";
 import { PickupCode } from "./PickupCode";
+import { ReviseSheet } from "./ReviseSheet";
 
 type TabKey = "all" | OrderGroup;
 const TABS: [TabKey, string][] = [["all", "全部"], ["act", "进行中"], ["pick", "待取件"], ["todo", "需处理"], ["end", "已结束"]];
@@ -28,6 +30,8 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
   switch (o.st) {
     case "pending":
       return <StatusBlock icon="hourglass_top" title="待审核" right={`提交于 ${o.at}`}>通过后自动进入排队；开始打印前可以自行取消。</StatusBlock>;
+    case "revising":
+      return <StatusBlock icon="hourglass_top" title="修改审核中" right={o.pos ? `保留第 ${o.pos} 位` : undefined} />;
     case "queued":
       return <StatusBlock icon="schedule" title={`队列第 ${o.pos} 位`} right={o.ahead ? `前方 ${o.ahead}` : undefined}>{o.wait ?? "空闲且兼容的打印机会从队首开始接单。"}</StatusBlock>;
     case "printing":
@@ -78,6 +82,7 @@ function recNodes(o: MyOrder, me: string, photo: string | null | undefined): Rec
   const later = (...k: ("print" | "stock" | "pick")[]) =>
     k.map((x): RecNode => (x === "print" ? { t: "打印", sys: true, s: "待打印", tone: "wait" } : x === "stock" ? { t: "入库", s: "待入库", tone: "wait" } : { t: "取件", s: "待核销", tone: "wait" }));
   if (st === "cancelled") return [...N, { t: "取消订单", who: o.canceller ?? me, s: "已取消", tone: "bad", note: o.reason?.replace(/^(你|工作人员)取消了?：/, "") }];
+  if (st === "revising") return [...N, { t: "审核", who: rev, s: "已通过", tone: "ok" }, { t: "修改文件", who: me, s: "修改审核中", tone: "cur", note: o.pos ? `保留第 ${o.pos} 位` : undefined }, { t: "排队", sys: true, s: "待排队", tone: "wait" }, ...later("print", "stock", "pick")];
   if (st === "pending") return [...N, { t: "审核", pool: true, s: "待审核", tone: "cur" }, { t: "排队", sys: true, s: "待排队", tone: "wait" }, ...later("print", "stock", "pick")];
   if (st === "rejected") return [...N, { t: "审核", who: rev, s: "已驳回", tone: "bad", time: o.at, note: o.reason }];
   N.push({ t: "审核", who: rev, s: "已通过", tone: "ok", time: o.at });
@@ -192,12 +197,16 @@ function Timeline({ o }: { o: MyOrder }) {
 
 /* ---------- page ---------- */
 
-type SheetState = { type: "detail" | "qr" | "cancel" | "retry"; id: number } | null;
+type SheetState = { type: "detail" | "qr" | "cancel" | "retry" | "revise"; id: number } | null;
 
 export function MyOrdersPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { rows: orders, loading, error } = useMyOrders();
+  const rules = useRules();
+  /* the server decides in real builds; the mock follows the rules and limits */
+  const revisable = (x: MyOrder) =>
+    LIVE ? !!x.canRevise : !!x.canRevise && !!rules?.revisions.enabled && (!rules.revisions.max || (x.revs ?? 0) < rules.revisions.max) && ["pending", "revising", "queued"].includes(x.st);
   const [tab, setTab] = useState<TabKey>("all");
   const [sheet, setSheet] = useState<SheetState>(null);
   const [last, setLast] = useState<NonNullable<SheetState>>({ type: "detail", id: 0 });
@@ -264,10 +273,11 @@ export function MyOrdersPage() {
                     <OrderHead id={x.id} chip={<StatusChip tone={s.tone}>{s.t}</StatusChip>} right={x.at} />
                     <OrderBody thumb={<Thumb fil={x.fil} url={x.thumb} alt={`#${x.id} 预览`} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
                     <OrderStatusBlock o={x} />
-                    {(x.st === "ready" || x.st === "pending" || x.st === "queued" || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
+                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
                       <OrderActions>
                         {x.st === "ready" && <Button icon="qr_code_2" onClick={(e) => (stop(e), open({ type: "qr", id: x.id }))}>出示取件码</Button>}
-                        {(x.st === "pending" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
+                        {revisable(x) && <Button variant="tonal" icon="upload_file" onClick={(e) => (stop(e), open({ type: "revise", id: x.id }))}>修改文件</Button>}
+                        {(x.st === "pending" || x.st === "revising" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
                         {x.st === "failed" && !x.retried && !LIVE && <Button icon="replay" onClick={(e) => (stop(e), open({ type: "retry", id: x.id }))}>一键重打</Button>}
                         {x.st === "rejected" && <Button variant="tonal" icon="send" onClick={(e) => (stop(e), navigate("/submit"))}>修改后重新提交</Button>}
                       </OrderActions>
@@ -318,6 +328,8 @@ export function MyOrdersPage() {
               {(id, cls) => <Select id={id} className={cls} options={CANCEL_WHY} placeholder="请选择" value={reason} onChange={(e) => setReason(e.target.value)} />}
             </Field>
           </Sheet>
+
+          <ReviseSheet key={`r${key}`} o={o} rules={rules} open={sheet?.type === "revise"} onClose={close} />
 
           <Sheet
             open={sheet?.type === "retry"}
