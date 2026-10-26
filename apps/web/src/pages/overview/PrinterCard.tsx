@@ -116,8 +116,8 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
           style={{ zoom }}
         >
           <div className="cam-ph relative aspect-[220/123] w-full overflow-hidden rounded-lg" role="img" aria-label={`${name} 摄像头画面`} />
-          <div className={cx("grid grid-cols-[104px_84px] self-stretch @max-[420px]:grid-cols-2", off && "opacity-48 blur-[3px]")}>
-            <div className="flex flex-col justify-center gap-1.5">
+          <div className={cx("grid grid-cols-[104px_84px] self-stretch @max-[420px]:grid-cols-[auto_auto] @max-[420px]:justify-evenly", off && "opacity-48 blur-[3px]")}>
+            <div className="flex flex-col justify-center gap-1.5 @max-[420px]:justify-start">
               {p.nozzles.length > 1 ? (
                 p.nozzles.map((n, i) => (
                   <Row key={i} icon="nozzle" tone="nz">
@@ -135,18 +135,21 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
               <Row icon="chamber">{p.chamber ? temp(p.chamber[0], p.chamber[1]) : "— / —"}</Row>
               <Row icon="layers">{p.layer ? `${p.layer[0]} / ${p.layer[1]}` : "— / —"}</Row>
             </div>
-            <div className="flex flex-col justify-center gap-1.5 px-0.5">
+            <div className="flex flex-col justify-center gap-1.5 px-0.5 @max-[420px]:justify-start @max-[420px]:px-0">
               {loaded.length ? (
                 loaded.slice(0, 4).map((x) => (
                   <div
                     key={x.label}
                     title={`${x.label} ${x.m}${x.r != null && x.r >= 0 ? " · 余 " + x.r + "%" : ""}`}
-                    className="flex h-5 items-center gap-1 whitespace-nowrap px-0.5 text-label-s font-medium text-strong"
+                    className="flex h-5 items-center gap-1 whitespace-nowrap px-0.5 text-label-s @max-[420px]:px-0 font-medium text-strong"
                   >
                     <Ring slot={x} />
                     <span className="min-w-[15px] whitespace-nowrap">{x.label}</span>
-                    <span className="min-w-8">{x.m}</span>
-                    {x.active && <span className="size-1 rounded-full bg-active-dot" />}
+                    <span className="relative">
+                      {x.m}
+                      {/* out of flow so it never widens the column that gets centred; still 4px past a 32px type slot, as before */}
+                      {x.active && <span className="absolute top-1.5 left-[calc(max(100%,32px)+4px)] size-1 rounded-full bg-active-dot" />}
+                    </span>
                   </div>
                 ))
               ) : (
