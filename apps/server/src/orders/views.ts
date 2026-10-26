@@ -88,6 +88,7 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
         fileName: f.fileName,
         sizeBytes: f.sizeBytes,
         sourceFileId: f.id,
+        groupId: r.groupId,
         plate: { index: r.plateIndex, count: r.plateCount, name: r.plateName },
         printerModel: r.printerModel,
         printerModelId: r.printerModelId,

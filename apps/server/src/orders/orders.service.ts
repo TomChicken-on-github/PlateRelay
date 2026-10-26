@@ -43,6 +43,12 @@ export interface SubmitChoices {
   bedType: string | null;
 }
 
+/** 修改文件 for a group: what each plate of the group becomes, and the new plates. */
+export interface GroupPlan {
+  map: { order: number; plate: number | null }[];
+  add: number[];
+}
+
 type Plate = Pick<PlateInfo, "index" | "printerModelId" | "nozzles" | "filaments">;
 
 export interface OrderQuery {
@@ -326,6 +332,7 @@ export class OrdersService {
               status: "PENDING_REVIEW",
               ownerId: userId(ctx)!,
               fileId,
+              groupId: fileId,
               plateIndex: p.index,
               plateCount: parsed.plates.length,
               plateName: p.name,
@@ -428,6 +435,133 @@ export class OrdersService {
   }
 
   /**
+   * 修改文件 for a whole submission group: the new file replaces the group's plates. `map` names, for
+   * every plate of the group still before printing, the plate of the new file that replaces it (null:
+   * drop it, the order is cancelled); `add` lists new plates, which become new orders of the group: reviewed,
+   * then queued at the end like any new submission. Each replaced plate follows the revision rules on its own.
+   */
+  async reviseGroup(ctx: Ctx, id: number, fileName: string, data: Buffer, plan: GroupPlan): Promise<OrderView[]> {
+    const cur = await this.ownOrder(ctx, id, "order.revise");
+    const members: { o: OrderRow; printer: PrinterRow | undefined }[] = [];
+    for (const o of await this.db.select().from(orders).where(and(eq(orders.groupId, cur.groupId), eq(orders.ownerId, cur.ownerId))).orderBy(asc(orders.id))) {
+      const printer = await this.dispatchedPrinter(o);
+      if (o.status === "PENDING_REVIEW" || o.status === "QUEUED" || printer) members.push({ o, printer });
+    }
+    const ids = members.map((m) => m.o.id);
+    const named = plan.map.map((m) => m.order);
+    if (named.length !== ids.length || new Set(named).size !== named.length || named.some((x) => !ids.includes(x))) {
+      throw new ApiError(HttpStatus.CONFLICT, "group-changed", "这组订单有变化，请刷新后再试", { orders: ids });
+    }
+    const parsed = this.gcode3mf.read(fileName, data);
+    const used = [...plan.map.flatMap((m) => (m.plate == null ? [] : [m.plate])), ...plan.add];
+    const unknown = used.filter((n) => !parsed.plates.some((p) => p.index === n));
+    if (unknown.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${unknown.join("、")} 盘`, { plates: unknown });
+    if (new Set(used).size !== used.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "同一盘只能用一次");
+    if (!plan.map.some((m) => m.plate != null)) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "至少要保留一张原来的单，全部不要请直接取消");
+    const rules = await this.settings.get("queue.rules");
+    if (!rules.revisions.enabled) throw new ApiError(HttpStatus.CONFLICT, "revisions-disabled", "本场不允许提交后修改文件");
+    const plateOf = (n: number) => parsed.plates.find((p) => p.index === n)!;
+    await this.assertOnOffer(await this.resources.offer(), parsed.printerModel, used.map(plateOf), cur.colourPref);
+
+    const fileId = uuidv7();
+    const thumbs = new Map<number, string>();
+    const fieldsOf = (n: number): VersionFields => {
+      const p = plateOf(n);
+      return {
+        fileId,
+        plateIndex: p.index,
+        plateCount: parsed.plates.length,
+        plateName: p.name,
+        printerModel: parsed.printerModel,
+        printerModelId: p.printerModelId,
+        nozzles: p.nozzles.map((x) => ({ extruder: x.extruder, side: x.side, diameter: x.diameter })),
+        filaments: p.filaments.map((f) => ({ slot: f.slot, type: f.type, color: f.color, usedGrams: f.usedGrams, extruder: f.extruder })),
+        printSeconds: Math.round(p.printSeconds),
+        weightGrams: p.weightGrams,
+        thumbnailKey: thumbs.get(n) ?? (p.thumbnail ? `plates/${fileId}/${n}.png` : null),
+      };
+    };
+    const swaps: { o: OrderRow; printer: PrinterRow | undefined; base: OrderRow; fields: VersionFields; d: Extract<RevisionDecision, { allowed: true }> }[] = [];
+    for (const m of plan.map) {
+      if (m.plate == null) continue;
+      const { o, printer } = members.find((x) => x.o.id === m.order)!;
+      const base = baseFor(o, await versionsOf(this.db, o.id));
+      const fields = fieldsOf(m.plate);
+      const d = this.policy.revise(rules, base, fields, !!printer);
+      if (!d.allowed) throw new ApiError(HttpStatus.CONFLICT, d.code, `#${o.id}：${d.message}`, { orderId: o.id });
+      swaps.push({ o, printer, base, fields, d });
+    }
+
+    const fileKey = `uploads/${fileId}.gcode.3mf`;
+    const written: string[] = [];
+    const recalls: [string, number][] = [];
+    try {
+      await this.storage.put(fileKey, data, "application/vnd.bambulab-gcode-3mf");
+      written.push(fileKey);
+      for (const n of used) {
+        const p = plateOf(n);
+        if (!p.thumbnail) continue;
+        const key = `plates/${fileId}/${n}.png`;
+        await this.storage.put(key, p.thumbnail, "image/png");
+        written.push(key);
+        thumbs.set(n, key);
+      }
+      const file = { id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
+      const rows = await this.db.transaction(async (tx) => {
+        const out: OrderRow[] = [];
+        for (const s of swaps) {
+          const r = await this.swapIn(tx, ctx, s.o, s.base, s.fields, s.d, s.printer, rules, { file });
+          if (r.recalled) recalls.push([r.recalled, s.o.id]);
+          out.push(r.row);
+        }
+        for (const m of plan.map.filter((x) => x.plate == null)) {
+          const { o, printer } = members.find((x) => x.o.id === m.order)!;
+          const reason = "修改文件时移除";
+          if (printer) {
+            const p = await lockPrinter(tx, printer.id);
+            if (p.state !== "PREPARING" || p.currentOrderId !== o.id) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", `#${o.id} 已经开始打印，不能移除`, { orderId: o.id });
+            await movePrinter(tx, p, "recalled", { currentOrderId: null });
+            recalls.push([p.id, o.id]);
+          }
+          const { row, from } = await transition(tx, ctx, o.id, "cancelOwn", { set: { cancelledBy: userId(ctx), cancelledAt: new Date(), cancelReason: reason }, data: { reason, file: fileName } });
+          await decide(tx, pendingOf(await versionsOf(tx, o.id)).map((v) => v.id), "withdrawn", userId(ctx));
+          await this.audit.record(ctx, { action: "order.cancel", targetType: "order", targetId: o.id, before: { status: from }, after: { status: "CANCELLED" }, reason }, tx);
+          out.push(row);
+        }
+        for (const n of plan.add) {
+          const fields = fieldsOf(n);
+          const [o] = await tx
+            .insert(orders)
+            .values({
+              status: "PENDING_REVIEW",
+              ownerId: cur.ownerId,
+              groupId: cur.groupId,
+              splitFrom: cur.id,
+              ...fields,
+              formVersionId: cur.formVersionId,
+              answers: cur.answers,
+              colourPref: cur.colourPref,
+              bedType: cur.bedType,
+              originalPrintSeconds: fields.printSeconds,
+            })
+            .returning();
+          await addVersion(tx, o.id, fields, { kind: "submit", state: "pending" });
+          await orderEvent(tx, ctx, o.id, "split", { from: cur.id, plate: n, of: parsed.plates.length });
+          await this.audit.record(ctx, { action: "order.submit", targetType: "order", targetId: o.id, after: { fileId, plate: n, splitFrom: cur.id } }, tx);
+          out.push(o);
+        }
+        return out;
+      });
+      for (const [p, o] of recalls) await this.sendRecall(ctx, p, o);
+      void this.scheduler.kick();
+      return this.views(ctx, rows);
+    } catch (e) {
+      for (const k of written) await this.storage.delete(k).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  /**
    * 恢复旧版本 (rules doc §3): an approved version comes back as a new version. It counts as a
    * revision and moves by the time rule like any other, but needs no review: that file was approved.
    */
@@ -522,11 +656,32 @@ export class OrdersService {
     rules: QueueRules,
     opts: { file?: typeof files.$inferInsert; restoredFrom?: number },
   ): Promise<OrderView> {
-    const id = cur.id;
     let recalled: string | null = null;
     const row = await this.db.transaction(async (tx) => {
-      const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");
-      if (o.status !== cur.status || o.fileId !== cur.fileId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
+      const r = await this.swapIn(tx, ctx, cur, base, fields, d, printer, rules, opts);
+      recalled = r.recalled;
+      return r.row;
+    });
+    if (recalled) await this.sendRecall(ctx, recalled, cur.id);
+    if (recalled || !d.review) void this.scheduler.kick();
+    return (await this.views(ctx, [row]))[0];
+  }
+
+  private async swapIn(
+    tx: Db,
+    ctx: Ctx,
+    cur: OrderRow,
+    base: OrderRow,
+    fields: VersionFields,
+    d: Extract<RevisionDecision, { allowed: true }>,
+    printer: PrinterRow | undefined,
+    rules: QueueRules,
+    opts: { file?: typeof files.$inferInsert; restoredFrom?: number },
+  ): Promise<{ row: OrderRow; recalled: string | null }> {
+    const id = cur.id;
+    let recalled: string | null = null;
+    {
+      const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");      if (o.status !== cur.status || o.fileId !== cur.fileId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
       if (printer) {
         const p = await lockPrinter(tx, printer.id);
         if (p.state !== "PREPARING" || p.currentOrderId !== id) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "这张单已经开始打印，不能再改", { orderId: id });
@@ -536,7 +691,7 @@ export class OrdersService {
       const [f] = await tx.select({ fileName: files.fileName }).from(files).where(eq(files.id, base.fileId));
       const superseded = pendingOf(await versionsOf(tx, id));
       await decide(tx, superseded.map((v) => v.id), "withdrawn", userId(ctx));
-      if (opts.file) await tx.insert(files).values(opts.file);
+      if (opts.file && !(await tx.select({ id: files.id }).from(files).where(eq(files.id, opts.file.id!))).length) await tx.insert(files).values(opts.file);
       const ver = await addVersion(tx, id, fields, {
         kind: d.kind,
         state: d.review ? "pending" : "approved",
@@ -582,11 +737,8 @@ export class OrdersService {
         tx,
       );
       /* auto-approved: it is queued again now, so it moves back now */
-      return !d.review && d.placesBack !== 0 ? this.moveBack(tx, ctx, id, info) : row;
-    });
-    if (recalled) await this.sendRecall(ctx, recalled, id);
-    if (recalled || !d.review) void this.scheduler.kick();
-    return (await this.views(ctx, [row]))[0];
+      return { row: !d.review && d.placesBack !== 0 ? await this.moveBack(tx, ctx, id, info) : row, recalled };
+    }
   }
 
   /** Best effort, like sendStop: the recall is recorded; the daemon link will deliver it once it exists. */
@@ -771,8 +923,10 @@ export class OrdersService {
           reviewedBy: machine ? o.reviewedBy : null,
           reviewedAt: machine ? o.reviewedAt : null,
           retryOf: id,
+          splitFrom: null,
         })
         .returning();
+      await addVersion(tx, retry.id, versionFields(retry), { kind: "submit", state: machine ? "approved" : "pending", decidedBy: o.reviewedBy });
       await orderEvent(tx, ctx, id, "attribute", { attribution, note, retry: retry.id });
       await orderEvent(tx, ctx, retry.id, "retry", { retryOf: id, attribution });
       await this.audit.record(ctx, { action: "order.attribute", targetType: "order", targetId: id, after: { attribution, retry: retry.id }, reason: note }, tx);

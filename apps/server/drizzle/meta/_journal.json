@@ -43,6 +43,13 @@
       "when": 1793057027631,
       "tag": "0005_order_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793057378656,
+      "tag": "0006_order_groups",
+      "breakpoints": true
     }
   ]
 }

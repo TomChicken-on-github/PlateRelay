@@ -92,6 +92,8 @@ export interface OrderView {
   sizeBytes: number;
   /** Plates of one upload share this. */
   sourceFileId: string;
+  /** Plates submitted together; 修改文件 can replace the group's file as a whole. */
+  groupId: string;
   plate: { index: number; count: number; name: string };
   printerModel: string | null;
   printerModelId: string;

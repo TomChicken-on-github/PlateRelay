@@ -31,6 +31,10 @@ const Choices = z.object({
   bedType: z.enum(BED_TYPES).optional(),
 });
 const Revise = z.object({ plate: z.coerce.number().int().positive().optional() });
+const GroupPlan = z.object({
+  map: z.array(z.object({ order: z.number().int().positive(), plate: z.number().int().positive().nullable() })).min(1).max(64),
+  add: z.array(z.number().int().positive()).max(64).default([]),
+});
 
 const PHOTO_MAX = 15 * 1024 * 1024;
 
@@ -71,6 +75,16 @@ export class OrdersController {
   revise(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @UploadedFile() file: Express.Multer.File | undefined, @Body() body: unknown) {
     if (!file) throw new BadRequestException("缺少文件字段 file");
     return this.orders.revise(ctx, id, file.originalname, file.buffer, parse(Revise, body ?? {}).plate);
+  }
+
+  /** 修改文件 for the whole submission group; multipart with "file" and "plan" (JSON: map and add, see GroupPlan). */
+  @Post("orders/:id/revise-group")
+  @HttpCode(200)
+  @RequirePerm("order:submit")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
+  async reviseGroup(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @UploadedFile() file: Express.Multer.File | undefined, @Body() body: { plan?: string }) {
+    if (!file) throw new BadRequestException("缺少文件字段 file");
+    return { orders: await this.orders.reviseGroup(ctx, id, file.originalname, file.buffer, parse(GroupPlan, json(body.plan ?? "", "plan"))) };
   }
 
   /** 撤回修改: the owner takes back a revision under review, free; the last approved version keeps its place. */
