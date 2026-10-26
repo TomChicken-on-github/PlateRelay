@@ -11,6 +11,7 @@ import { fmtDur, ordersApi, shortModel } from "../../lib/ordersApi";
 import { type MyOrder, myOrders } from "../../mock/myOrders";
 
 type Version = { model: string; modelId: string; nozzle: string; dual: boolean; sec: number; g: number; fil: [string, string][]; block: string[] };
+type Next = Pick<Version, "modelId" | "dual" | "sec" | "fil">;
 type Parsed = { name: string; file: File; plates: (Version & { n: number })[] };
 
 const secOf = (t: string) => {
@@ -40,7 +41,26 @@ async function parse(f: File): Promise<Parsed> {
   };
 }
 
-const Fil = ({ fil }: { fil: [string, string][] }) => (
+const current = (o: MyOrder): Version => ({ model: o.model, modelId: o.modelId ?? o.model, nozzle: o.nozzle, dual: o.dual ?? o.fil.length > 1, sec: secOf(o.time), g: o.g, fil: o.fil, block: [] });
+
+/** What a new version does to the order, as the server's policy will decide it: places back, review, counts. */
+export function placement(o: MyOrder, rules: QueueRules | null, next: Next | undefined, restore = false) {
+  const cur = current(o);
+  const isSwitch = !!next && next.modelId !== cur.modelId;
+  const delta = next ? next.sec - (o.baseSec ?? cur.sec) : 0;
+  const r = rules?.revisions;
+  let back: number | "tail" = r ? revisionPlacesBack(r, delta) : 0;
+  /* dispatched but not started: the print is recalled and the order moves back extra places */
+  if (r && o.st === "printing" && back !== "tail") back += r.dispatchedExtraPlaces;
+  if (isSwitch && rules) back = rules.modelSwitch.position === "tail" ? "tail" : back === "tail" ? back : back + rules.modelSwitch.extraPlaces;
+  const same = !!next && next.fil.length === cur.fil.length && next.fil.every(([c, t], i) => c.toLowerCase() === cur.fil[i][0].toLowerCase() && t === cur.fil[i][1]);
+  const auto = restore || (o.st === "queued" && !!r?.autoApproveMinor && !isSwitch && same && delta <= r.thresholdMinutes * 60);
+  const counts = !isSwitch || (next && cur.dual && !next.dual ? !!rules?.modelSwitch.dualToSingleCounts : !!rules?.modelSwitch.countsAsRevision);
+  const nth = (o.revs ?? 0) + (counts ? 1 : 0);
+  return { isSwitch, delta, back, same, auto, counts, nth };
+}
+
+export const Fil = ({ fil }: { fil: [string, string][] }) => (
   <>
     {fil.map(([c, t], i) => (
       <span key={i} className="mr-1.5 inline-flex items-center gap-1">
@@ -75,18 +95,8 @@ export function ReviseSheet({ o, rules, open, onClose }: { o: MyOrder; rules: Qu
   };
 
   const next = parsed?.plates.find((x) => x.n === n);
-  const cur: Version = { model: o.model, modelId: o.modelId ?? o.model, nozzle: o.nozzle, dual: o.dual ?? o.fil.length > 1, sec: secOf(o.time), g: o.g, fil: o.fil, block: [] };
-  const isSwitch = !!next && next.modelId !== cur.modelId;
-  const delta = next ? next.sec - (o.baseSec ?? cur.sec) : 0;
-  const r = rules?.revisions;
-  let back: number | "tail" = r ? revisionPlacesBack(r, delta) : 0;
-  /* dispatched but not started: the print is recalled and the order moves back extra places */
-  if (r && o.st === "printing" && back !== "tail") back += r.dispatchedExtraPlaces;
-  if (isSwitch && rules) back = rules.modelSwitch.position === "tail" ? "tail" : back === "tail" ? back : back + rules.modelSwitch.extraPlaces;
-  const same = !!next && next.fil.length === cur.fil.length && next.fil.every(([c, t], i) => c.toLowerCase() === cur.fil[i][0].toLowerCase() && t === cur.fil[i][1]);
-  const auto = o.st === "queued" && !!r?.autoApproveMinor && !isSwitch && same && delta <= r.thresholdMinutes * 60;
-  const counts = !isSwitch || (next && cur.dual && !next.dual ? !!rules?.modelSwitch.dualToSingleCounts : !!rules?.modelSwitch.countsAsRevision);
-  const nth = (o.revs ?? 0) + (counts ? 1 : 0);
+  const cur = current(o);
+  const { isSwitch, delta, back, same, auto, counts, nth } = placement(o, rules, next);
 
   const send = async () => {
     if (!parsed || !next) return;

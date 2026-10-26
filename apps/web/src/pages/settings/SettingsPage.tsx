@@ -219,9 +219,9 @@ function PolicyTab() {
 
 const PENALTIES: [QueueRules["revisions"]["penalty"], string][] = [["none", "不变"], ["fixed", "固定后移"], ["per-step", "每多一段时间后移"], ["tail", "排到队尾"]];
 
-type Draft = Record<"size" | "revMax" | "thr" | "places" | "step" | "swMax" | "swExtra" | "skip", string>;
+type Draft = Record<"size" | "revMax" | "thr" | "places" | "step" | "dispExtra" | "swMax" | "swExtra" | "skip", string>;
 const draftOf = (r: QueueRules, size: string): Draft => ({
-  size, revMax: String(r.revisions.max), thr: String(r.revisions.thresholdMinutes), places: String(r.revisions.places), step: String(r.revisions.stepMinutes),
+  size, revMax: String(r.revisions.max), thr: String(r.revisions.thresholdMinutes), places: String(r.revisions.places), step: String(r.revisions.stepMinutes), dispExtra: String(r.revisions.dispatchedExtraPlaces),
   swMax: String(r.modelSwitch.max), swExtra: String(r.modelSwitch.extraPlaces), skip: String(r.skipReminderMinutes),
 });
 
@@ -233,15 +233,15 @@ function PolicyForm({ rules }: { rules: QueueRules }) {
   const [busy, setBusy] = useState(false);
   const rev = <K extends keyof QueueRules["revisions"]>(k: K, v: QueueRules["revisions"][K]) => setR({ ...r, revisions: { ...r.revisions, [k]: v } });
   const sw = <K extends keyof QueueRules["modelSwitch"]>(k: K, v: QueueRules["modelSwitch"][K]) => setR({ ...r, modelSwitch: { ...r.modelSwitch, [k]: v } });
-  const LIMITS: Record<keyof Draft, [number, number]> = { size: [1, 2000], revMax: [0, 99], thr: [0, 1440], places: [0, 999], step: [1, 1440], swMax: [0, 99], swExtra: [0, 999], skip: [1, 1440] };
+  const LIMITS: Record<keyof Draft, [number, number]> = { size: [1, 2000], revMax: [0, 99], thr: [0, 1440], places: [0, 999], step: [1, 1440], dispExtra: [0, 999], swMax: [0, 99], swExtra: [0, 999], skip: [1, 1440] };
   const bad = (k: keyof Draft) => d[k] === "" || +d[k] < LIMITS[k][0] || +d[k] > LIMITS[k][1];
   const next: QueueRules = {
     ...r,
-    revisions: { ...r.revisions, max: +d.revMax, thresholdMinutes: +d.thr, places: +d.places, stepMinutes: +d.step },
+    revisions: { ...r.revisions, max: +d.revMax, thresholdMinutes: +d.thr, places: +d.places, stepMinutes: +d.step, dispatchedExtraPlaces: +d.dispExtra },
     modelSwitch: { ...r.modelSwitch, max: +d.swMax, extraPlaces: +d.swExtra },
     skipReminderMinutes: +d.skip,
   };
-  const shown: (keyof Draft)[] = ["skip", "swMax", ...(LIVE ? [] : ["size" as const]), ...(r.revisions.enabled ? (["revMax", "thr"] as const) : []),
+  const shown: (keyof Draft)[] = ["skip", "swMax", ...(LIVE ? [] : ["size" as const]), ...(r.revisions.enabled ? (["revMax", "thr"] as const) : []), ...(r.revisions.enabled && r.revisions.whenDispatched === "recall" ? (["dispExtra"] as const) : []),
     ...(r.revisions.enabled && r.revisions.penalty === "per-step" ? (["step", "places"] as const) : []), ...(r.revisions.enabled && r.revisions.penalty === "fixed" ? (["places"] as const) : []),
     ...(r.modelSwitch.position === "original" ? (["swExtra"] as const) : [])];
   const ok = shown.every((k) => !bad(k));
@@ -312,6 +312,7 @@ function PolicyForm({ rules }: { rules: QueueRules }) {
           <>
             {num("revMax", "最多修改次数", "次")}
             {sel("已派单、还没开始打时修改", [["recall", "撤回打印并冻结"], ["refuse", "不允许修改"]], r.revisions.whenDispatched, (v) => rev("whenDispatched", v))}
+            {r.revisions.whenDispatched === "recall" && num("dispExtra", "撤回后额外后移", "位")}
             <h3 className="m-0 mt-1 -mb-2 text-label-l font-medium text-on-variant">排队位置</h3>
             {num("thr", "时长增加不超过", "分钟")}
             {sel("超过后", PENALTIES, r.revisions.penalty, (v) => rev("penalty", v))}

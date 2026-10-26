@@ -1,6 +1,6 @@
-import { COLOUR_PREF_LABEL, type FailureAttribution, type OrderDetail, type OrderList, type OrderTimelineEntry, type OrderView, type OverviewStats, type PersonView, type PrinterView, type TodoView } from "@platerelay/shared";
+import { COLOUR_PREF_LABEL, type FailureAttribution, type OrderDetail, type OrderList, type OrderTimelineEntry, type OrderVersionView, type OrderView, type OverviewStats, type PersonView, type PrinterView, type TodoView } from "@platerelay/shared";
 import { type AdminOrder, adminOrders } from "../mock/adminOrders";
-import { type MyOrder, myOrders, type OrderStatus } from "../mock/myOrders";
+import { type MyOrder, myOrders, type OrderStatus, type Version, type VersionSt } from "../mock/myOrders";
 import { type Task, tasks } from "../mock/todo";
 import { type ApiErr, LIVE, type Res, api } from "./api";
 import { resource, stableLink } from "./live";
@@ -102,7 +102,41 @@ export function toMyOrder(v: OrderView): MyOrder {
     baseSec: v.revisions.baselineSeconds,
     modelId: v.printerModelId,
     dual: v.nozzles.length > 1,
+    canWithdraw: v.canWithdraw,
   };
+}
+
+function versionSt(x: OrderVersionView, queued: boolean): VersionSt {
+  switch (x.state) {
+    case "pending":
+      return queued ? "审核中" : "待审核";
+    case "approved":
+      return x.current ? "当前" : "已通过";
+    case "withdrawn":
+      return "已撤回";
+    case "rejected":
+      return "未通过";
+  }
+}
+
+/** 版本记录 rows; `queued`: the order already holds a place (a pending version is then a revision). */
+export function toVersions(d: Pick<OrderDetail, "id" | "versions" | "queue">): Version[] {
+  return (d.versions ?? []).map((x) => ({
+    n: x.n,
+    file: x.fileName,
+    model: shortModel(x.printerModel, x.printerModelId),
+    modelId: x.printerModelId,
+    nozzle: nozzleText(x),
+    time: fmtDur(x.printSeconds),
+    sec: x.printSeconds,
+    g: Math.round(x.weightGrams),
+    fil: fil(x),
+    at: fmtAt(x.at),
+    st: versionSt(x, !!d.queue),
+    from: x.restoredFrom ?? undefined,
+    thumb: stableLink(`order:${d.id}:v${x.n}`, x.thumbUrl),
+    reason: x.reason ?? undefined,
+  }));
 }
 
 export function toAdminOrder(v: OrderView): AdminOrder {
@@ -201,6 +235,7 @@ export function toAdminDetail(v: OrderDetail): AdminOrder {
   return {
     ...toAdminOrder(v),
     answers: (v.answers ?? []).map((a) => [a.label, answerText(a.value)]),
+    vers: toVersions(v),
     log: v.timeline.map((e) => [fmtAt(e.at), eventText(e)]),
   };
 }
@@ -250,7 +285,7 @@ const MANAGE_LIMIT = 200;
 
 export const live = {
   mine: resource(() => mapRes(api<OrderView[]>("/api/orders/mine"), (v) => v.map(toMyOrder))),
-  review: resource(() => mapRes(api<OrderDetail[]>("/api/review"), (v) => v.map((o) => ({ ...toAdminOrder(o), answers: (o.answers ?? []).map((a): [string, string] => [a.label, answerText(a.value)]) })))),
+  review: resource(() => mapRes(api<OrderDetail[]>("/api/review"), (v) => v.map((o) => ({ ...toAdminOrder(o), answers: (o.answers ?? []).map((a): [string, string] => [a.label, answerText(a.value)]), vers: toVersions(o) })))),
   manage: resource(() => mapRes(api<OrderList>(`/api/orders?limit=${MANAGE_LIMIT}`), (v) => v.orders.map(toAdminOrder))),
   todo: resource(() => mapRes(api<TodoView>("/api/todo"), toTasks)),
   overview: resource(() => api<OverviewStats>("/api/overview")),
@@ -302,6 +337,50 @@ export const ordersApi = {
     return after(await api<null>(`/api/orders/${id}/cancel`, json("POST", { reason })), "mine");
   },
 
+  /** 撤回修改: free; back to the last approved version in the same place. */
+  async withdraw(id: number): Promise<Done> {
+    if (!LIVE) {
+      myOrders.set((s) =>
+        s.map((x) => {
+          if (x.id !== id || !x.vers) return x;
+          const back = [...x.vers].reverse().find((v) => v.st === "已通过" || v.st === "当前")!;
+          const vers = x.vers.map((v): Version => (v.st === "审核中" ? { ...v, st: "已撤回" } : v.n === back.n ? { ...v, st: "当前" } : v));
+          return { ...x, vers, file: back.file, model: back.model, nozzle: back.nozzle, time: back.time, g: back.g, fil: back.fil, st: "queued", canWithdraw: false, revs: Math.max(0, (x.revs ?? 1) - 1) };
+        }),
+      );
+      return ok;
+    }
+    return after(await api<null>(`/api/orders/${id}/withdraw`, json("POST")), "mine", "review", "manage");
+  },
+
+  /** 恢复: an approved version comes back as a new one (counts as a revision, no review). */
+  async restore(id: number, n: number, placesBack: number | "tail"): Promise<Done> {
+    if (!LIVE) {
+      myOrders.set((s) =>
+        s.map((x) => {
+          if (x.id !== id || !x.vers) return x;
+          const v = x.vers.find((y) => y.n === n)!;
+          const next = Math.max(...x.vers.map((y) => y.n)) + 1;
+          const vers: Version[] = [...x.vers.map((y): Version => (y.st === "当前" ? { ...y, st: "已通过" } : y)), { ...v, n: next, st: "当前", from: n, at: fmtAt(new Date().toISOString()) }];
+          const pos = x.pos == null ? x.pos : placesBack === "tail" ? x.pos : x.pos + placesBack;
+          return { ...x, vers, file: v.file, model: v.model, nozzle: v.nozzle, time: v.time, g: v.g, fil: v.fil, revs: (x.revs ?? 0) + 1, pos };
+        }),
+      );
+      return ok;
+    }
+    return after(await api<null>(`/api/orders/${id}/versions/${n}/restore`, json("POST")), "mine", "manage");
+  },
+
+  /** 版本记录 of one order: from the order detail in real builds. */
+  async versions(id: number): Promise<Res<Version[]>> {
+    if (!LIVE) return { ok: true, data: myOrders.get().find((x) => x.id === id)?.vers ?? [] };
+    return mapRes(api<OrderDetail>(`/api/orders/${id}`), toVersions);
+  },
+
+  async versionFileUrl(id: number, n: number): Promise<Res<{ url: string }>> {
+    return api<{ url: string }>(`/api/orders/${id}/versions/${n}/file`);
+  },
+
   /** 修改文件: a new version of the order's plate; `plate` picks it in a multi-plate file. */
   async revise(id: number, file: File, plate?: number): Promise<Res<OrderView>> {
     const body = new FormData();
@@ -317,7 +396,8 @@ export const ordersApi = {
   },
 
   async reject(id: number, reason: string): Promise<Done> {
-    if (!LIVE) return updateAdmin(id, () => ({ st: "rejected", note: reason })), ok;
+    /* a rejected revision falls back to the version before it and keeps queueing */
+    if (!LIVE) return updateAdmin(id, (o) => (o.rev ? { st: "queued", file: o.rev.file, model: o.rev.model, time: o.rev.time, g: o.rev.g, fil: o.rev.fil, rev: undefined } : { st: "rejected", note: reason })), ok;
     return after(await api<null>(`/api/orders/${id}/reject`, json("POST", { reason })), "review", "manage");
   },
 

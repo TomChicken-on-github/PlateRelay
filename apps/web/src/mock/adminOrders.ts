@@ -1,5 +1,5 @@
 import { createStore } from "../lib/store";
-import type { Fil, OrderStatus } from "./myOrders";
+import type { Fil, OrderStatus, Version } from "./myOrders";
 
 export type AdminOrder = {
   id: number;
@@ -25,6 +25,8 @@ export type AdminOrder = {
   retried?: number;
   /** Filled in by the detail request. */
   answers?: [string, string][];
+  /** 版本记录 (real builds: from the order detail). */
+  vers?: Version[];
   log?: [string, string][];
   /** Owner's own order: approving it is still allowed, the server checks permissions. */
   mine?: boolean;

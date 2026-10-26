@@ -7,7 +7,8 @@ import { FilterTabs, StatusChip } from "../../components/Chip";
 import { Field, Select, TextArea } from "../../components/Field";
 import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelPreview } from "../../components/ModelThumb";
-import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock } from "../../components/OrderBits";
+import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock, Thumb } from "../../components/OrderBits";
+import { VersionList, useVersionDownload } from "../../components/VersionList";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
 import { useToast } from "../../components/Toast";
@@ -16,6 +17,7 @@ import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { live, ordersApi, toAdminDetail, useManageOrders, useReviewOrders } from "../../lib/ordersApi";
 import { ADMIN_STATUS, ATTRIBUTION, type AdminOrder, CANCEL_WHY, adminOrders, answers, auditFor } from "../../mock/adminOrders";
+import type { Version } from "../../mock/myOrders";
 
 type Mode = "review" | "manage";
 type TabKey = "all" | "pending" | "queued" | "printing" | "pick" | "bad" | "end";
@@ -44,6 +46,17 @@ function useDetail(id: number | null, version: number): AdminOrder | null | unde
   if (id === null) return undefined;
   /* undefined while loading, null when the server has no such order for this account */
   return LIVE ? (d?.id === id ? d.o : undefined) : mock.find((o) => o.id === id);
+}
+
+/** 版本记录: the server's list, or for mock rows a revision and the version before it. */
+function versionsOf(o: AdminOrder): Version[] {
+  if (o.vers) return o.vers;
+  if (!o.rev) return [];
+  const sec = (t: string) => (+(t.match(/(\d+)h/)?.[1] ?? 0) * 60 + +(t.match(/(\d+)m/)?.[1] ?? 0)) * 60;
+  return [
+    { n: o.rev.n, file: o.rev.file, model: o.rev.model, nozzle: o.nozzle, time: o.rev.time, sec: sec(o.rev.time), g: o.rev.g, fil: o.rev.fil, at: o.at, st: "已通过" },
+    { n: o.rev.n + 1, file: o.file, model: o.model, nozzle: o.nozzle, time: o.time, sec: sec(o.time), g: o.g, fil: o.fil, at: o.at, st: "审核中" },
+  ];
 }
 
 /* ---------- sheets ---------- */
@@ -358,6 +371,11 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
   const [label, tone] = ADMIN_STATUS[o.st];
   const live = !["done", "cancelled", "rejected", "failed"].includes(o.st);
   const back = () => navigate(mode === "review" ? "/review" : "/manage/orders");
+  const vers = versionsOf(o);
+  const [ver, setVer] = useState<number | undefined>();
+  /* the version under review (or the current one) until another is picked */
+  const shown = vers.length > 1 ? (vers.find((v) => v.n === ver) ?? vers[vers.length - 1]) : undefined;
+  const downloadVersion = useVersionDownload(o.id);
   const acts = (
     <>
       {mode === "review" && (o.st === "pending" || o.st === "revising") && (
@@ -386,32 +404,40 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
         actions={<div className="flex flex-wrap gap-2 max-sm:w-full max-sm:[&>button]:flex-1">{acts}</div>}
       />
       <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-start gap-4 max-lg:grid-cols-1">
-        <Box title="模型预览">
-          <div className="relative grid aspect-square place-items-center overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--md-outline-variant)] max-lg:mx-auto max-lg:w-full max-lg:max-w-[420px]" style={{ background: "radial-gradient(100% 80% at 50% 110%, var(--md-sc-high), var(--md-sc))" }}>
-            <div className="size-[78%]">
-              <Preview o={o} />
+        <div className="flex min-w-0 flex-col gap-4">
+          <Box title="模型预览">
+            <div className="relative grid aspect-square place-items-center overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--md-outline-variant)] max-lg:mx-auto max-lg:w-full max-lg:max-w-[420px]" style={{ background: "radial-gradient(100% 80% at 50% 110%, var(--md-sc-high), var(--md-sc))" }}>
+              <div className="size-[78%]">
+                {shown ? <Thumb fil={shown.fil} url={shown.thumb} alt={`#${o.id} 第 ${shown.n} 版预览`} /> : <Preview o={o} />}
+              </div>
+              {!(shown ? shown.thumb : o.thumb) && <span className="absolute bottom-3 left-3 rounded-lg bg-sc-high px-2.5 py-0.5 text-body-s leading-5 font-medium text-on-variant">示意{shown ? ` · 第 ${shown.n} 版` : ""}</span>}
             </div>
-            {!o.thumb && <span className="absolute bottom-3 left-3 rounded-lg bg-sc-high px-2.5 py-0.5 text-body-s leading-5 font-medium text-on-variant">示意</span>}
-          </div>
-          <div className="flex items-center gap-3 rounded-xl bg-sc-high px-3.5 py-3 max-sm:flex-wrap">
-            <Icon name="folder_zip" className="text-on-variant" />
-            <div className="min-w-0 flex-1">
-              <b className="block truncate text-label-l font-medium">{o.file}</b>
-              <small className="text-body-s text-on-variant">
-                {o.plate ? o.plate + " · " : ""}
-                {o.mb} MB
-              </small>
+            <div className="flex items-center gap-3 rounded-xl bg-sc-high px-3.5 py-3 max-sm:flex-wrap">
+              <Icon name="folder_zip" className="text-on-variant" />
+              <div className="min-w-0 flex-1">
+                <b className="block truncate text-label-l font-medium">{shown?.file ?? o.file}</b>
+                <small className="text-body-s text-on-variant">
+                  {o.plate ? o.plate + " · " : ""}
+                  {shown ? `${shown.time} · ${shown.g} g` : `${o.mb} MB`}
+                </small>
+              </div>
+              <Button variant="outlined" icon="download" className="max-sm:w-full" onClick={async () => {
+                  if (shown) return void downloadVersion(shown);
+                  if (!LIVE) return toast(`原型：正式环境会下载原始文件 ${o.file}`);
+                  const r = await ordersApi.fileUrl(o.id);
+                  if (r.ok) window.location.assign(r.data.url);
+                  else toast(r.error.message || "下载链接生成失败");
+                }}>
+                下载
+              </Button>
             </div>
-            <Button variant="outlined" icon="download" className="max-sm:w-full" onClick={async () => {
-                if (!LIVE) return toast(`原型：正式环境会下载原始文件 ${o.file}`);
-                const r = await ordersApi.fileUrl(o.id);
-                if (r.ok) window.location.assign(r.data.url);
-                else toast(r.error.message || "下载链接生成失败");
-              }}>
-              下载
-            </Button>
-          </div>
-        </Box>
+          </Box>
+          {vers.length > 1 && (
+            <Box title="版本记录">
+              <VersionList orderId={o.id} vers={vers} selected={shown?.n} onSelect={setVer} showModel={false} />
+            </Box>
+          )}
+        </div>
         <div className="flex min-w-0 flex-col gap-4">
           <Box title="打印参数">
             <div className="grid grid-cols-2 gap-3">
