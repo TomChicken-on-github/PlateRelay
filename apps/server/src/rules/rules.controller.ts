@@ -19,6 +19,7 @@ const Rules = z.object({
     stepMinutes: z.number().int().min(1).max(24 * 60),
     baseline: z.enum(["original", "previous"]),
     whenDispatched: z.enum(["recall", "refuse"]),
+    dispatchedExtraPlaces: count(999),
   }),
   modelSwitch: z.object({
     max: count(99),

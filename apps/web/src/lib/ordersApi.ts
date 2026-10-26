@@ -94,6 +94,7 @@ export function toMyOrder(v: OrderView): MyOrder {
     redeemer: person(v.redeemed?.by),
     canceller: v.cancel?.by?.name,
     canRevise: v.canRevise,
+    canCancel: v.canCancelOwn,
     revs: v.revisions.count,
     revMax: v.revisions.max,
     switches: v.revisions.switches,

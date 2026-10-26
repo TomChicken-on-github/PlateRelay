@@ -35,6 +35,8 @@ export type MyOrder = {
   canceller?: string;
   /* 提交后修改: revisions used / allowed (0 = no limit), model switches likewise; seconds the next version is compared with */
   canRevise?: boolean;
+  /** Real builds: the owner may cancel now (dispatched but not started included). */
+  canCancel?: boolean;
   revs?: number;
   revMax?: number;
   switches?: number;

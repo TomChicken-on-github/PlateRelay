@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { DEFAULT_QUEUE_RULES, type OrderView, type PersonView, type QueueRules } from "@platerelay/shared";
+import { DEFAULT_QUEUE_RULES, OWNER_CANCELLABLE, type OrderView, type PersonView, type QueueRules } from "@platerelay/shared";
 import { eq, inArray } from "drizzle-orm";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import type { Db } from "../db/db.js";
@@ -133,6 +133,7 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
           baselineSeconds: rules.revisions.baseline === "original" ? (r.originalPrintSeconds ?? r.printSeconds) : r.printSeconds,
         },
         canRevise: userId(ctx) === r.ownerId && revisable(r, rules, onThisPrinter ? p?.state : undefined),
+        canCancelOwn: userId(ctx) === r.ownerId && (OWNER_CANCELLABLE.includes(r.status) || (r.status === "PRINTING" && onThisPrinter && p?.state === "PREPARING")),
         revision: r.revision,
         ...(extras.missingColours?.has(r.id) ? { missingColours: extras.missingColours.get(r.id) } : {}),
       };

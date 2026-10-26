@@ -273,11 +273,11 @@ export function MyOrdersPage() {
                     <OrderHead id={x.id} chip={<StatusChip tone={s.tone}>{s.t}</StatusChip>} right={x.at} />
                     <OrderBody thumb={<Thumb fil={x.fil} url={x.thumb} alt={`#${x.id} 预览`} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
                     <OrderStatusBlock o={x} />
-                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
+                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || (LIVE && x.canCancel) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
                       <OrderActions>
                         {x.st === "ready" && <Button icon="qr_code_2" onClick={(e) => (stop(e), open({ type: "qr", id: x.id }))}>出示取件码</Button>}
                         {revisable(x) && <Button variant="tonal" icon="upload_file" onClick={(e) => (stop(e), open({ type: "revise", id: x.id }))}>修改文件</Button>}
-                        {(x.st === "pending" || x.st === "revising" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
+                        {(LIVE ? x.canCancel : x.st === "pending" || x.st === "revising" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
                         {x.st === "failed" && !x.retried && !LIVE && <Button icon="replay" onClick={(e) => (stop(e), open({ type: "retry", id: x.id }))}>一键重打</Button>}
                         {x.st === "rejected" && <Button variant="tonal" icon="send" onClick={(e) => (stop(e), navigate("/submit"))}>修改后重新提交</Button>}
                       </OrderActions>

@@ -27,6 +27,8 @@ export interface QueueRules {
     baseline: "original" | "previous";
     /** A dispatched job that has not started: recall the print and freeze the order, or refuse the revision. */
     whenDispatched: "recall" | "refuse";
+    /** Recalled jobs move back this many extra places on top of the time rule. Once printing has started the file cannot change. */
+    dispatchedExtraPlaces: number;
   };
   modelSwitch: {
     /** 换机型次数上限. */
@@ -57,6 +59,7 @@ export const DEFAULT_QUEUE_RULES: QueueRules = {
     stepMinutes: 15,
     baseline: "original",
     whenDispatched: "recall",
+    dispatchedExtraPlaces: 1,
   },
   modelSwitch: { max: 1, position: "original", extraPlaces: 0, countsAsRevision: true, dualToSingleCounts: false },
   skipReminderMinutes: 30,

@@ -406,7 +406,8 @@ export class OrdersService {
           },
           tx,
         );
-        return row;
+        /* auto-approved: it is queued again now, so it moves back now */
+        return !d.review && d.placesBack !== 0 ? this.moveBack(tx, ctx, id, info) : row;
       });
       if (recalled) await this.sendRecall(ctx, recalled, id);
       if (recalled || !d.review) void this.scheduler.kick();
@@ -447,27 +448,30 @@ export class OrdersService {
       });
       await this.audit.record(ctx, { action: "order.approve", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "QUEUED" } }, tx);
       if (!rev || rev.placesBack === 0) return row;
-      {
-        const q = await lockQueue(tx);
-        const from = q.findIndex((o) => o.id === id);
-        const to = await moveInQueue(tx, q, id, rev.placesBack === "tail" ? q.length - 1 : from + rev.placesBack);
-        await this.audit.record(
-          ctx,
-          {
-            action: "queue.revision-penalty",
-            targetType: "order",
-            targetId: id,
-            before: { position: from + 1 },
-            after: { position: to + 1 },
-            reason: JSON.stringify({ policy: this.policy.id, revision: rev.n, kind: rev.kind, deltaSeconds: rev.deltaSeconds, placesBack: rev.placesBack }),
-          },
-          tx,
-        );
-      }
-      return (await tx.select().from(orders).where(eq(orders.id, id)))[0];
+      return this.moveBack(tx, ctx, id, rev);
     });
     void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
+  }
+
+  /** Moves an approved revision back in the queue as the policy decided, and records the move with its numbers. */
+  private async moveBack(tx: Db, ctx: Ctx, id: number, rev: RevisionInfo): Promise<OrderRow> {
+    const q = await lockQueue(tx);
+    const from = q.findIndex((o) => o.id === id);
+    const to = await moveInQueue(tx, q, id, rev.placesBack === "tail" ? q.length - 1 : from + rev.placesBack);
+    await this.audit.record(
+      ctx,
+      {
+        action: "queue.revision-penalty",
+        targetType: "order",
+        targetId: id,
+        before: { position: from + 1 },
+        after: { position: to + 1 },
+        reason: JSON.stringify({ policy: this.policy.id, revision: rev.n, kind: rev.kind, deltaSeconds: rev.deltaSeconds, placesBack: rev.placesBack, recalled: rev.recalled }),
+      },
+      tx,
+    );
+    return (await tx.select().from(orders).where(eq(orders.id, id)))[0];
   }
 
   async reject(ctx: Ctx, id: number, reason: string): Promise<OrderView> {
@@ -501,19 +505,26 @@ export class OrdersService {
       if (!mine && !can(ctx, "order:view:any")) throw notFound("订单");
       throw new ApiError(HttpStatus.FORBIDDEN, "forbidden", "没有权限取消这张单");
     }
-    if (!any && !OWNER_CANCELLABLE.includes(cur.status)) {
-      throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单已经开始打印，不能自行取消", { orderId: id, status: cur.status });
-    }
     let stopPrinter: string | null = null;
+    let recallPrinter: string | null = null;
     const row = await this.db.transaction(async (tx) => {
       const [o] = await tx.select().from(orders).where(eq(orders.id, id));
       const printer = o.status === "PRINTING" && o.printerId ? await lockPrinter(tx, o.printerId) : null;
+      /* dispatched but still PREPARING has not started: the submitter may still cancel it */
+      const early = printer?.state === "PREPARING" && printer.currentOrderId === id;
+      if (!any && !OWNER_CANCELLABLE.includes(o.status) && !early) {
+        throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单已经开始打印，不能自行取消", { orderId: id, status: o.status });
+      }
       const now = new Date();
       const { row, from } = await transition(tx, ctx, id, any ? "cancelAny" : "cancelOwn", {
         set: { cancelledBy: userId(ctx), cancelledAt: now, cancelReason: reason, errorPausedMs: o.errorPausedMs + (printer ? pausedMs(printer, now) : 0) },
         data: { reason },
       });
-      if (printer && printer.currentOrderId === id && printer.state !== "CLEARING_REQUIRED") {
+      if (early) {
+        /* nothing on the bed yet: take the job back instead of stopping a print */
+        await movePrinter(tx, printer, "recalled", { currentOrderId: null });
+        recallPrinter = printer.id;
+      } else if (printer && printer.currentOrderId === id && printer.state !== "CLEARING_REQUIRED") {
         await movePrinter(tx, printer, "stopped", { error: null });
         stopPrinter = printer.id;
       }
@@ -522,6 +533,10 @@ export class OrdersService {
       return row;
     });
     if (stopPrinter) await this.sendStop(ctx, stopPrinter);
+    if (recallPrinter) {
+      await this.sendRecall(ctx, recallPrinter, id);
+      void this.scheduler.kick();
+    }
     return (await this.views(ctx, [row]))[0];
   }
 

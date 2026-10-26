@@ -128,6 +128,8 @@ export interface OrderView {
   revisions: { count: number; max: number; switches: number; maxSwitches: number; baselineSeconds: number };
   /** Owner only: a new file can replace this one now (rules, state and limits allow it). */
   canRevise: boolean;
+  /** Owner only: the owner may cancel it now (before printing starts, dispatched-but-preparing included). */
+  canCancelOwn: boolean;
   /** A revision waiting for re-review; the order keeps its place in the queue meanwhile (frozen). */
   revision: RevisionInfo | null;
   /** Review pool only: 颜色要求 is 一致 and these colours are not on offer, so a spool has to be fetched. */

@@ -243,6 +243,43 @@ describe("print rules", () => {
       assert.equal((await revise(user, b, x2dPlate1Plus(5)).expect(409)).body.code, "already-dispatched");
     });
 
+    it("moves a recalled revision back one extra place, and lets the owner cancel until printing starts", async () => {
+      await t.db.update(printers).set({ state: "IDLE" }).where(eq(printers.id, x2d));
+      t.commands.online = true;
+      const a = await queued(user);
+      await t.app.get(SchedulerService).dispatch(x2d);
+      await queued(other);
+      const c = await queued(other);
+      const v = (await revise(user, a, x2dPlate1Plus(5)).expect(200)).body as OrderView;
+      assert.equal(v.revision!.placesBack, 1, "within the time rule, plus one for the recall");
+      /* the freed printer takes the next order at once; close it so the rest stays queued */
+      await new Promise((r) => setTimeout(r, 50));
+      await builder.post(`/api/printers/${x2d}/open`).send({ open: false }).expect(200);
+      await t.db.update(printers).set({ state: "IDLE", currentOrderId: null }).where(eq(printers.id, x2d));
+      await builder.post(`/api/orders/${a}/approve`).expect(200);
+      const pos = await positions();
+      assert.ok(pos.get(c)! < pos.get(a)!, "moved behind the order that was after it");
+
+      await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
+      await new Promise((r) => setTimeout(r, 50));
+      const [p] = await t.db.select().from(printers).where(eq(printers.id, x2d));
+      assert.equal(p.state, "PREPARING");
+      const first = p.currentOrderId!;
+      const mine = first === a ? user : other;
+      assert.equal((await mine.get(`/api/orders/${first}`).expect(200)).body.canCancelOwn, true);
+      await mine.post(`/api/orders/${first}/cancel`).send({ reason: "不需要了" }).expect(200);
+      assert.ok(t.commands.sent.some((c) => c.cmd === "recall" && c.arg === first));
+      await new Promise((r) => setTimeout(r, 50));
+      const [p2] = await t.db.select().from(printers).where(eq(printers.id, x2d));
+      const next = p2.currentOrderId!;
+      assert.notEqual(next, first, "the printer took the next order");
+      await t.app.get(PrintersService).onStarted(x2d);
+      const owner = next === a ? user : other;
+      assert.equal((await owner.get(`/api/orders/${next}`).expect(200)).body.canCancelOwn, false);
+      assert.equal((await owner.post(`/api/orders/${next}/cancel`).send({ reason: "不需要了" }).expect(409)).body.code, "order-state-conflict");
+      assert.equal((await revise(owner, next, x2dPlate1Plus(5)).expect(409)).body.code, "order-state-conflict");
+    });
+
     it("refuses revisions when they are off", async () => {
       await setRules((r) => (r.revisions.enabled = false));
       const a = await queued(user);

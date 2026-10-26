@@ -29,7 +29,8 @@ export const TRANSITIONS = {
   revise: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "PENDING_REVIEW" },
   /** Same, when 轻微修改自动审核 lets it skip the re-review. */
   reviseApproved: { from: ["QUEUED", "PRINTING"], to: "QUEUED" },
-  cancelOwn: { from: ["PENDING_REVIEW", "QUEUED"], to: "CANCELLED" },
+  /* PRINTING only while the job is dispatched and not started; the service checks the printer */
+  cancelOwn: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "CANCELLED" },
   cancelAny: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING", "PRINTED_AWAITING_STORAGE", "STORED_READY_PICKUP"], to: "CANCELLED" },
 } as const satisfies Record<string, { from: readonly OrderStatus[]; to: OrderStatus }>;
 

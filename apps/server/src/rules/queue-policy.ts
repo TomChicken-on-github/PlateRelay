@@ -71,6 +71,7 @@ export class ParamPolicy implements QueuePolicy {
     const base = r.baseline === "original" ? (o.originalPrintSeconds ?? o.printSeconds) : o.printSeconds;
     const deltaSeconds = Math.round(next.printSeconds - base);
     let placesBack = revisionPlacesBack(r, deltaSeconds);
+    if (dispatched && placesBack !== "tail") placesBack += r.dispatchedExtraPlaces;
     if (isSwitch) {
       if (rules.modelSwitch.position === "tail") placesBack = "tail";
       else if (placesBack !== "tail") placesBack += rules.modelSwitch.extraPlaces;

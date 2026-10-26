@@ -80,6 +80,8 @@ export function ReviseSheet({ o, rules, open, onClose }: { o: MyOrder; rules: Qu
   const delta = next ? next.sec - (o.baseSec ?? cur.sec) : 0;
   const r = rules?.revisions;
   let back: number | "tail" = r ? revisionPlacesBack(r, delta) : 0;
+  /* dispatched but not started: the print is recalled and the order moves back extra places */
+  if (r && o.st === "printing" && back !== "tail") back += r.dispatchedExtraPlaces;
   if (isSwitch && rules) back = rules.modelSwitch.position === "tail" ? "tail" : back === "tail" ? back : back + rules.modelSwitch.extraPlaces;
   const same = !!next && next.fil.length === cur.fil.length && next.fil.every(([c, t], i) => c.toLowerCase() === cur.fil[i][0].toLowerCase() && t === cur.fil[i][1]);
   const auto = o.st === "queued" && !!r?.autoApproveMinor && !isSwitch && same && delta <= r.thresholdMinutes * 60;
