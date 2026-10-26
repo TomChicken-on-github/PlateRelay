@@ -128,6 +128,8 @@ export interface OrderView {
   revisions: { count: number; max: number; switches: number; maxSwitches: number; baselineSeconds: number };
   /** Owner only: a new file can replace this one now (rules, state and limits allow it). */
   canRevise: boolean;
+  /** Owner only: a revision is waiting for re-review and an approved version exists to go back to (撤回修改, free). */
+  canWithdraw: boolean;
   /** Owner only: the owner may cancel it now (before printing starts, dispatched-but-preparing included). */
   canCancelOwn: boolean;
   /** A revision waiting for re-review; the order keeps its place in the queue meanwhile (frozen). */
@@ -140,7 +142,7 @@ export interface OrderView {
 export interface RevisionInfo {
   /** 1-based revision number. */
   n: number;
-  kind: "revision" | "model-switch" | "dual-to-single";
+  kind: "revision" | "model-switch" | "dual-to-single" | "restore";
   at: string;
   /** The version before this one. */
   prev: { fileName: string; printerModel: string | null; printerModelId: string; nozzles: OrderNozzle[]; filaments: OrderFilament[]; printSeconds: number; weightGrams: number };
@@ -150,6 +152,34 @@ export interface RevisionInfo {
   placesBack: number | "tail";
   /** It was dispatched but not started; the print was recalled. */
   recalled: boolean;
+}
+
+export const VERSION_STATES = ["pending", "approved", "rejected", "withdrawn"] as const;
+export type VersionState = (typeof VERSION_STATES)[number];
+
+/** One file an order has had (rules doc §3). Every version stays downloadable; an approved one can be restored. */
+export interface OrderVersionView {
+  /** 1-based; 1 is the submitted file. */
+  n: number;
+  kind: "submit" | RevisionInfo["kind"];
+  /** For kind "restore": the version it copies. */
+  restoredFrom: number | null;
+  state: VersionState;
+  /** The version the order prints now (or is reviewing). */
+  current: boolean;
+  fileName: string;
+  sizeBytes: number;
+  plate: { index: number; count: number; name: string };
+  printerModel: string | null;
+  printerModelId: string;
+  nozzles: OrderNozzle[];
+  filaments: OrderFilament[];
+  printSeconds: number;
+  weightGrams: number;
+  thumbUrl: string | null;
+  at: string;
+  /** Reject reason of a rejected revision. */
+  reason: string | null;
 }
 
 export interface OrderTimelineEntry {
@@ -165,6 +195,8 @@ export interface OrderDetail extends OrderView {
   /** Request form answers: owner and reviewers only. */
   answers: { label: string; value: string | string[] | number | null }[] | null;
   timeline: OrderTimelineEntry[];
+  /** Oldest first: owner, reviewers and people who can see any order. */
+  versions: OrderVersionView[] | null;
   /** Signed link to the 入库 photo: owner and people who can see any order. */
   storePhotoUrl?: string | null;
 }

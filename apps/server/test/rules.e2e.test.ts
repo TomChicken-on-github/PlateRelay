@@ -203,6 +203,61 @@ describe("print rules", () => {
       assert.equal(done.canRevise, true, "a model switch is still possible");
     });
 
+    it("keeps every version: withdraw is free, a rejected revision falls back, restore counts and needs no review", async () => {
+      const a = await queued(user);
+      const b = await queued(other);
+      const detail = async (ag: Agent = user) => (await ag.get(`/api/orders/${a}`).expect(200)).body as OrderDetail;
+
+      /* withdraw: back to version 1, same place, nothing counted */
+      let v = (await revise(user, a, x2dPlate1Plus(40)).expect(200)).body as OrderView;
+      assert.equal(v.canWithdraw, true);
+      v = (await user.post(`/api/orders/${a}/withdraw`).expect(200)).body as OrderView;
+      assert.equal(v.status, "QUEUED");
+      assert.equal(v.printSeconds, PLATE1_SECONDS);
+      assert.equal(v.revisions.count, 0);
+      assert.equal((await positions()).get(a), 1);
+      await user.post(`/api/orders/${a}/withdraw`).expect(409);
+      await other.post(`/api/orders/${a}/withdraw`).expect(404);
+
+      /* a second upload under review supersedes the first and gives its count back */
+      await revise(user, a, x2dPlate1Plus(20)).expect(200);
+      v = (await revise(user, a, x2dPlate1Plus(25)).expect(200)).body as OrderView;
+      assert.equal(v.revisions.count, 1);
+      assert.equal(v.revision!.prev.printSeconds, PLATE1_SECONDS, "compared with the approved version");
+
+      /* reject: the order keeps queueing on version 1 */
+      v = (await builder.post(`/api/orders/${a}/reject`).send({ reason: "支撑太多" }).expect(200)).body as OrderView;
+      assert.equal(v.status, "QUEUED");
+      assert.equal(v.printSeconds, PLATE1_SECONDS);
+      assert.equal((await positions()).get(a), 1);
+      let d = await detail();
+      assert.deepEqual(
+        d.versions!.map((x) => [x.n, x.state, x.current]),
+        [[1, "approved", true], [2, "withdrawn", false], [3, "withdrawn", false], [4, "rejected", false]],
+      );
+      assert.equal(d.versions![3].reason, "支撑太多");
+      assert.equal(d.versions![3].printSeconds, PLATE1_SECONDS + 1500);
+
+      /* an approved revision, then restore version 1: counts, no review, moves by the time rule */
+      await revise(user, a, x2dPlate1Plus(-20)).expect(200);
+      await builder.post(`/api/orders/${a}/approve`).expect(200);
+      await user.post(`/api/orders/${a}/versions/4/restore`).expect(409);
+      await user.post(`/api/orders/${a}/versions/5/restore`).expect(409);
+      v = (await user.post(`/api/orders/${a}/versions/1/restore`).expect(200)).body as OrderView;
+      assert.equal(v.status, "QUEUED");
+      assert.equal(v.printSeconds, PLATE1_SECONDS);
+      assert.equal(v.revisions.count, 3);
+      assert.deepEqual([(await positions()).get(a), (await positions()).get(b)], [1, 2]);
+      d = await detail();
+      assert.deepEqual(d.versions!.at(-1)!.kind, "restore");
+      assert.deepEqual([d.versions!.at(-1)!.restoredFrom, d.versions!.at(-1)!.current, d.versions!.at(-1)!.state], [1, true, "approved"]);
+
+      /* every version stays downloadable; reviewers too, and that read is audited */
+      assert.match((await user.get(`/api/orders/${a}/versions/2/file`).expect(200)).body.url, /./);
+      await other.get(`/api/orders/${a}/versions/2/file`).expect(404);
+      await builder.get(`/api/orders/${a}/versions/4/file`).expect(200);
+    });
+
     it("lets small changes through without review when 轻微修改自动审核 is on", async () => {
       await setRules((r) => (r.revisions.autoApproveMinor = true));
       const a = await queued(user);

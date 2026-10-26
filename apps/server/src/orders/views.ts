@@ -133,6 +133,8 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
           baselineSeconds: rules.revisions.baseline === "original" ? (r.originalPrintSeconds ?? r.printSeconds) : r.printSeconds,
         },
         canRevise: userId(ctx) === r.ownerId && revisable(r, rules, onThisPrinter ? p?.state : undefined),
+        /* queueSeq is set on the first approval, so an approved version exists to go back to */
+        canWithdraw: userId(ctx) === r.ownerId && r.status === "PENDING_REVIEW" && !!r.revision && r.queueSeq != null,
         canCancelOwn: userId(ctx) === r.ownerId && (OWNER_CANCELLABLE.includes(r.status) || (r.status === "PRINTING" && onThisPrinter && p?.state === "PREPARING")),
         revision: r.revision,
         ...(extras.missingColours?.has(r.id) ? { missingColours: extras.missingColours.get(r.id) } : {}),

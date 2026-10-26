@@ -73,6 +73,27 @@ export class OrdersController {
     return this.orders.revise(ctx, id, file.originalname, file.buffer, parse(Revise, body ?? {}).plate);
   }
 
+  /** 撤回修改: the owner takes back a revision under review, free; the last approved version keeps its place. */
+  @Post("orders/:id/withdraw")
+  @HttpCode(200)
+  @RequirePerm("order:submit")
+  withdraw(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number) {
+    return this.orders.withdraw(ctx, id);
+  }
+
+  /** 恢复旧版本: an approved version comes back as a new version (counts as a revision, no review). */
+  @Post("orders/:id/versions/:n/restore")
+  @HttpCode(200)
+  @RequirePerm("order:submit")
+  restore(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Param("n", ParseIntPipe) n: number) {
+    return this.orders.restore(ctx, id, n);
+  }
+
+  @Get("orders/:id/versions/:n/file")
+  async versionFile(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Param("n", ParseIntPipe) n: number) {
+    return { url: await this.orders.versionFileUrl(ctx, id, n) };
+  }
+
   /** The submit page's preview: parse result, per-plate availability and the queue. Nothing is stored. */
   @Post("orders/preview")
   @HttpCode(200)
