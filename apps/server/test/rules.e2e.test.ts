@@ -308,6 +308,20 @@ describe("print rules", () => {
       assert.equal(new Set(k.values()).size, 5, "no two orders share a key");
       const pos = await positions();
       assert.deepEqual([c, b, a, d, e].map((id) => pos.get(id)), [1, 2, 3, 4, 5]);
+
+      /* at the same time: two approvals that move back, a manual move and a withdraw */
+      await revise(user, b, x2dPlate1Plus(20)).expect(200);
+      await revise(user, d, x2dPlate1Plus(20)).expect(200);
+      await revise(user, a, x2dPlate1Plus(5)).expect(200);
+      await Promise.all([
+        builder.post(`/api/orders/${b}/approve`).expect(200),
+        builder.post(`/api/orders/${d}/approve`).expect(200),
+        user.post(`/api/orders/${a}/withdraw`).expect(200),
+        builder.post("/api/queue/reorder").send({ orderId: e, toPosition: 1 }).expect(204),
+      ]);
+      const after = await keys();
+      assert.equal(new Set(after.values()).size, 5, "still no shared keys");
+      assert.deepEqual([...(await positions()).values()].sort(), [1, 2, 3, 4, 5]);
     });
 
     it("lets small changes through without review when 轻微修改自动审核 is on", async () => {

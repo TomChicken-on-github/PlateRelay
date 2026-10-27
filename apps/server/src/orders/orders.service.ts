@@ -32,7 +32,7 @@ import { QUEUE_POLICY, type QueuePolicy, type RevisionDecision } from "../rules/
 import { type Offer, ResourcesService } from "../rules/resources.service.js";
 import { SettingsService } from "../settings/settings.service.js";
 import { STORAGE, type ObjectStorage } from "../storage/storage.js";
-import { lockQueue, moveInQueue } from "./queue.js";
+import { lockQueue, moveInQueue, queueLock } from "./queue.js";
 import { type OrderRow, orderEvent, transition } from "./transition.js";
 import { addVersion, currentOf, decide, lastApproved, pendingOf, type VersionFields, type VersionRow, versionFields, versionsOf } from "./versions.js";
 import { loadPeople, orderViews, THUMB_TTL_S, type ViewExtras } from "./views.js";
@@ -682,6 +682,8 @@ export class OrdersService {
     const id = cur.id;
     let recalled: string | null = null;
     {
+      /* queue before order row, like dispatch, so the two never wait on each other */
+      await queueLock(tx);
       const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");      if (o.status !== cur.status || o.fileId !== cur.fileId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
       if (printer) {
         const p = await lockPrinter(tx, printer.id);
@@ -762,6 +764,7 @@ export class OrdersService {
    */
   async approve(ctx: Ctx, id: number): Promise<OrderView> {
     const row = await this.db.transaction(async (tx) => {
+      await queueLock(tx);
       const [pending] = await tx.select({ revision: orders.revision }).from(orders).where(eq(orders.id, id)).for("update");
       const rev = pending?.revision ?? null;
       const { row } = await transition(tx, ctx, id, "approve", {

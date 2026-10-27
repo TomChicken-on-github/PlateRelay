@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/db.js";
 import { orders } from "../db/schema.js";
 
@@ -10,8 +10,20 @@ export const inQueue = or(eq(orders.status, "QUEUED"), and(eq(orders.status, "PE
 
 export type QueueMember = { id: number; seq: number };
 
+/** Arbitrary constant naming the queue's advisory lock. */
+const QUEUE_LOCK = 4_701_001;
+
+/**
+ * Serializes everything that reorders the queue or takes from it, until the transaction ends. Row locks
+ * alone are not enough: a reader waiting on a row lock may still see the old order of the keys.
+ */
+export async function queueLock(tx: Db) {
+  await tx.execute(sql`select pg_advisory_xact_lock(${QUEUE_LOCK})`);
+}
+
 /** The queue in order, rows locked. */
 export async function lockQueue(tx: Db): Promise<QueueMember[]> {
+  await queueLock(tx);
   const q = await tx.select({ id: orders.id, seq: orders.queueSeq }).from(orders).where(inQueue).orderBy(asc(orders.queueSeq), asc(orders.id)).for("update");
   return q.map((o) => ({ id: o.id, seq: o.seq! }));
 }

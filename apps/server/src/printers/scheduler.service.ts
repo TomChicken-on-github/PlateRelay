@@ -11,6 +11,7 @@ import { SettingsService } from "../settings/settings.service.js";
 import { PRINTER_COMMANDS, type PrinterCommands } from "./commands.js";
 import { hasWritableStorage } from "./compat.js";
 import { lockPrinter, movePrinter } from "./printer-state.js";
+import { queueLock } from "../orders/queue.js";
 
 /**
  * Global FIFO queue: an idle printer open to submitters takes the first
@@ -47,12 +48,14 @@ export class SchedulerService {
     const picked = await this.db.transaction(async (tx) => {
       const p = await lockPrinter(tx, printerId);
       if (p.state !== "IDLE" || !p.openToContestants || !hasWritableStorage(p)) return null;
+      /* wait for any move in progress, then read the queue as it is after it */
+      await queueLock(tx);
       const queued = await tx
         .select()
         .from(orders)
         .where(eq(orders.status, "QUEUED"))
         .orderBy(asc(orders.queueSeq), asc(orders.id))
-        .for("update", { skipLocked: true });
+        .for("update");
       const o = this.policy.pick(rules, queued, p);
       if (!o) return null;
       const now = new Date();
