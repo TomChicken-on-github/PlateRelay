@@ -4,7 +4,7 @@ import type { Fil } from "./myOrders";
 export type Task = {
   id: string;
   /** clear: a bed to clear with nothing to store (failed, cancelled or external job). */
-  kind: "stock" | "err" | "clear" | "skip";
+  kind: "dispatch" | "stock" | "err" | "clear" | "skip";
   order: number;
   file: string;
   n: number;
@@ -19,6 +19,8 @@ export type Task = {
   err?: string;
   /** skip: why printers keep passing it over. */
   why?: string;
+  /** dispatch: the suggested order's place in the queue. */
+  pos?: number;
   pct?: number;
   /* from the server; the mock leaves them out */
   printerId?: string;
@@ -28,6 +30,7 @@ export type Task = {
 };
 
 export const tasks = createStore<Task[]>([
+  { id: "d1", kind: "dispatch", order: 1052, file: "云台支架.gcode.3mf", n: 1, model: "P1S", nozzle: "0.4", time: "1h 20m", g: 32, fil: [["#f2f2f2", "PLA"]], printer: "P1S-05", owner: "王可", since: "6 分钟", pos: 2 },
   { id: "t1", kind: "stock", order: 1045, file: "云台底座.gcode.3mf", n: 1, model: "P1S", nozzle: "0.4", time: "2h 40m", g: 61, fil: [["#ff7043", "ABS"]], printer: "P1S-01", owner: "周浩然", since: "38 分钟" },
   { id: "t2", kind: "stock", order: 1043, file: "电机支架.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "1h 10m", g: 35, fil: [["#6155f5", "PETG"]], printer: "X2D-02", owner: "林小满", since: "12 分钟" },
   { id: "t3", kind: "err", order: 1047, file: "舵机支架.gcode.3mf", n: 1, model: "H2D", nozzle: "0.4", time: "1h 50m", g: 36, fil: [["#ff7043", "ABS"]], printer: "H2D-02", owner: "Tom_Chicken", since: "5 分钟", err: "AMS A2 断料：耗材用尽，打印已暂停（41%）", pct: 41 },
