@@ -12,6 +12,10 @@ export const PERMISSIONS = [
   "order:submitter-name:view-others",
   "order:submit",
   "order:cancel:own",
+  /** 本场可用资源 on the submit page. */
+  "resource:view",
+  /** 预计等待 in that table (also needs the setting on). */
+  "queue:wait:view",
   /** Read any order's detail, answers and file. */
   "order:view:any",
   /** Cancel any unfinished order, printing ones included. */
@@ -33,6 +37,8 @@ export const PERMISSIONS = [
   /** Add, edit and remove printers; take them in and out of maintenance. */
   "printer:manage",
   "form:configure",
+  /** 系统设置 → 可用资源: hide, sort and annotate rows, stock filaments. */
+  "resource:configure",
   "user:manage",
   "daemon:manage",
   "settings:manage",
@@ -51,6 +57,8 @@ const USER: Permission[] = [
   "order:submitter-name:view-others",
   "order:submit",
   "order:cancel:own",
+  "resource:view",
+  "queue:wait:view",
   "order:skip-parts:own",
 ];
 

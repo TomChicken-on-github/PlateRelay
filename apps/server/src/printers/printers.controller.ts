@@ -86,6 +86,14 @@ export class PrintersController {
     return this.printers.star(ctx, id, parse(Star, body).starred);
   }
 
+  /** 开放给选手 */
+  @Post("printers/:id/open")
+  @HttpCode(200)
+  @RequirePerm("printer:manage")
+  setOpen(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string, @Body() body: unknown) {
+    return this.printers.setOpen(ctx, id, parse(z.object({ open: z.boolean() }), body).open);
+  }
+
   /** Error handling: STOP needs printer:stop and a reason; the rest need printer:operate. */
   @Post("printers/:id/resolve")
   @HttpCode(200)

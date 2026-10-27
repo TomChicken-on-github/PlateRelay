@@ -25,7 +25,18 @@ export const TRANSITIONS = {
   fail: { from: ["PRINTING"], to: "FAILED" },
   store: { from: ["PRINTED_AWAITING_STORAGE"], to: "STORED_READY_PICKUP" },
   redeem: { from: ["STORED_READY_PICKUP"], to: "COMPLETED" },
-  cancelOwn: { from: ["PENDING_REVIEW", "QUEUED"], to: "CANCELLED" },
+  /** A new file replaces the plate; it waits for re-review frozen in its place (rules doc §3). A PRINTING one was dispatched but not started and is recalled. */
+  revise: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "PENDING_REVIEW" },
+  /** Same, when 轻微修改自动审核 lets it skip the re-review. PENDING_REVIEW: replacing a revision still under review. */
+  reviseApproved: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "QUEUED" },
+  /** 恢复旧版本: an approved version comes back as a new one, approved already. */
+  restore: { from: ["QUEUED", "PRINTING"], to: "QUEUED" },
+  /** 撤回修改: the owner takes back a revision under review; the last approved version keeps its place. */
+  withdraw: { from: ["PENDING_REVIEW"], to: "QUEUED" },
+  /** A rejected revision: the last approved version keeps queueing in its place. */
+  rejectRevision: { from: ["PENDING_REVIEW"], to: "QUEUED" },
+  /* PRINTING only while the job is dispatched and not started; the service checks the printer */
+  cancelOwn: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING"], to: "CANCELLED" },
   cancelAny: { from: ["PENDING_REVIEW", "QUEUED", "PRINTING", "PRINTED_AWAITING_STORAGE", "STORED_READY_PICKUP"], to: "CANCELLED" },
 } as const satisfies Record<string, { from: readonly OrderStatus[]; to: OrderStatus }>;
 

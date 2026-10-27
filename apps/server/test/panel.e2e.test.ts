@@ -25,7 +25,7 @@ describe("panel API", () => {
     const res = await builder.post("/api/printers").send({ name, ip: "192.0.2.10", serial: `SN${name.replace(/\W/g, "")}0001` }).expect(201);
     await t.db
       .update(printers)
-      .set({ model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }], storage: [{ medium: "internal", present: true, writable: true }], state: "IDLE" })
+      .set({ openToContestants: true, model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }], storage: [{ medium: "internal", present: true, writable: true }], state: "IDLE" })
       .where(eq(printers.id, res.body.id));
     return res.body.id as string;
   }

@@ -1,5 +1,6 @@
 import {
   type AnswerSnapshot,
+  COLOUR_PREFS,
   FAILURE_ATTRIBUTIONS,
   type FormField,
   type FormFieldType,
@@ -11,6 +12,10 @@ import {
   type PrinterError,
   type ReportedNozzle,
   type ReportedStorage,
+  type ReportedTray,
+  type OrderVersionView,
+  type RevisionInfo,
+  VERSION_STATES,
 } from "@platerelay/shared";
 import { sql } from "drizzle-orm";
 import {
@@ -41,9 +46,11 @@ export const printerState = pgEnum("printer_state", PRINTER_STATES);
 export const failureAttribution = pgEnum("failure_attribution", FAILURE_ATTRIBUTIONS);
 export const actorType = pgEnum("actor_type", ["user", "system", "daemon", "printer"]);
 export const auditResult = pgEnum("audit_result", ["ok", "failed", "denied"]);
+export const colourPref = pgEnum("colour_pref", COLOUR_PREFS);
+export const versionState = pgEnum("version_state", VERSION_STATES);
 
 /* JSON column shapes live in @platerelay/shared because the API sends them as they are. */
-export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, OrderPart, PrinterError, ReportedNozzle, ReportedStorage };
+export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, OrderPart, PrinterError, ReportedNozzle, ReportedStorage, ReportedTray, RevisionInfo };
 
 /* ---- accounts ---- */
 
@@ -142,6 +149,12 @@ export const printers = pgTable("printers", {
   modelId: text("model_id"),
   nozzles: jsonb("nozzles").$type<ReportedNozzle[]>(),
   storage: jsonb("storage").$type<ReportedStorage[]>(),
+  /** Loaded spools, reported like the nozzles; feeds 本场可用资源. */
+  trays: jsonb("trays").$type<ReportedTray[]>(),
+  /** Build plate on the printer, reported or set by hand. */
+  bedType: text("bed_type"),
+  /** 开放给选手. New printers start closed; only open ones take queued orders (rules doc §1.5). */
+  openToContestants: boolean("open_to_contestants").notNull().default(false),
   /** Latest telemetry snapshot (temperatures, AMS, progress). Not audited. */
   telemetry: jsonb("telemetry").$type<Record<string, unknown>>(),
   state: printerState("state").notNull().default("OFFLINE"),
@@ -241,12 +254,63 @@ export const orders = pgTable(
     attributedBy: uuid("attributed_by").references(() => users.id),
     attributedAt: ts("attributed_at"),
     retryOf: integer("retry_of"),
+    colourPref: colourPref("colour_pref").notNull().default("similar"),
+    /** Plate the submitter picked when 自选板 is allowed; null prints on the plate the file was sliced for. */
+    bedType: text("bed_type"),
+    /** Print time of the first version, the baseline for revision penalties. */
+    originalPrintSeconds: integer("original_print_seconds"),
+    revisionCount: integer("revision_count").notNull().default(0),
+    modelSwitchCount: integer("model_switch_count").notNull().default(0),
+    /** Revision waiting for re-review (frozen in its place), cleared on approval. */
+    revision: jsonb("revision").$type<RevisionInfo>(),
+    /** First time a later order was dispatched while this one stayed queued; cleared on dispatch. */
+    skippedSince: ts("skipped_since"),
   },
   (t) => [
     index("orders_status_queue").on(t.status, t.queueSeq, t.id),
     index("orders_owner").on(t.ownerId, t.submittedAt),
     uniqueIndex("orders_retry_of").on(t.retryOf),
   ],
+);
+
+/**
+ * Every file an order has had (rules doc §3). The order row holds the version it prints; these keep
+ * the others downloadable and restorable, and are what a withdrawn or rejected revision falls back to.
+ */
+export const orderVersions = pgTable(
+  "order_versions",
+  {
+    id: serial("id").primaryKey(),
+    orderId: integer("order_id").notNull().references(() => orders.id),
+    /** 1-based; 1 is the submitted file. */
+    n: integer("n").notNull(),
+    kind: text("kind").$type<OrderVersionView["kind"]>().notNull(),
+    restoredFrom: integer("restored_from"),
+    state: versionState("state").notNull(),
+    fileId: uuid("file_id").notNull().references(() => files.id),
+    plateIndex: integer("plate_index").notNull(),
+    plateCount: integer("plate_count").notNull(),
+    plateName: text("plate_name").notNull().default(""),
+    printerModel: text("printer_model"),
+    printerModelId: text("printer_model_id").notNull(),
+    nozzles: jsonb("nozzles").$type<OrderNozzle[]>().notNull(),
+    filaments: jsonb("filaments").$type<OrderFilament[]>().notNull(),
+    printSeconds: integer("print_seconds").notNull(),
+    weightGrams: real("weight_grams").notNull(),
+    thumbnailKey: text("thumbnail_key"),
+    /** 跳过零件: the version's parts and plate images, so a revision or restore brings its own. */
+    parts: jsonb("parts").$type<OrderPart[]>().notNull().default([]),
+    partsTopKey: text("parts_top_key"),
+    partsPickKey: text("parts_pick_key"),
+    /** Counted towards revisions.max / modelSwitch.max; given back when it is withdrawn. */
+    counted: boolean("counted").notNull().default(false),
+    switched: boolean("switched").notNull().default(false),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: ts("decided_at"),
+    reason: text("reason"),
+  },
+  (t) => [uniqueIndex("order_versions_n").on(t.orderId, t.n)],
 );
 
 /** Pickup codes: issued on demand, valid 10 minutes, a new one revokes the previous one. */

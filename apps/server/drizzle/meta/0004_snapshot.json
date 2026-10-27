@@ -1,5 +1,5 @@
 {
-  "id": "21d7df5a-4bd8-48da-97ad-b30e0a5c6dce",
+  "id": "66e05299-d10b-404c-8695-dad806f47e77",
   "prevId": "87c505bd-fb47-4cd0-9977-d8def142dd4d",
   "version": "7",
   "dialect": "postgresql",
@@ -659,32 +659,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "parts": {
-          "name": "parts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "parts_top_key": {
-          "name": "parts_top_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "parts_pick_key": {
-          "name": "parts_pick_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "skipped_parts": {
-          "name": "skipped_parts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
         "form_version_id": {
           "name": "form_version_id",
           "type": "integer",
@@ -847,6 +821,52 @@
         "retry_of": {
           "name": "retry_of",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "colour_pref": {
+          "name": "colour_pref",
+          "type": "colour_pref",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'similar'"
+        },
+        "bed_type": {
+          "name": "bed_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "original_print_seconds": {
+          "name": "original_print_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision_count": {
+          "name": "revision_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "model_switch_count": {
+          "name": "model_switch_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "revision": {
+          "name": "revision",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skipped_since": {
+          "name": "skipped_since",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
@@ -1212,6 +1232,25 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "trays": {
+          "name": "trays",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bed_type": {
+          "name": "bed_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "open_to_contestants": {
+          "name": "open_to_contestants",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "telemetry": {
           "name": "telemetry",
@@ -1663,6 +1702,15 @@
         "ok",
         "failed",
         "denied"
+      ]
+    },
+    "public.colour_pref": {
+      "name": "colour_pref",
+      "schema": "public",
+      "values": [
+        "exact",
+        "similar",
+        "any"
       ]
     },
     "public.failure_attribution": {

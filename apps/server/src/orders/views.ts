@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { OrderView, PersonView } from "@platerelay/shared";
+import { DEFAULT_QUEUE_RULES, OWNER_CANCELLABLE, type OrderView, type PersonView, type QueueRules } from "@platerelay/shared";
 import { eq, inArray } from "drizzle-orm";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import type { Db } from "../db/db.js";
@@ -43,6 +43,16 @@ export async function loadPeople(db: Db, ids: (string | null | undefined)[]): Pr
 export interface ViewExtras {
   queue?: Map<number, { position: number; aheadSeconds: number }>;
   waitReasons?: Map<number, string | null>;
+  rules?: QueueRules;
+  missingColours?: Map<number, string[]>;
+}
+
+/** Whether the owner may upload a new version now. The revise endpoint decides the details (limits, kind). */
+export function revisable(r: OrderRow, rules: QueueRules, printerState: string | undefined): boolean {
+  const rv = rules.revisions;
+  if (!rv.enabled) return false;
+  const state = r.status === "PENDING_REVIEW" || r.status === "QUEUED" || (r.status === "PRINTING" && printerState === "PREPARING" && rv.whenDispatched === "recall");
+  return state && (rv.max === 0 || r.revisionCount < rv.max || r.modelSwitchCount < rules.modelSwitch.max);
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -62,6 +72,7 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
     rows.flatMap((r) => [r.ownerId, r.reviewedBy, r.cancelledBy, r.failedBy, r.attributedBy, r.storedBy, r.redeemedBy]),
   );
   const operate = can(ctx, "printer:operate");
+  const rules = extras.rules ?? DEFAULT_QUEUE_RULES;
 
   return Promise.all(
     rows.map(async (r): Promise<OrderView> => {
@@ -125,6 +136,21 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
                   (can(ctx, "order:skip-parts:any") || (userId(ctx) === r.ownerId && can(ctx, "order:skip-parts:own"))),
               }
             : null,
+        colourPref: r.colourPref,
+        bedType: r.bedType,
+        revisions: {
+          count: r.revisionCount,
+          max: rules.revisions.max,
+          switches: r.modelSwitchCount,
+          maxSwitches: rules.modelSwitch.max,
+          baselineSeconds: rules.revisions.baseline === "original" ? (r.originalPrintSeconds ?? r.printSeconds) : r.printSeconds,
+        },
+        canRevise: userId(ctx) === r.ownerId && revisable(r, rules, onThisPrinter ? p?.state : undefined),
+        /* queueSeq is set on the first approval, so an approved version exists to go back to */
+        canWithdraw: userId(ctx) === r.ownerId && r.status === "PENDING_REVIEW" && !!r.revision && r.queueSeq != null,
+        canCancelOwn: userId(ctx) === r.ownerId && (OWNER_CANCELLABLE.includes(r.status) || (r.status === "PRINTING" && onThisPrinter && p?.state === "PREPARING")),
+        revision: r.revision,
+        ...(extras.missingColours?.has(r.id) ? { missingColours: extras.missingColours.get(r.id) } : {}),
       };
     }),
   );

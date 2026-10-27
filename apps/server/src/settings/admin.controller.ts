@@ -116,7 +116,7 @@ export class AdminController {
   @Get("settings")
   @RequirePerm("settings:manage")
   async getSettings() {
-    return { registration: await this.settings.get("auth.registration"), queue: await this.settings.get("queue.policy") };
+    return { registration: await this.settings.get("auth.registration"), queue: await this.settings.get("queue.policy"), rules: await this.settings.get("queue.rules") };
   }
 
   @Put("settings/registration")

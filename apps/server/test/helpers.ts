@@ -19,10 +19,14 @@ const FIX = join(__dirname, "../../../../packages/shared/test/fixtures/x2d-two-p
 export const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]);
 export const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
 
-/** The two-plate X2D fixture as a .gcode.3mf: real slicer metadata, stand-in G-code and PNG. */
-export function x2dTwoPlates(): Buffer {
+/**
+ * The two-plate X2D fixture as a .gcode.3mf: real slicer metadata, stand-in G-code and PNG. `edit`
+ * rewrites slice_info.config to make other versions (another print time, another model).
+ */
+export function x2dTwoPlates(edit?: (sliceInfo: string) => string): Buffer {
   const files: Record<string, Uint8Array> = {};
   for (const f of ["slice_info.config", "model_settings.config", "project_settings.config"]) files[`Metadata/${f}`] = readFileSync(join(FIX, f));
+  if (edit) files["Metadata/slice_info.config"] = strToU8(edit(readFileSync(join(FIX, "slice_info.config"), "utf8")));
   for (const n of [1, 2]) {
     files[`Metadata/plate_${n}.gcode`] = strToU8("G28\n");
     files[`Metadata/plate_${n}.png`] = PNG;
@@ -50,6 +54,10 @@ export class FakeCommands implements PrinterCommands {
   async stop(printerId: string) {
     if (!this.online) throw new PrinterUnreachable(printerId);
     this.sent.push({ printerId, cmd: "stop" });
+  }
+  async recall(printerId: string, orderId: number) {
+    if (!this.online) throw new PrinterUnreachable(printerId);
+    this.sent.push({ printerId, cmd: "recall", arg: orderId });
   }
   async skipParts(printerId: string, partIds: number[]) {
     if (!this.online) throw new PrinterUnreachable(printerId);
@@ -100,3 +108,10 @@ export async function startApp(): Promise<TestApp> {
     },
   };
 }
+
+/** Plate 1 of the fixture prints for this long (slicer prediction). */
+export const PLATE1_SECONDS = 16479;
+
+/** The fixture with plate 1 taking `minutes` longer (or shorter, when negative). */
+export const x2dPlate1Plus = (minutes: number) =>
+  x2dTwoPlates((x) => x.replace(`key="prediction" value="${PLATE1_SECONDS}"`, `key="prediction" value="${PLATE1_SECONDS + minutes * 60}"`));

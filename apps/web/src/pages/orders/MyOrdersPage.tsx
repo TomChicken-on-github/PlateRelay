@@ -18,8 +18,11 @@ import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { ordersApi, useMyOrders } from "../../lib/ordersApi";
 import { useMe } from "../../lib/session";
-import { type MyOrder, type OrderGroup, STATUS, myOrders } from "../../mock/myOrders";
+import { type MyOrder, type OrderGroup, STATUS, type Version, myOrders } from "../../mock/myOrders";
+import { VersionList } from "../../components/VersionList";
+import { useRules } from "../../lib/rulesApi";
 import { PickupCode } from "./PickupCode";
+import { Fil, ReviseSheet, placement } from "./ReviseSheet";
 
 type TabKey = "all" | OrderGroup;
 const TABS: [TabKey, string][] = [["all", "全部"], ["act", "进行中"], ["pick", "待取件"], ["todo", "需处理"], ["end", "已结束"]];
@@ -29,6 +32,8 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
   switch (o.st) {
     case "pending":
       return <StatusBlock icon="hourglass_top" title="待审核" right={`提交于 ${o.at}`}>通过后自动进入排队；开始打印前可以自行取消。</StatusBlock>;
+    case "revising":
+      return <StatusBlock icon="hourglass_top" title="修改审核中" right={o.pos ? `保留第 ${o.pos} 位` : undefined} />;
     case "queued":
       return <StatusBlock icon="schedule" title={`队列第 ${o.pos} 位`} right={o.ahead ? `前方 ${o.ahead}` : undefined}>{o.wait ?? "空闲且兼容的打印机会从队首开始接单。"}</StatusBlock>;
     case "printing":
@@ -80,6 +85,7 @@ function recNodes(o: MyOrder, me: string, photo: string | null | undefined): Rec
   const later = (...k: ("print" | "stock" | "pick")[]) =>
     k.map((x): RecNode => (x === "print" ? { t: "打印", sys: true, s: "待打印", tone: "wait" } : x === "stock" ? { t: "入库", s: "待入库", tone: "wait" } : { t: "取件", s: "待核销", tone: "wait" }));
   if (st === "cancelled") return [...N, { t: "取消订单", who: o.canceller ?? me, s: "已取消", tone: "bad", note: o.reason?.replace(/^(你|工作人员)取消了?：/, "") }];
+  if (st === "revising") return [...N, { t: "审核", who: rev, s: "已通过", tone: "ok" }, { t: "修改文件", who: me, s: "修改审核中", tone: "cur", note: o.pos ? `保留第 ${o.pos} 位` : undefined }, { t: "排队", sys: true, s: "待排队", tone: "wait" }, ...later("print", "stock", "pick")];
   if (st === "pending") return [...N, { t: "审核", pool: true, s: "待审核", tone: "cur" }, { t: "排队", sys: true, s: "待排队", tone: "wait" }, ...later("print", "stock", "pick")];
   if (st === "rejected") return [...N, { t: "审核", who: rev, s: "已驳回", tone: "bad", time: o.at, note: o.reason }];
   N.push({ t: "审核", who: rev, s: "已通过", tone: "ok", time: o.at });
@@ -192,14 +198,75 @@ function Timeline({ o }: { o: MyOrder }) {
   );
 }
 
+/* ---------- 恢复旧版本 ---------- */
+
+const asNext = (o: MyOrder, v: Version) => ({ modelId: v.modelId ?? v.model, dual: !!o.dual, sec: v.sec, fil: v.fil });
+
+function RestoreSheet({ o, v, rules, open, onClose, onConfirm }: { o: MyOrder; v: Version; rules: ReturnType<typeof useRules>; open: boolean; onClose: () => void; onConfirm: () => void }) {
+  const { back, same, nth, counts } = placement(o, rules, asNext(o, v), true);
+  const row = (k: string, val: React.ReactNode) => (
+    <div key={k}>
+      <span className="block text-on-variant">{k}</span>
+      <b className="font-medium">{val}</b>
+    </div>
+  );
+  const cmp = (k: string, a: React.ReactNode, b: React.ReactNode, eq: boolean) => row(k, eq ? b : <><s className="font-normal text-on-variant">{a}</s> → {b}</>);
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={`恢复第 ${v.n} 版 #${o.id}`}
+      sub={v.file}
+      footer={
+        <>
+          <Button variant="text" onClick={onClose}>取消</Button>
+          <Button onClick={onConfirm}>恢复</Button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-note">
+        {cmp("机型", `${o.model} · ${o.nozzle} mm`, `${v.model} · ${v.nozzle} mm`, o.model === v.model && o.nozzle === v.nozzle)}
+        {cmp("预计时长", o.time, v.time, o.time === v.time)}
+        {cmp("耗材重量", `${o.g} g`, `${v.g} g`, o.g === v.g)}
+        {cmp("耗材", <Fil fil={o.fil} />, <Fil fil={v.fil} />, same)}
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 border-t border-solid border-outline-variant pt-3 text-note">
+        {row("排队位置", o.pos ? (back === "tail" ? "排到队尾" : back ? `后移 ${back} 位` : `保持第 ${o.pos} 位`) : "—")}
+        {row("审核", "自动通过")}
+        {counts && row("修改次数", o.revMax ? `第 ${nth} 次，最多 ${o.revMax} 次` : `第 ${nth} 次`)}
+      </div>
+    </Sheet>
+  );
+}
+
 /* ---------- page ---------- */
 
-type SheetState = { type: "detail" | "qr" | "cancel" | "retry" | "skip"; id: number } | null;
+type SheetState = { type: "detail" | "qr" | "cancel" | "retry" | "revise" | "withdraw" | "restore" | "skip"; id: number } | null;
+
+/** 版本记录 of the open order: the mock keeps them on the row, real builds read the order detail. */
+function useVersions(o: MyOrder | undefined, open: boolean): Version[] {
+  const [live, setLive] = useState<Version[]>([]);
+  const stamp = o ? `${o.id}:${o.st}:${o.revs}:${o.file}` : "";
+  useEffect(() => {
+    if (!LIVE || !o || !open) return;
+    let on = true;
+    void ordersApi.versions(o.id).then((r) => on && r.ok && setLive(r.data));
+    return () => {
+      on = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stamp, open]);
+  return LIVE ? live : (o?.vers ?? []);
+}
 
 export function MyOrdersPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { rows: orders, loading, error } = useMyOrders();
+  const rules = useRules();
+  /* the server decides in real builds; the mock follows the rules and limits */
+  const revisable = (x: MyOrder) =>
+    LIVE ? !!x.canRevise : !!x.canRevise && !!rules?.revisions.enabled && (!rules.revisions.max || (x.revs ?? 0) < rules.revisions.max) && ["pending", "revising", "queued"].includes(x.st);
   const [tab, setTab] = useState<TabKey>("all");
   const [sheet, setSheet] = useState<SheetState>(null);
   const [last, setLast] = useState<NonNullable<SheetState>>({ type: "detail", id: 0 });
@@ -214,6 +281,12 @@ export function MyOrdersPage() {
   };
   const close = () => setSheet(null);
   const o = orders.find((x) => x.id === last.id);
+  const vers = useVersions(o, sheet?.type === "detail" || sheet?.type === "withdraw" || sheet?.type === "restore");
+  const [restoreN, setRestoreN] = useState(0);
+  const restoring = vers.find((v) => v.n === restoreN);
+  const lastOk = [...vers].reverse().find((v) => v.st === "已通过" || v.st === "当前");
+  const canWithdraw = (x: MyOrder) => (LIVE ? !!x.canWithdraw : x.st === "revising" && !!x.canWithdraw);
+  const canRestore = (v: Version) => !!o && v.st === "已通过" && revisable(o) && (o.st === "queued" || o.st === "printing");
 
   const todo = orders.filter((x) => STATUS[x.st].g === "todo" && !x.retried).length;
   const list = orders.filter((x) => tab === "all" || STATUS[x.st].g === tab).sort((a, b) => b.id - a.id);
@@ -221,6 +294,19 @@ export function MyOrdersPage() {
   const confirmCancel = async () => {
     const r = await ordersApi.cancelMine(last.id, reason);
     if (!r.ok) return toast(r.error.message || "取消失败，请重试");
+    close();
+  };
+  const confirmWithdraw = async () => {
+    const r = await ordersApi.withdraw(last.id);
+    if (!r.ok) return toast(r.error.message || "撤回失败，请重试");
+    toast(lastOk ? `已撤回，回到第 ${lastOk.n} 版` : "已撤回");
+    close();
+  };
+  const confirmRestore = async () => {
+    if (!o || !restoring) return;
+    const r = await ordersApi.restore(o.id, restoring.n, placement(o, rules, asNext(o, restoring), true).back);
+    if (!r.ok) return toast(r.error.message || "恢复失败，请重试");
+    toast(`已恢复第 ${restoring.n} 版`);
     close();
   };
   const confirmRetry = () => {
@@ -266,11 +352,13 @@ export function MyOrdersPage() {
                     <OrderHead id={x.id} chip={<StatusChip tone={s.tone}>{s.t}</StatusChip>} right={x.at} />
                     <OrderBody thumb={<Thumb fil={x.fil} url={x.thumb} alt={`#${x.id} 预览`} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
                     <OrderStatusBlock o={x} />
-                    {(x.st === "ready" || x.st === "pending" || x.st === "queued" || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected" || x.parts?.allowed) && (
+                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || canWithdraw(x) || (LIVE && x.canCancel) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected" || x.parts?.allowed) && (
                       <OrderActions>
                         {x.parts?.allowed && <Button variant="tonal" icon="skip_next" onClick={(e) => (stop(e), open({ type: "skip", id: x.id }))}>跳过零件</Button>}
                         {x.st === "ready" && <Button icon="qr_code_2" onClick={(e) => (stop(e), open({ type: "qr", id: x.id }))}>出示取件码</Button>}
-                        {(x.st === "pending" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
+                        {revisable(x) && <Button variant="tonal" icon="upload_file" onClick={(e) => (stop(e), open({ type: "revise", id: x.id }))}>修改文件</Button>}
+                        {canWithdraw(x) && <Button variant="outlined" icon="undo" onClick={(e) => (stop(e), open({ type: "withdraw", id: x.id }))}>撤回修改</Button>}
+                        {(LIVE ? x.canCancel : x.st === "pending" || x.st === "revising" || x.st === "queued") && <Button variant="outlined" icon="cancel" onClick={(e) => (stop(e), open({ type: "cancel", id: x.id }))}>取消订单</Button>}
                         {x.st === "failed" && !x.retried && !LIVE && <Button icon="replay" onClick={(e) => (stop(e), open({ type: "retry", id: x.id }))}>一键重打</Button>}
                         {x.st === "rejected" && <Button variant="tonal" icon="send" onClick={(e) => (stop(e), navigate("/submit"))}>修改后重新提交</Button>}
                       </OrderActions>
@@ -297,7 +385,38 @@ export function MyOrdersPage() {
               ))}
             </div>
             <Timeline o={o} />
+            {vers.length > 1 && (
+              <>
+                <h3 className="m-0 mt-1 text-title-s font-medium">版本记录</h3>
+                <VersionList
+                  orderId={o.id}
+                  vers={vers}
+                  canRestore={canRestore}
+                  onRestore={(v) => {
+                    setRestoreN(v.n);
+                    setSheet({ type: "restore", id: o.id });
+                  }}
+                />
+              </>
+            )}
           </Sheet>
+
+          <Sheet
+            open={sheet?.type === "withdraw"}
+            onClose={close}
+            title={`撤回修改 #${o.id}`}
+            sub={lastOk ? `回到第 ${lastOk.n} 版${o.pos ? `，保留第 ${o.pos} 位` : ""}，不计修改次数。` : undefined}
+            footer={
+              <>
+                <Button variant="text" onClick={close}>返回</Button>
+                <Button onClick={() => void confirmWithdraw()}>确认撤回</Button>
+              </>
+            }
+          />
+
+          {restoring && (
+            <RestoreSheet o={o} v={restoring} rules={rules} open={sheet?.type === "restore"} onClose={close} onConfirm={() => void confirmRestore()} />
+          )}
 
           <SkipPartsSheet orderId={o.id} sub={`${o.file} · ${o.printer ?? ""}`} open={sheet?.type === "skip"} onClose={close} />
 
@@ -323,6 +442,8 @@ export function MyOrdersPage() {
               {(id, cls) => <Select id={id} className={cls} options={CANCEL_WHY} placeholder="请选择" value={reason} onChange={(e) => setReason(e.target.value)} />}
             </Field>
           </Sheet>
+
+          <ReviseSheet key={`r${key}`} o={o} rules={rules} open={sheet?.type === "revise"} onClose={close} />
 
           <Sheet
             open={sheet?.type === "retry"}

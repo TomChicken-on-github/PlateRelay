@@ -7,7 +7,8 @@ import { FilterTabs, StatusChip } from "../../components/Chip";
 import { Field, Select, TextArea } from "../../components/Field";
 import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelPreview } from "../../components/ModelThumb";
-import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock } from "../../components/OrderBits";
+import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock, Thumb } from "../../components/OrderBits";
+import { VersionList, useVersionDownload } from "../../components/VersionList";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
 import { SkipPartsSheet } from "../../components/SkipPartsSheet";
@@ -17,12 +18,13 @@ import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { live, ordersApi, toAdminDetail, useManageOrders, useReviewOrders } from "../../lib/ordersApi";
 import { ADMIN_STATUS, ATTRIBUTION, type AdminOrder, CANCEL_WHY, adminOrders, answers, auditFor } from "../../mock/adminOrders";
+import type { Version } from "../../mock/myOrders";
 
 type Mode = "review" | "manage";
 type SheetType = "reject" | "cancel" | "attr" | "skip";
 type TabKey = "all" | "pending" | "queued" | "printing" | "pick" | "bad" | "end";
 const TABS: [TabKey, string][] = [["all", "全部"], ["pending", "待审核"], ["queued", "排队中"], ["printing", "打印中"], ["pick", "入库取件"], ["bad", "异常"], ["end", "已结束"]];
-const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
+const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", revising: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
 
 const ATTR_IDS = ["machine", "model"] as const;
 
@@ -46,6 +48,17 @@ function useDetail(id: number | null, version: number): AdminOrder | null | unde
   if (id === null) return undefined;
   /* undefined while loading, null when the server has no such order for this account */
   return LIVE ? (d?.id === id ? d.o : undefined) : mock.find((o) => o.id === id);
+}
+
+/** 版本记录: the server's list, or for mock rows a revision and the version before it. */
+function versionsOf(o: AdminOrder): Version[] {
+  if (o.vers) return o.vers;
+  if (!o.rev) return [];
+  const sec = (t: string) => (+(t.match(/(\d+)h/)?.[1] ?? 0) * 60 + +(t.match(/(\d+)m/)?.[1] ?? 0)) * 60;
+  return [
+    { n: o.rev.n, file: o.rev.file, model: o.rev.model, nozzle: o.nozzle, time: o.rev.time, sec: sec(o.rev.time), g: o.rev.g, fil: o.rev.fil, at: o.at, st: "已通过" },
+    { n: o.rev.n + 1, file: o.file, model: o.model, nozzle: o.nozzle, time: o.time, sec: sec(o.time), g: o.g, fil: o.fil, at: o.at, st: "审核中" },
+  ];
 }
 
 /* ---------- sheets ---------- */
@@ -122,7 +135,7 @@ function ReviewQueue({ onReject }: { onReject: (id: number) => void }) {
   return (
     <>
       <PageHeader title="审核队列" />
-      <div className="text-note text-on-variant">共享审核池：有审核权限的人都能审，最早提交的排在最前。{list.length} 单待审核。</div>
+      <div className="text-note text-on-variant">共享审核池：有审核权限的人都能审，修改版排在最前，其余按提交先后。{list.length} 单待审核。</div>
       {list.length ? (
         <OrderGrid>
           <AnimatePresence initial={false} mode="popLayout">
@@ -132,8 +145,23 @@ function ReviewQueue({ onReject }: { onReject: (id: number) => void }) {
               return (
                 <motion.div key={o.id} layout className="flex" exit={{ opacity: 0, scale: 0.96, transition: t("short4", "emphasizedAccelerate") }}>
                   <OrderCard className="flex-1" tabIndex={0} role="button" aria-label={`订单 ${o.id}`} onClick={() => navigate(`/review/${o.id}`)} onKeyDown={(e) => e.target === e.currentTarget && e.key === "Enter" && navigate(`/review/${o.id}`)}>
-                    <OrderHead id={o.id} chip={<StatusChip>待审核</StatusChip>} right={o.at} />
+                    <OrderHead
+                      id={o.id}
+                      chip={
+                        <>
+                          <StatusChip tone={o.rev ? "warn" : "neutral"}>{o.rev ? `修改版 · 第 ${o.rev.n} 次` : "待审核"}</StatusChip>
+                          {o.missing && <StatusChip tone="err">缺色</StatusChip>}
+                        </>
+                      }
+                      right={o.at}
+                    />
                     <OrderBody thumb={<Preview o={o} />} name={o.file} meta={<PlateMeta parts={[`${o.model} · ${o.nozzle} mm`, `${o.time} · ${o.g} g`]} fil={o.fil} />} />
+                    {o.rev && (
+                      <StatusBlock icon="replay" title="上一版" right={o.rev.pos ? `保留第 ${o.rev.pos} 位${o.rev.back === "tail" ? " · 通过后排到队尾" : o.rev.back ? ` · 通过后后移 ${o.rev.back} 位` : ""}` : undefined}>
+                        <s>{o.rev.time} · {o.rev.g} g</s> → {o.time} · {o.g} g
+                        {o.rev.model !== o.model && <> · <s>{o.rev.model}</s> → {o.model}</>}
+                      </StatusBlock>
+                    )}
                     <StatusBlock title={first} right={second}>申请人：{o.owner}</StatusBlock>
                     <OrderActions>
                       <Button variant="outlined" icon="cancel" onClick={(e) => (e.stopPropagation(), onReject(o.id))}>驳回</Button>
@@ -345,9 +373,14 @@ function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o
   const [label, tone] = ADMIN_STATUS[o.st];
   const live = !["done", "cancelled", "rejected", "failed"].includes(o.st);
   const back = () => navigate(mode === "review" ? "/review" : "/manage/orders");
+  const vers = versionsOf(o);
+  const [ver, setVer] = useState<number | undefined>();
+  /* the version under review (or the current one) until another is picked */
+  const shown = vers.length > 1 ? (vers.find((v) => v.n === ver) ?? vers[vers.length - 1]) : undefined;
+  const downloadVersion = useVersionDownload(o.id);
   const acts = (
     <>
-      {mode === "review" && o.st === "pending" && (
+      {mode === "review" && (o.st === "pending" || o.st === "revising") && (
         <>
           <Button variant="outlined" icon="cancel" onClick={onReject}>驳回</Button>
           <Button
@@ -374,32 +407,40 @@ function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o
         actions={<div className="flex flex-wrap gap-2 max-sm:w-full max-sm:[&>button]:flex-1">{acts}</div>}
       />
       <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-start gap-4 max-lg:grid-cols-1">
-        <Box title="模型预览">
-          <div className="relative grid aspect-square place-items-center overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--md-outline-variant)] max-lg:mx-auto max-lg:w-full max-lg:max-w-[420px]" style={{ background: "radial-gradient(100% 80% at 50% 110%, var(--md-sc-high), var(--md-sc))" }}>
-            <div className="size-[78%]">
-              <Preview o={o} />
+        <div className="flex min-w-0 flex-col gap-4">
+          <Box title="模型预览">
+            <div className="relative grid aspect-square place-items-center overflow-hidden rounded-xl shadow-[inset_0_0_0_1px_var(--md-outline-variant)] max-lg:mx-auto max-lg:w-full max-lg:max-w-[420px]" style={{ background: "radial-gradient(100% 80% at 50% 110%, var(--md-sc-high), var(--md-sc))" }}>
+              <div className="size-[78%]">
+                {shown ? <Thumb fil={shown.fil} url={shown.thumb} alt={`#${o.id} 第 ${shown.n} 版预览`} /> : <Preview o={o} />}
+              </div>
+              {!(shown ? shown.thumb : o.thumb) && <span className="absolute bottom-3 left-3 rounded-lg bg-sc-high px-2.5 py-0.5 text-body-s leading-5 font-medium text-on-variant">示意{shown ? ` · 第 ${shown.n} 版` : ""}</span>}
             </div>
-            {!o.thumb && <span className="absolute bottom-3 left-3 rounded-lg bg-sc-high px-2.5 py-0.5 text-body-s leading-5 font-medium text-on-variant">示意</span>}
-          </div>
-          <div className="flex items-center gap-3 rounded-xl bg-sc-high px-3.5 py-3 max-sm:flex-wrap">
-            <Icon name="folder_zip" className="text-on-variant" />
-            <div className="min-w-0 flex-1">
-              <b className="block truncate text-label-l font-medium">{o.file}</b>
-              <small className="text-body-s text-on-variant">
-                {o.plate ? o.plate + " · " : ""}
-                {o.mb} MB
-              </small>
+            <div className="flex items-center gap-3 rounded-xl bg-sc-high px-3.5 py-3 max-sm:flex-wrap">
+              <Icon name="folder_zip" className="text-on-variant" />
+              <div className="min-w-0 flex-1">
+                <b className="block truncate text-label-l font-medium">{shown?.file ?? o.file}</b>
+                <small className="text-body-s text-on-variant">
+                  {o.plate ? o.plate + " · " : ""}
+                  {shown ? `${shown.time} · ${shown.g} g` : `${o.mb} MB`}
+                </small>
+              </div>
+              <Button variant="outlined" icon="download" className="max-sm:w-full" onClick={async () => {
+                  if (shown) return void downloadVersion(shown);
+                  if (!LIVE) return toast(`原型：正式环境会下载原始文件 ${o.file}`);
+                  const r = await ordersApi.fileUrl(o.id);
+                  if (r.ok) window.location.assign(r.data.url);
+                  else toast(r.error.message || "下载链接生成失败");
+                }}>
+                下载
+              </Button>
             </div>
-            <Button variant="outlined" icon="download" className="max-sm:w-full" onClick={async () => {
-                if (!LIVE) return toast(`原型：正式环境会下载原始文件 ${o.file}`);
-                const r = await ordersApi.fileUrl(o.id);
-                if (r.ok) window.location.assign(r.data.url);
-                else toast(r.error.message || "下载链接生成失败");
-              }}>
-              下载
-            </Button>
-          </div>
-        </Box>
+          </Box>
+          {vers.length > 1 && (
+            <Box title="版本记录">
+              <VersionList orderId={o.id} vers={vers} selected={shown?.n} onSelect={setVer} showModel={false} />
+            </Box>
+          )}
+        </div>
         <div className="flex min-w-0 flex-col gap-4">
           <Box title="打印参数">
             <div className="grid grid-cols-2 gap-3">
@@ -417,9 +458,23 @@ function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o
                 </Small>
               </Tile>
               <Tile label="打印机"><Small>{o.printer || "尚未派单"}</Small></Tile>
+              {o.colour && <Tile label="颜色要求" wide={!o.missing}><Small>{o.colour}</Small></Tile>}
+              {o.missing && <Tile label="本场缺少"><Small><FilamentDots fil={o.missing} /></Small></Tile>}
               <Tile label="提交时间" wide><Small>{o.at}</Small></Tile>
             </div>
           </Box>
+          {o.rev && (
+            <Box title="与上一版对比">
+              <div className="grid grid-cols-2 gap-3">
+                <Tile label="上一版文件" wide><Small>{o.rev.file}</Small></Tile>
+                <Tile label="预计耗时"><Small><s className="font-normal text-on-variant">{o.rev.time}</s> → {o.time}</Small></Tile>
+                <Tile label="耗材用量"><Small><s className="font-normal text-on-variant">{o.rev.g} g</s> → {o.g} g</Small></Tile>
+                <Tile label="目标机型"><Small>{o.rev.model === o.model ? o.model : <><s className="font-normal text-on-variant">{o.rev.model}</s> → {o.model}</>}</Small></Tile>
+                <Tile label="排队位置"><Small>{!o.rev.pos ? "—" : o.rev.back === "tail" ? `第 ${o.rev.pos} 位 → 队尾` : o.rev.back ? `第 ${o.rev.pos} 位 → 第 ${o.rev.pos + o.rev.back} 位` : `第 ${o.rev.pos} 位`}</Small></Tile>
+                <Tile label="耗材" wide><Small><span className="inline-flex flex-wrap items-center gap-2"><FilamentDots fil={o.rev.fil} /> → <FilamentDots fil={o.fil} /></span></Small></Tile>
+              </div>
+            </Box>
+          )}
           <Box title="申请表答案">
             <div className="grid grid-cols-2 gap-3">
               {!answers(o).length && <Tile label="申请表" wide><Small>{LIVE && !o.answers ? "正在加载…" : "没有填写项"}</Small></Tile>}

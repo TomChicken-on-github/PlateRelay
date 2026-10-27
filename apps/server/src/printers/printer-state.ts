@@ -14,6 +14,8 @@ export const PRINTER_TRANSITIONS = {
   started: { from: ["PREPARING"], to: "PRINTING" },
   /** File transfer or preheat failed before anything was printed: the bed is still clean. */
   prepareFailed: { from: ["PREPARING"], to: "IDLE" },
+  /** The job was taken back before it started (the owner revised the file): the bed is still clean. */
+  recalled: { from: ["PREPARING"], to: "IDLE" },
   errorPaused: { from: ["PREPARING", "PRINTING"], to: "ERROR_PAUSED" },
   resumed: { from: ["ERROR_PAUSED"], to: "PRINTING" },
   finished: { from: ["PRINTING"], to: "CLEARING_REQUIRED" },
