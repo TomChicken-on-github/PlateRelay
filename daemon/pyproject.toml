@@ -2,8 +2,24 @@
 name = "platerelay-daemon"
 version = "0.1.0"
 authors = [{ name = "Tom_Chicken", email = "Tom_Chicken@qq.com" }]
+license = "GPL-3.0-only"
 requires-python = ">=3.12"
-dependencies = []
+# 拓竹 driver 复用 ha-bambulab 的 pybambu（MIT），放在 drivers/bambu/_vendor/pybambu。
+# 下面这些是 pybambu 自己的依赖。
+dependencies = [
+  "paho-mqtt>=2.1",
+  "python-dateutil>=2.9",
+  "requests>=2.32",
+  "beautifulsoup4>=4.12",
+  "pillow>=10.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

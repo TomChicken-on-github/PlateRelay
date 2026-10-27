@@ -38,6 +38,16 @@ pnpm dev:web
 - [项目简报](docs/project-brief.md)
 - [打印机 Driver 接口草稿](docs/printer-driver-interface-draft.md)
 
-## 许可证
+## 版权与许可证
 
-[GPL-3.0-only](LICENSE)
+Copyright (C) 2026 Tom_Chicken
+
+PlateRelay 是自由软件，按 GNU 通用公共许可证第 3 版（[GPL-3.0-only](LICENSE)）发布。本程序不附带任何担保，详见许可证全文。
+
+### 第三方代码
+
+| 组件 | 位置 | 版权 | 许可证 |
+| --- | --- | --- | --- |
+| [ha-bambulab](https://github.com/greghesp/ha-bambulab) 的 pybambu | [daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/](daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/) | Copyright (c) 2023 ha-bambulab contributors | MIT，原文见 [LICENSE](daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/LICENSE) |
+
+PlateRelay 与拓竹（Bambu Lab）、ha-bambulab 项目均无关联。

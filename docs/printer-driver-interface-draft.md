@@ -455,11 +455,15 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 - **故障隔离**：每个打印机实例跑在自己的 asyncio 任务里，由 daemon 的监督器管理。driver 抛异常只影响那一台：记录、退避、重连，不拖垮整个 daemon。真需要更强的隔离（比如某个 driver 有内存泄漏），以后再改成子进程，接口不变。
 - **一致性测试**：`driver-api` 自带一套 pytest 测试，每个 driver 包在自己的 CI 里对 fake 环境或录制的流量跑一遍。社区以后贡献新品牌 driver，也是过这套测试才能合并。
 
-### 9.4 依赖候选（未核实，选型前需查维护状态）
+### 9.4 依赖
 
-- MQTT：基于 paho 的异步封装（如 aiomqtt）。
-- FTPS：拓竹走的是**隐式 TLS**（端口 990，前面查到的资料里也是这个端口）。Python 标准库的 `ftplib.FTP_TLS` 默认是显式 TLS，需要自己包一层才能用，这是个常见的坑。
-- HTTP / WebSocket（Moonraker）：aiohttp 或 httpx。
+- **拓竹**【已定】：优先复用 ha-bambulab 的 `pybambu`，不自己写 MQTT / FTPS。ha-bambulab 是 MIT 许可证，可以并入 GPLv3 项目，但要保留它的版权声明和许可证原文。PyPI 上的 `pybambu` 包停在 2024-01，所以按 commit 原样内置在 `daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/`，上游 commit 和升级方法见同目录的 `README.md`。不在内置代码里直接改，要改行为就在外面包一层：
+  - `read_only.py`：MQTT 只放行 `pushall`、`pushing start`、`get_version`，FTPS 拦下所有写操作（上传、删除、建目录、改名）。pybambu 自带的灯光、调速、温度、打印等控制方法因此全部失效，要等用户同意后才放开。
+  - `state_map.py`：按 §4.1 把 `gcode_state` + `stg_cur` 归一成主状态和子阶段。
+  - pybambu 本身是线程 + 回调（paho 的网络线程），driver 把回调转回 asyncio 线程再发事件。
+  - 不传云端账号，pybambu 不会访问拓竹云。
+- FTPS 的隐式 TLS（端口 990）pybambu 已经处理好了（`ImplicitFTP_TLS`），标准库 `ftplib.FTP_TLS` 默认是显式 TLS 的坑不用再踩。
+- HTTP / WebSocket（Moonraker）：aiohttp 或 httpx（未核实）。
 
 ---
 
