@@ -17,7 +17,7 @@ import { CELLS, ERROR_ACTION_LABEL, ROWS, STOP_WHY, type Task, ZONES } from "../
 type TabKey = "all" | Task["kind"];
 type SheetType = "stock" | "stop" | "hms";
 const WAIT_MS = 60e3;
-const KIND = { stock: { t: "铲件入库", tone: "ok" }, err: { t: "报错处理", tone: "err" }, clear: { t: "清理热床", tone: "neutral" } } as const;
+const KIND = { stock: { t: "铲件入库", tone: "ok" }, err: { t: "报错处理", tone: "err" }, clear: { t: "清理热床", tone: "neutral" }, skip: { t: "跳单提醒", tone: "warn" } } as const;
 
 const SLOT_SELECT = "w-full box-border rounded-lg border-0 bg-transparent py-3 pr-1 pl-3 text-[16px] leading-6 text-on-surface outline-0 shadow-[inset_0_0_0_1px_var(--md-outline)] focus:shadow-[inset_0_0_0_2px_var(--md-primary)] disabled:opacity-50";
 
@@ -223,6 +223,7 @@ export function TodoPage() {
             ["all", "全部"],
             ["stock", "铲件入库"],
             ["err", "报错处理"],
+            ["skip", "跳单提醒"],
           ] as [TabKey, string][]
         ).map(([k, l]) => ({ key: k, label: l, count: cnt(k) }))}
       />
@@ -238,6 +239,10 @@ export function TodoPage() {
                     <StatusBlock icon="inventory_2" title="打印完成，等待铲件入库" right={`已等 ${x.since}`}>
                       {x.printer} 在入库前不会释放，下一单会等它。取件人：{x.owner}
                     </StatusBlock>
+                  ) : x.kind === "skip" ? (
+                    <StatusBlock icon="schedule" title="被跳过" right={`已等 ${x.since}`}>
+                      {x.why}
+                    </StatusBlock>
                   ) : x.kind === "clear" ? (
                     <StatusBlock icon="cleaning_services" title="等待清理热床" right={`已等 ${x.since}`}>
                       {x.printer} 上的任务已结束，没有成品要入库。清理热床后才会派下一单。
@@ -247,7 +252,7 @@ export function TodoPage() {
                       {x.err}
                     </StatusBlock>
                   )}
-                  <OrderActions>
+                  {x.kind !== "skip" && <OrderActions>
                     {x.kind === "stock" ? (
                       <Button icon="inventory_2" onClick={() => open({ type: "stock", id: x.id })}>铲件入库</Button>
                     ) : x.kind === "clear" ? (
@@ -258,7 +263,7 @@ export function TodoPage() {
                         去处理
                       </Button>
                     )}
-                  </OrderActions>
+                  </OrderActions>}
                 </OrderCard>
               </motion.div>
             ))}

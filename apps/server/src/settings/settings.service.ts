@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { DEFAULT_QUEUE_RULES, DEFAULT_RESOURCE_SETTINGS, type QueueRules, type ResourceSettings } from "@platerelay/shared";
 import { eq } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, userId } from "../auth/actor.js";
@@ -11,6 +12,10 @@ export const DEFAULTS = {
   "auth.registration": { enabled: true },
   /** Queue rule; FIFO is the only one so far (brief §0.6). */
   "queue.policy": { rule: "fifo" as const },
+  /** 文件与排队: revisions, model switches, skip reminder, plate choice (rules doc §2–4). */
+  "queue.rules": DEFAULT_QUEUE_RULES as QueueRules,
+  /** 可用资源: the submit page's resource table (rules doc §1.5). */
+  resources: DEFAULT_RESOURCE_SETTINGS as ResourceSettings,
 } satisfies Record<string, unknown>;
 
 export type SettingKey = keyof typeof DEFAULTS;
@@ -25,7 +30,7 @@ export class SettingsService {
 
   async get<K extends SettingKey>(key: K): Promise<SettingValue<K>> {
     const [row] = await this.db.select().from(settings).where(eq(settings.key, key));
-    return { ...DEFAULTS[key], ...(row?.value as object | undefined) } as SettingValue<K>;
+    return merge(DEFAULTS[key], row?.value) as SettingValue<K>;
   }
 
   async set<K extends SettingKey>(ctx: Ctx, key: K, value: SettingValue<K>) {
@@ -39,3 +44,12 @@ export class SettingsService {
     });
   }
 }
+
+/** Stored values over the defaults, one level of nesting deep, so a new rule gets its default on old rows. */
+function merge(def: unknown, stored: unknown): unknown {
+  if (!isObj(def) || !isObj(stored)) return stored ?? def;
+  const out: Record<string, unknown> = { ...def };
+  for (const [k, v] of Object.entries(stored)) out[k] = isObj(def[k]) && isObj(v) && !Array.isArray(v) ? { ...def[k], ...v } : v;
+  return out;
+}
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

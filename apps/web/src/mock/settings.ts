@@ -1,4 +1,4 @@
-import type { AuditLogView } from "@platerelay/shared";
+import { type AuditLogView, DEFAULT_QUEUE_RULES, type QueueRules } from "@platerelay/shared";
 import { createStore } from "../lib/store";
 
 export const ROLES = ["User", "Staff", "Builder", "Coreteam"] as const;
@@ -23,6 +23,7 @@ export const settings = createStore({
     { id: 3, name: "测试机房", net: "10.0.5.0/24", seen: "3 天前", on: false, tail: "b04e" },
   ] as Daemon[],
   policy: { size: "200", rule: "FIFO（先到先得）" },
+  rules: DEFAULT_QUEUE_RULES as QueueRules,
   notify: { mail: true, fs: true, fsMode: "直接调用飞书机器人", hook: "https://open.feishu.cn/open-apis/bot/v2/hook/••••••••" },
   /* audit entries never carry a token, access code or other secret */
   audit: [

@@ -12,6 +12,8 @@ import { orderEvent, transition } from "../orders/transition.js";
 import { loadPeople } from "../orders/views.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "./commands.js";
 import { lockPrinter, movePrinter, pausedMs, type PrinterRow } from "./printer-state.js";
+import { QUEUE_POLICY, type QueuePolicy } from "../rules/queue-policy.js";
+import { SettingsService } from "../settings/settings.service.js";
 import { SchedulerService } from "./scheduler.service.js";
 
 export interface PrinterInput {
@@ -36,6 +38,8 @@ export class PrintersService {
     private readonly audit: AuditService,
     private readonly scheduler: SchedulerService,
     private readonly orders: OrdersService,
+    private readonly settings: SettingsService,
+    @Inject(QUEUE_POLICY) private readonly policy: QueuePolicy,
   ) {}
 
   /* ---------- reading ---------- */
@@ -79,6 +83,9 @@ export class PrintersService {
         error: operate ? p.error : null,
         maintenanceReason: p.maintenanceReason,
         starred: p.starred,
+        openToContestants: p.openToContestants,
+        bedType: p.bedType,
+        trays: p.trays,
         lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
         job: j ? { orderId: j.id, fileName: j.fileName, plate: { index: j.plateIndex, count: j.plateCount }, owner: people.owner(ctx, j.ownerId), status: j.status } : null,
       };
@@ -204,6 +211,18 @@ export class PrintersService {
     return (await this.views(ctx, [p]))[0];
   }
 
+  /** 开放给选手: only open printers take queued orders and show in 本场可用资源. */
+  async setOpen(ctx: Ctx, id: string, open: boolean) {
+    const p = await this.db.transaction(async (tx) => {
+      const cur = await lockPrinter(tx, id);
+      const [next] = await tx.update(printers).set({ openToContestants: open }).where(eq(printers.id, id)).returning();
+      await this.audit.record(ctx, { action: "printer.open", targetType: "printer", targetId: id, before: { open: cur.openToContestants }, after: { open } }, tx);
+      return next;
+    });
+    if (open) void this.scheduler.kick();
+    return (await this.views(ctx, [p]))[0];
+  }
+
   /* ---------- handling ---------- */
 
   /**
@@ -272,13 +291,18 @@ export class PrintersService {
     return this.get(ctx, id);
   }
 
-  /** 待办: plates to store, beds to clear, errors to handle. */
+  /** 待办: plates to store, beds to clear, errors to handle, orders passed over too long (跳单提醒). */
   async todo(ctx: Ctx): Promise<TodoView> {
+    const rules = await this.settings.get("queue.rules");
+    const now = new Date();
+    const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince))).orderBy(asc(orders.skippedSince))).filter((o) =>
+      this.policy.remindSkipped(rules, o, now),
+    );
     const busy = await this.db.select().from(printers).where(inArray(printers.state, ["CLEARING_REQUIRED", "ERROR_PAUSED"])).orderBy(asc(printers.stateSince));
     const awaiting = await this.db.select().from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE")).orderBy(asc(orders.printedAt));
     const onBeds = busy.map((p) => p.currentOrderId).filter((x): x is number => x != null);
     const bedOrders = onBeds.length ? await this.db.select().from(orders).where(inArray(orders.id, onBeds)) : [];
-    const views = new Map<number, OrderView>((await this.orders.views(ctx, [...awaiting, ...bedOrders.filter((o) => o.status !== "PRINTED_AWAITING_STORAGE")])).map((v) => [v.id, v]));
+    const views = new Map<number, OrderView>((await this.orders.views(ctx, [...awaiting, ...bedOrders.filter((o) => o.status !== "PRINTED_AWAITING_STORAGE"), ...skipped])).map((v) => [v.id, v]));
     const pViews = new Map((await this.views(ctx, busy)).map((p) => [p.id, p]));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
     return {
@@ -289,6 +313,7 @@ export class PrintersService {
       errors: busy
         .filter((p) => p.state === "ERROR_PAUSED")
         .map((p) => ({ printer: pViews.get(p.id)!, order: p.currentOrderId != null ? (views.get(p.currentOrderId) ?? null) : null, since: p.stateSince.toISOString() })),
+      skipped: skipped.map((o) => ({ order: views.get(o.id)!, since: o.skippedSince!.toISOString() })),
     };
   }
 

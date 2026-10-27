@@ -4,7 +4,7 @@ import type { Fil } from "./myOrders";
 export type Task = {
   id: string;
   /** clear: a bed to clear with nothing to store (failed, cancelled or external job). */
-  kind: "stock" | "err" | "clear";
+  kind: "stock" | "err" | "clear" | "skip";
   order: number;
   file: string;
   n: number;
@@ -17,6 +17,8 @@ export type Task = {
   owner: string;
   since: string;
   err?: string;
+  /** skip: why printers keep passing it over. */
+  why?: string;
   pct?: number;
   /* from the server; the mock leaves them out */
   printerId?: string;
@@ -32,6 +34,7 @@ export const tasks = createStore<Task[]>([
   { id: "t2", kind: "stock", order: 1043, file: "电机支架.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "1h 10m", g: 35, fil: [["#6155f5", "PETG"]], printer: "X2D-02", owner: "林小满", since: "12 分钟" },
   { id: "t3", kind: "err", order: 1047, file: "舵机支架.gcode.3mf", n: 1, model: "H2D", nozzle: "0.4", time: "1h 50m", g: 36, fil: [["#ff7043", "ABS"]], printer: "H2D-02", owner: "Tom_Chicken", since: "5 分钟", err: "AMS A2 断料：耗材用尽，打印已暂停（41%）", pct: 41, hms: "0700-2000-0002-0001", actions: ["RESUME", "STOP"] },
   { id: "t5", kind: "err", order: 1049, file: "传感器外壳.gcode.3mf", n: 2, model: "X2D", nozzle: "0.4", time: "2h 05m", g: 48, fil: [["#7cb342", "PLA"]], printer: "X2D-01", owner: "林小满", since: "2 分钟", err: "检测到喷嘴可能有耗材结块，打印已暂停（23%）", pct: 23, hms: "0C00-0300-0002-0010", actions: ["RESUME_PROBLEM_SOLVED", "RESUME_ACCEPT_DEFECTS", "STOP"] },
+  { id: "t4", kind: "skip", order: 1050, file: "机械臂轴承座.gcode.3mf", n: 3, model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], printer: "队列第 1 位", owner: "周浩然", since: "42 分钟", why: "等待兼容的打印机：H2D 0.6 mm 当前没有可用设备" },
 ]);
 
 /* Staging basket: zone A/B, rows 1-3, cells 1-4 */
