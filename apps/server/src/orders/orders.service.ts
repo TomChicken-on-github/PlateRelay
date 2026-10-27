@@ -448,6 +448,7 @@ export class OrdersService {
       if (o.status === "PENDING_REVIEW" || o.status === "QUEUED" || printer) members.push({ o, printer });
     }
     const ids = members.map((m) => m.o.id);
+    if (!ids.includes(id)) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "已经开始打印的订单不能修改，只能取消后重新提交", { orderId: id, status: cur.status });
     const named = plan.map.map((m) => m.order);
     if (named.length !== ids.length || new Set(named).size !== named.length || named.some((x) => !ids.includes(x))) {
       throw new ApiError(HttpStatus.CONFLICT, "group-changed", "这组订单有变化，请刷新后再试", { orders: ids });

@@ -283,6 +283,8 @@ describe("print rules", () => {
       pos = await positions();
       assert.equal(pos.get(a), undefined);
       assert.equal(pos.get(split.id), 3, "frozen in its own place");
+      /* a finished or cancelled plate cannot start a group revision */
+      assert.equal((await group(user, a, x2dTwoPlates(), { map: [{ order: split.id, plate: 1 }], add: [] }).expect(409)).body.code, "order-state-conflict");
     });
 
     it("lets small changes through without review when 轻微修改自动审核 is on", async () => {
