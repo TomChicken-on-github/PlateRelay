@@ -16,6 +16,9 @@ export const PERMISSIONS = [
   "order:view:any",
   /** Cancel any unfinished order, printing ones included. */
   "order:cancel:any",
+  /** Skip parts of a running print: own orders, or any order. Sends a command to the printer. */
+  "order:skip-parts:own",
+  "order:skip-parts:any",
   "order:review",
   "order:reorder",
   /** 失败归因: decide why a failed order failed, which spawns the retry. */
@@ -48,9 +51,10 @@ const USER: Permission[] = [
   "order:submitter-name:view-others",
   "order:submit",
   "order:cancel:own",
+  "order:skip-parts:own",
 ];
 
-const STAFF: Permission[] = [...USER, "order:store", "order:redeem", "printer:operate", "printer:stop"];
+const STAFF: Permission[] = [...USER, "order:skip-parts:any", "order:store", "order:redeem", "printer:operate", "printer:stop"];
 
 export const PRESET_ROLES: Record<RoleId, { name: string; permissions: readonly Permission[] }> = {
   user: { name: "User", permissions: USER },

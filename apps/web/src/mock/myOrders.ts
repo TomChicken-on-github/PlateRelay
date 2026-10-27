@@ -33,7 +33,11 @@ export type MyOrder = {
   storer?: string;
   redeemer?: string;
   canceller?: string;
+  /** 跳过零件: absent when the plate cannot skip parts. */
+  parts?: PartsState;
 };
+
+export type PartsState = { total: number; skipped: number; allowed: boolean };
 
 export type OrderGroup = "act" | "pick" | "todo" | "end";
 
@@ -53,7 +57,7 @@ export const STATUS: Record<OrderStatus, { t: string; tone: "neutral" | "ok" | "
 
 export const myOrders = createStore<MyOrder[]>([
   { id: 1051, file: "齿轮箱外壳.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "1h 40m", g: 52, fil: [["#6155f5", "PETG"]], st: "pending", at: "10-24 09:12" },
-  { id: 1048, file: "机械臂轴承座.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#00c0e8", "PLA"], ["#ffcc00", "PLA"]], st: "printing", at: "10-24 08:40", printer: "X2D-01", pct: 62, left: "1h 04m", eta: "10:58" },
+  { id: 1048, file: "机械臂轴承座.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#00c0e8", "PLA"], ["#ffcc00", "PLA"]], st: "printing", at: "10-24 08:40", printer: "X2D-01", pct: 62, left: "1h 04m", eta: "10:58", parts: { total: 9, skipped: 0, allowed: true } },
   { id: 1049, file: "机械臂轴承座.gcode.3mf", n: 2, model: "X2D", nozzle: "0.4", time: "1h 12m", g: 31, fil: [["#6155f5", "PETG"]], st: "queued", at: "10-24 08:40", pos: 3, ahead: "约 3h 20m" },
   { id: 1050, file: "机械臂轴承座.gcode.3mf", n: 3, model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "queued", at: "10-24 08:40", pos: 5, wait: "等待兼容的打印机：H2D 当前没有可用设备" },
   { id: 1047, file: "舵机支架.gcode.3mf", n: 1, model: "H2D", nozzle: "0.4", time: "1h 50m", g: 36, fil: [["#ff7043", "ABS"]], st: "paused", why: "耗材异常", at: "10-24 07:20", printer: "H2D-02", pct: 41 },

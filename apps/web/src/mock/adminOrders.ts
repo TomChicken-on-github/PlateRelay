@@ -1,5 +1,5 @@
 import { createStore } from "../lib/store";
-import type { Fil, OrderStatus } from "./myOrders";
+import type { Fil, OrderStatus, PartsState } from "./myOrders";
 
 export type AdminOrder = {
   id: number;
@@ -28,6 +28,8 @@ export type AdminOrder = {
   log?: [string, string][];
   /** Owner's own order: approving it is still allowed, the server checks permissions. */
   mine?: boolean;
+  /** 跳过零件: absent when the plate cannot skip parts. */
+  parts?: PartsState;
 };
 
 export const ADMIN_STATUS: Record<OrderStatus, [string, "neutral" | "ok" | "err"]> = {
@@ -42,7 +44,7 @@ export const adminOrders = createStore<AdminOrder[]>([
   { id: 1052, file: "机械臂轴承座.gcode.3mf", plate: "第 3 盘 / 共 3 盘", owner: "周浩然", model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, mb: 38.5, fil: [["#00c0e8", "PLA"]], st: "queued", at: "10-24 08:40" },
   { id: 1051, file: "机械臂轴承座.gcode.3mf", plate: "第 2 盘 / 共 3 盘", owner: "周浩然", model: "X2D", nozzle: "0.4", time: "1h 12m", g: 31, mb: 38.5, fil: [["#6155f5", "PETG"]], st: "queued", at: "10-24 08:40" },
   { id: 1050, file: "云台支架.gcode.3mf", owner: "王雨桐", model: "X2D", nozzle: "0.4", time: "2h 05m", g: 58, mb: 21.0, fil: [["#ffb300", "PLA"]], st: "queued", at: "10-24 08:22" },
-  { id: 1049, file: "电机固定板.gcode.3mf", owner: "Tom_Chicken", model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, mb: 17.3, fil: [["#00c0e8", "PLA"], ["#ffb300", "PLA"]], st: "printing", printer: "X2D-01", at: "10-24 08:10", pct: 62 },
+  { id: 1049, file: "电机固定板.gcode.3mf", owner: "Tom_Chicken", model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, mb: 17.3, fil: [["#00c0e8", "PLA"], ["#ffb300", "PLA"]], st: "printing", printer: "X2D-01", at: "10-24 08:10", pct: 62, parts: { total: 9, skipped: 0, allowed: true } },
   { id: 1048, file: "线缆夹.gcode.3mf", owner: "林小满", model: "H2D", nozzle: "0.4", time: "0h 40m", g: 9, mb: 3.1, fil: [["#ffb300", "PLA"]], st: "printing", printer: "H2D-01", at: "10-24 07:58", pct: 30 },
   { id: 1047, file: "舵机支架.gcode.3mf", owner: "Tom_Chicken", model: "H2D", nozzle: "0.4", time: "1h 50m", g: 36, mb: 12.4, fil: [["#ff7043", "ABS"]], st: "paused", printer: "H2D-02", at: "10-24 07:20", note: "AMS A2 断料" },
   { id: 1045, file: "云台底座.gcode.3mf", owner: "周浩然", model: "P1S", nozzle: "0.4", time: "2h 40m", g: 61, mb: 24.9, fil: [["#ff7043", "ABS"]], st: "awaiting", printer: "P1S-01", at: "10-24 05:30" },

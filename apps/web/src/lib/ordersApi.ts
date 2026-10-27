@@ -1,6 +1,7 @@
-import type { FailureAttribution, OrderDetail, OrderList, OrderTimelineEntry, OrderView, OverviewStats, PersonView, PrinterView, TodoView } from "@platerelay/shared";
+import type { FailureAttribution, OrderDetail, OrderList, OrderPartsView, OrderTimelineEntry, OrderView, OverviewStats, PersonView, PrinterView, TodoView } from "@platerelay/shared";
 import { type AdminOrder, adminOrders } from "../mock/adminOrders";
-import { type MyOrder, myOrders, type OrderStatus } from "../mock/myOrders";
+import { type MyOrder, myOrders, type OrderStatus, type PartsState } from "../mock/myOrders";
+import { mockParts } from "../mock/skip-parts";
 import { type Task, tasks } from "../mock/todo";
 import { type ApiErr, LIVE, type Res, api } from "./api";
 import { resource, stableLink } from "./live";
@@ -93,6 +94,7 @@ export function toMyOrder(v: OrderView): MyOrder {
     storer: person(v.stored?.by),
     redeemer: person(v.redeemed?.by),
     canceller: v.cancel?.by?.name,
+    parts: v.parts ?? undefined,
   };
 }
 
@@ -129,6 +131,7 @@ export function toAdminOrder(v: OrderView): AdminOrder {
     attributed: !!v.failure?.attribution,
     retried: v.retriedAs ?? undefined,
     mine: v.isMine,
+    parts: v.parts ?? undefined,
   };
 }
 
@@ -169,6 +172,8 @@ function eventText(e: OrderTimelineEntry): string {
       return `${by} 失败归因：${ATTR_LABEL[d.attribution as FailureAttribution] ?? ""}${d.retry ? `，重打为 #${d.retry}` : ""}`;
     case "retry":
       return `由 #${d.retryOf} 失败重打生成`;
+    case "skip-parts":
+      return `${by} 跳过零件：${((d.parts as { name: string }[] | undefined) ?? []).map((p) => p.name).join("、")}`;
     default:
       return `${by} ${e.kind}`;
   }
@@ -263,7 +268,8 @@ async function after<T>(r: Res<T>, ...which: (keyof typeof live)[]): Promise<Res
   return r;
 }
 
-const updateAdmin = (id: number, f: (o: AdminOrder) => Partial<AdminOrder>) => adminOrders.set((s) => s.map((o) => (o.id === id ? { ...o, ...f(o) } : o)));
+const mockSkipped = new Map<number, number[]>();
+const updateAdmin =(id: number, f: (o: AdminOrder) => Partial<AdminOrder>) => adminOrders.set((s) => s.map((o) => (o.id === id ? { ...o, ...f(o) } : o)));
 
 export const ordersApi = {
   async detail(id: number): Promise<Res<OrderDetail>> {
@@ -306,6 +312,25 @@ export const ordersApi = {
   async reorder(id: number, toPosition: number): Promise<Done> {
     if (!LIVE) return ok;
     return after(await api<null>("/api/queue/reorder", json("POST", { orderId: id, toPosition })), "manage");
+  },
+
+  /* 跳过零件 */
+
+  async parts(id: number): Promise<Res<OrderPartsView>> {
+    if (!LIVE) return { ok: true, data: { ...mockParts(), skipped: mockSkipped.get(id) ?? [] } };
+    return api<OrderPartsView>(`/api/orders/${id}/parts`);
+  },
+
+  async skipParts(id: number, parts: number[]): Promise<Done> {
+    if (!LIVE) {
+      const skipped = [...(mockSkipped.get(id) ?? []), ...parts];
+      mockSkipped.set(id, skipped);
+      const next = (p?: PartsState) => p && { ...p, skipped: skipped.length, allowed: p.total - skipped.length > 1 };
+      myOrders.set((s) => s.map((x) => (x.id === id ? { ...x, parts: next(x.parts) } : x)));
+      updateAdmin(id, (o) => ({ parts: next(o.parts) }));
+      return ok;
+    }
+    return after(await api<null>(`/api/orders/${id}/skip-parts`, json("POST", { parts })), "mine", "manage");
   },
 
   async fileUrl(id: number): Promise<Res<{ url: string }>> {

@@ -14,7 +14,7 @@ export class Gcode3mfService {
       ...info,
       fileName,
       sizeBytes: data.byteLength,
-      plates: info.plates.map(({ thumbnail, ...p }) => ({
+      plates: info.plates.map(({ thumbnail, partsView: _view, ...p }) => ({
         ...p,
         thumbnailUrl: thumbnail ? `data:image/png;base64,${Buffer.from(thumbnail).toString("base64")}` : null,
       })),

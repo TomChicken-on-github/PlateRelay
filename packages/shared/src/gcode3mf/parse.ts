@@ -67,6 +67,13 @@ export interface FilamentInfo {
   forSupport: boolean;
 }
 
+/** One printable object on a plate, as the printer knows it. */
+export interface PlatePart {
+  /** identify_id: the id in the G-code object labels, the pick image and the printer's skip command. */
+  id: number;
+  name: string;
+}
+
 export interface PlateInfo {
   /** 1-based plate number in the project; what the printer is told to print. */
   index: number;
@@ -79,6 +86,14 @@ export interface PlateInfo {
   nozzles: NozzleInfo[];
   filaments: FilamentInfo[];
   objects: string[];
+  parts: PlatePart[];
+  /** Objects are labelled in the G-code ("label objects" in the slicer), which skipping parts needs. */
+  partsLabelled: boolean;
+  /**
+   * Top view and pick map of the plate (Metadata/top_N.png, pick_N.png), null when absent or when
+   * thumbnails were not requested. Each pick map pixel holds a part id as RGB: r + g·256 + b·65536.
+   */
+  partsView: { top: Uint8Array; pick: Uint8Array } | null;
   supportUsed: boolean;
   /** Slicer flagged an object partly outside the printable area. */
   outside: boolean;
@@ -132,7 +147,7 @@ export function parseGcode3mf(data: Uint8Array, opts: ParseOptions = {}): Gcode3
   const wanted = (f: UnzipFileInfo) => {
     names.add(f.name);
     if (f.name === SLICE_INFO || f.name === MODEL_SETTINGS || f.name === PROJECT_SETTINGS) return f.originalSize <= MAX_CONFIG_BYTES;
-    return wantThumbs && /^Metadata\/plate_\d+\.png$/.test(f.name) && f.originalSize <= MAX_PNG_BYTES;
+    return wantThumbs && /^Metadata\/(plate|top|pick)_\d+\.png$/.test(f.name) && f.originalSize <= MAX_PNG_BYTES;
   };
 
   let files: Record<string, Uint8Array>;
@@ -227,6 +242,11 @@ export function parseGcode3mf(data: Uint8Array, opts: ParseOptions = {}): Gcode3
     }
 
     const png = wantThumbs ? files[thumbnailPath] : undefined;
+    const parts = tags(b, "object")
+      .map(({ attrs: a }) => ({ id: num(a.identify_id), name: a.name ?? "" }))
+      .filter((o) => Number.isInteger(o.id) && o.id > 0);
+    const top = files[`Metadata/top_${index}.png`];
+    const pick = files[`Metadata/pick_${index}.png`];
     return {
       index,
       name: p.name ?? "",
@@ -236,6 +256,9 @@ export function parseGcode3mf(data: Uint8Array, opts: ParseOptions = {}): Gcode3
       nozzles,
       filaments,
       objects: tags(b, "object").map((o) => o.attrs.name ?? ""),
+      parts,
+      partsLabelled: bool(m.label_object_enabled),
+      partsView: top && pick && isPng(top) && isPng(pick) ? { top, pick } : null,
       supportUsed: bool(m.support_used),
       outside: bool(m.outside),
       gcodePath,

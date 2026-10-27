@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
-import { type FailureAttribution, type OrderDetail, type OrderPreview, type OrderStatus, type OrderView, type OverviewStats, OWNER_CANCELLABLE } from "@platerelay/shared";
+import { type FailureAttribution, type OrderDetail, type OrderPartsView, type OrderPreview, type OrderStatus, type OrderView, type OverviewStats, OWNER_CANCELLABLE } from "@platerelay/shared";
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
@@ -190,12 +190,23 @@ export class OrdersService {
       await this.storage.put(fileKey, data, "application/vnd.bambulab-gcode-3mf");
       written.push(fileKey);
       const thumbs = new Map<number, string>();
+      const views = new Map<number, { top: string; pick: string }>();
       for (const p of info.plates) {
-        if (!p.thumbnail) continue;
-        const key = `plates/${fileId}/${p.index}.png`;
-        await this.storage.put(key, p.thumbnail, "image/png");
-        written.push(key);
-        thumbs.set(p.index, key);
+        if (p.thumbnail) {
+          const key = `plates/${fileId}/${p.index}.png`;
+          await this.storage.put(key, p.thumbnail, "image/png");
+          written.push(key);
+          thumbs.set(p.index, key);
+        }
+        if (p.partsView && skippable(p)) {
+          const top = `plates/${fileId}/${p.index}-top.png`;
+          const pick = `plates/${fileId}/${p.index}-pick.png`;
+          await this.storage.put(top, p.partsView.top, "image/png");
+          written.push(top);
+          await this.storage.put(pick, p.partsView.pick, "image/png");
+          written.push(pick);
+          views.set(p.index, { top, pick });
+        }
       }
       const rows = await this.db.transaction(async (tx) => {
         await tx.insert(files).values({ id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
@@ -217,6 +228,9 @@ export class OrdersService {
               printSeconds: Math.round(p.printSeconds),
               weightGrams: p.weightGrams,
               thumbnailKey: thumbs.get(p.index) ?? null,
+              parts: skippable(p) ? p.parts : [],
+              partsTopKey: views.get(p.index)?.top ?? null,
+              partsPickKey: views.get(p.index)?.pick ?? null,
               formVersionId: form.id,
               answers,
             })
@@ -316,6 +330,65 @@ export class OrdersService {
     }
     await this.audit.record(ctx, { action: "printer.stop.command", targetType: "printer", targetId: printerId, after: { command: "STOP" } });
     return true;
+  }
+
+  /* ---------- skipping parts ---------- */
+
+  /** What the 跳过零件 sheet draws: the plate's parts, which are skipped, and its top view and pick map. */
+  async parts(ctx: Ctx, id: number): Promise<OrderPartsView> {
+    const [r] = await this.db.select().from(orders).where(eq(orders.id, id));
+    if (!r || (r.ownerId !== userId(ctx) && !can(ctx, "order:view:any"))) throw notFound("订单");
+    if (!r.partsTopKey || !r.partsPickKey) throw new ApiError(HttpStatus.CONFLICT, "parts-unavailable", "这张单的文件不支持跳过零件");
+    return {
+      parts: r.parts,
+      skipped: r.skippedParts,
+      topUrl: await this.storage.signedUrl(r.partsTopKey, THUMB_TTL_S),
+      pickUrl: await this.storage.signedUrl(r.partsPickKey, THUMB_TTL_S),
+    };
+  }
+
+  /**
+   * 跳过零件 on a running print: the owner with order:skip-parts:own, anyone with
+   * order:skip-parts:any. At least one part has to stay; skipping everything is a cancel.
+   * The command goes out first and only a sent command is recorded.
+   */
+  async skipParts(ctx: Ctx, id: number, partIds: number[]): Promise<OrderView> {
+    const [o] = await this.db.select().from(orders).where(eq(orders.id, id));
+    if (!o) throw notFound("订单");
+    const mine = o.ownerId === userId(ctx);
+    if (!can(ctx, "order:skip-parts:any") && !(mine && can(ctx, "order:skip-parts:own"))) {
+      await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, after: { parts: partIds }, result: "denied" });
+      if (!mine && !can(ctx, "order:view:any")) throw notFound("订单");
+      throw new ApiError(HttpStatus.FORBIDDEN, "forbidden", "没有权限跳过这张单的零件");
+    }
+    if (!o.partsTopKey || o.parts.length < 2) throw new ApiError(HttpStatus.CONFLICT, "parts-unavailable", "这张单的文件不支持跳过零件");
+    const [p] = o.printerId ? await this.db.select().from(printers).where(eq(printers.id, o.printerId)) : [];
+    if (o.status !== "PRINTING" || !p || p.currentOrderId !== id || !["PRINTING", "ERROR_PAUSED"].includes(p.state)) {
+      throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有正在打印的订单能跳过零件", { orderId: id, status: o.status });
+    }
+    const known = new Set(o.parts.map((x) => x.id));
+    const ids = [...new Set(partIds)];
+    if (!ids.length || ids.some((x) => !known.has(x) || o.skippedParts.includes(x))) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-parts", "零件不存在或已经跳过", { parts: ids.filter((x) => !known.has(x) || o.skippedParts.includes(x)) });
+    }
+    if (o.skippedParts.length + ids.length >= o.parts.length) throw new ApiError(HttpStatus.CONFLICT, "skip-all", "不能跳过全部零件，要停掉整盘请取消订单");
+    try {
+      await this.commands.skipParts(p.id, ids);
+    } catch (e) {
+      await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, after: { printerId: p.id, parts: ids }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
+      if (e instanceof PrinterUnreachable) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "printer-unreachable", "连不上这台打印机的 daemon，请在打印机屏幕上跳过");
+      throw e;
+    }
+    const row = await this.db.transaction(async (tx) => {
+      const [cur] = await tx.select({ skipped: orders.skippedParts }).from(orders).where(eq(orders.id, id)).for("update");
+      const skipped = [...new Set([...cur.skipped, ...ids])];
+      const [row] = await tx.update(orders).set({ skippedParts: skipped }).where(eq(orders.id, id)).returning();
+      const named = o.parts.filter((x) => ids.includes(x.id));
+      await orderEvent(tx, ctx, id, "skip-parts", { parts: named });
+      await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, before: { skipped: cur.skipped }, after: { printerId: p.id, skipped } }, tx);
+      return row;
+    });
+    return (await this.views(ctx, [row]))[0];
   }
 
   /* ---------- failure attribution ---------- */
@@ -439,5 +512,9 @@ function blank(o: Omit<OrderRow, "id" | "status" | "submittedAt">) {
     attribution: null,
     attributedBy: null,
     attributedAt: null,
+    skippedParts: [],
   };
 }
+
+/** A plate can skip parts when the G-code labels its objects and there is more than one. */
+const skippable = (p: { parts: unknown[]; partsLabelled: boolean }) => p.partsLabelled && p.parts.length > 1;

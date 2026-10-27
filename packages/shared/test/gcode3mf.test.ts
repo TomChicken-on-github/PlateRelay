@@ -82,6 +82,21 @@ describe("parseGcode3mf", () => {
     expect(p2.thumbnailPath).toBe("Metadata/plate_2.png");
   });
 
+  it("reads the parts that can be skipped, with their top view and pick map", () => {
+    const view = { "Metadata/top_1.png": PNG, "Metadata/pick_1.png": PNG };
+    const [p1, p2] = parseGcode3mf(build("x2d-two-plates", [1, 2], view)).plates;
+    expect(p1.partsLabelled).toBe(true);
+    expect(p1.parts.slice(0, 2)).toEqual([
+      { id: 253, name: "Top-Cover-Cat-v100.stl" },
+      { id: 264, name: "Top-Cover-Enclosed-v117.stl" },
+    ]);
+    expect(p1.parts).toHaveLength(9);
+    expect(p1.partsView).toEqual({ top: PNG, pick: PNG });
+    expect(p2.parts.map((x) => x.id)).toEqual([286, 297, 352, 363, 374, 385]);
+    expect(p2.partsView).toBeNull();
+    expect(parseGcode3mf(build("x2d-two-plates", [1, 2], view), { thumbnails: false }).plates[0].partsView).toBeNull();
+  });
+
   it("skips thumbnails when asked", () => {
     const info = parseGcode3mf(build("x2d-two-plates", [1, 2]), { thumbnails: false });
     expect(info.plates.map((p) => p.thumbnail)).toEqual([null, null]);

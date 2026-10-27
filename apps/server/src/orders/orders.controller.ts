@@ -9,7 +9,8 @@ import { PickupService } from "./pickup.service.js";
 
 const Reason = z.object({ reason: z.string().trim().min(1, "要填写原因").max(500) });
 const Attribute = z.object({ attribution: z.enum(FAILURE_ATTRIBUTIONS), note: z.string().trim().max(500).nullish() });
-const Reorder = z.object({ orderId: z.number().int().positive(), toPosition: z.number().int().positive(), reason: z.string().trim().max(500).nullish() });
+const SkipParts = z.object({ parts: z.array(z.number().int().positive()).min(1, "至少选一个零件").max(256) });
+const Reorder =z.object({ orderId: z.number().int().positive(), toPosition: z.number().int().positive(), reason: z.string().trim().max(500).nullish() });
 const Store = z.object({ slot: z.string().trim().min(1).max(40), bedCleared: z.literal("true", { message: "要确认热床已清理" }) });
 const ListQuery = z.object({
   status: z
@@ -115,6 +116,19 @@ export class OrdersController {
   @RequirePerm("order:cancel:own", "order:cancel:any")
   cancel(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
     return this.orders.cancel(ctx, id, parse(Reason, body).reason);
+  }
+
+  @Get("orders/:id/parts")
+  parts(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number) {
+    return this.orders.parts(ctx, id);
+  }
+
+  /** 跳过零件 on a running print: own orders (order:skip-parts:own) or any (order:skip-parts:any); checked in the service. */
+  @Post("orders/:id/skip-parts")
+  @HttpCode(200)
+  @RequirePerm("order:skip-parts:own", "order:skip-parts:any")
+  skipParts(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.orders.skipParts(ctx, id, parse(SkipParts, body).parts);
   }
 
   @Post("orders/:id/attribute")

@@ -26,6 +26,8 @@ export function x2dTwoPlates(): Buffer {
   for (const n of [1, 2]) {
     files[`Metadata/plate_${n}.gcode`] = strToU8("G28\n");
     files[`Metadata/plate_${n}.png`] = PNG;
+    files[`Metadata/top_${n}.png`] = PNG;
+    files[`Metadata/pick_${n}.png`] = PNG;
   }
   return Buffer.from(zipSync(files));
 }
@@ -48,6 +50,10 @@ export class FakeCommands implements PrinterCommands {
   async stop(printerId: string) {
     if (!this.online) throw new PrinterUnreachable(printerId);
     this.sent.push({ printerId, cmd: "stop" });
+  }
+  async skipParts(printerId: string, partIds: number[]) {
+    if (!this.online) throw new PrinterUnreachable(printerId);
+    this.sent.push({ printerId, cmd: "skip", arg: partIds });
   }
 }
 
