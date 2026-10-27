@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { DEFAULT_QUEUE_RULES, type OrderDetail, type OrderView } from "@platerelay/shared";
+import { DEFAULT_QUEUE_RULES, type OrderDetail, type OrderView, type TodoView } from "@platerelay/shared";
 import { and, inArray, isNotNull, sql } from "drizzle-orm";
 import { orders, orderVersions, printers } from "../src/db/schema.js";
 import { inQueue } from "../src/orders/queue.js";
@@ -80,7 +80,7 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
       .update(printers)
       .set({ model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }], storage: [{ medium: "internal", present: true, writable: true }], state: "IDLE", openToContestants: true })
       .where(inArray(printers.id, printerIds));
-    /* every printer takes every order, so any order passed over while ahead of a dispatched one is out-of-order dispatch */
+    /* every printer takes every order and Staff confirm the head first, so any order passed over while ahead of a dispatched one is out-of-order dispatch */
     await t.db.execute(sql`create table if not exists stress_skips (order_id int, at timestamptz default now())`);
     await t.db.execute(sql`create or replace function stress_skip() returns trigger language plpgsql as $$ begin insert into stress_skips(order_id) values (new.id); return new; end $$`);
     await t.db.execute(sql`create or replace trigger stress_skip after update of skipped_since on orders for each row when (old.skipped_since is null and new.skipped_since is not null) execute function stress_skip()`);
@@ -104,6 +104,7 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
     const revising = pending.filter((o) => o.revision && o.queueSeq != null);
     const printing = by((o) => o.status === "PRINTING");
     const fleet = await t.db.select().from(printers).where(inArray(printers.id, printerIds));
+    const sugg = await suggestions();
     const touched = new Set<number>();
     const jobs: Promise<unknown>[] = [];
     const go = (id: number | undefined, f: (id: number) => Promise<unknown>) => {
@@ -141,15 +142,32 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
       else if (p.state === "PRINTING") jobs.push(ev("printer.finished", () => ps.onFinished(p.id)));
       else if (p.state === "CLEARING_REQUIRED" && p.currentOrderId != null && all.find((o) => o.id === p.currentOrderId)?.status === "PRINTED_AWAITING_STORAGE") {
         const id = p.currentOrderId;
-        jobs.push(call("store", staff.post(`/api/orders/${id}/store`).attach("photo", JPEG, "p.jpg").field("slot", "A-1-1").field("bedCleared", "true")));
-      } else if (p.state === "CLEARING_REQUIRED") jobs.push(call("clear-bed", staff.post(`/api/printers/${p.id}/clear-bed`)));
+        jobs.push(call("store", staff.post(`/api/orders/${id}/store`).attach("photo", JPEG, "p.jpg").field("slot", "A-1-1").field("bedCleared", "true")).then(() => confirmFreed(p.id)));
+      } else if (p.state === "CLEARING_REQUIRED") jobs.push(call("clear-bed", staff.post(`/api/printers/${p.id}/clear-bed`)).then(() => confirmFreed(p.id)));
     }
-    jobs.push(t.app.get(SchedulerService).kick());
+    /* Staff confirm the suggestion for the printer idle longest, twice at once: one wins, the other gets a 409 */
+    const head = sugg[0];
+    if (head) for (let i = 0; i < 2; i++) go(head.order, (id) => call("confirm-dispatch", staff.post(`/api/printers/${head.printer}/dispatch`).send({ orderId: id })));
     await Promise.all(jobs);
-    /* kicks fired by the requests run after them; let them settle */
-    await new Promise((r) => setTimeout(r, 150));
-    await t.app.get(SchedulerService).kick();
+    await confirmAll();
     return touched;
+  }
+
+  /** What 待办 suggests now, in the order Staff see it (longest idle first). */
+  async function suggestions() {
+    const todo = (await staff.get("/api/todo").expect(200)).body as TodoView;
+    return todo.dispatch.filter((d) => printerIds.includes(d.printer.id)).map((d) => ({ printer: d.printer.id, order: d.order.id }));
+  }
+
+  /** A bed just cleared: two Staff confirm its suggestion at once, while the rest of the burst runs. */
+  async function confirmFreed(printerId: string) {
+    const d = (await suggestions()).find((x) => x.printer === printerId);
+    if (d) await Promise.all([0, 1].map(() => call("confirm-dispatch", staff.post(`/api/printers/${printerId}/dispatch`).send({ orderId: d.order }))));
+  }
+
+  /** Staff confirm every suggestion one by one, as the scheduler used to dispatch on its own. */
+  async function confirmAll() {
+    for (const d of await suggestions()) await call("confirm-dispatch", staff.post(`/api/printers/${d.printer}/dispatch`).send({ orderId: d.order }));
   }
 
   async function check(round: number, before: number[], touched: Set<number>) {

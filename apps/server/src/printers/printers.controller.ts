@@ -123,8 +123,16 @@ export class PrintersController {
     return this.printers.clearBed(ctx, id);
   }
 
+  /** 确认派单: send the suggested next order; orderId is the suggestion the confirmer saw. */
+  @Post("printers/:id/dispatch")
+  @HttpCode(200)
+  @RequirePerm("order:dispatch")
+  dispatch(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string, @Body() body: unknown) {
+    return this.printers.confirmDispatch(ctx, id, parse(z.object({ orderId: z.number().int().positive() }), body).orderId);
+  }
+
   @Get("todo")
-  @RequirePerm("order:store", "printer:operate")
+  @RequirePerm("order:store", "printer:operate", "order:dispatch")
   todo(@ReqCtx() ctx: Ctx) {
     return this.printers.todo(ctx);
   }

@@ -279,13 +279,13 @@ export class OrdersService {
     const fleet = await this.openFleet();
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE"));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
-    /* same items as GET /todo: plates to store, beds to clear with nothing to store, errors, passed-over orders */
+    /* same items as GET /todo: suggestions to confirm, plates to store, beds to clear with nothing to store, errors, passed-over orders */
     const todo = awaiting.length + fleet.filter((p) => p.state === "ERROR_PAUSED" || (p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))).length;
     const rules = await this.settings.get("queue.rules");
     const now = new Date();
     const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)))).filter((o) => this.policy.remindSkipped(rules, o, now)).length;
     const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
-    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped };
+    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped + (await this.scheduler.suggestions()).size };
   }
 
   /**
@@ -494,7 +494,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.withdraw", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending[0].n }, after: { status: "QUEUED", version: back.n } }, tx);
       return row;
     });
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -554,7 +553,6 @@ export class OrdersService {
       return r.row;
     });
     if (recalled) await this.sendRecall(ctx, recalled, cur.id);
-    if (recalled || !d.review) void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -669,7 +667,6 @@ export class OrdersService {
       if (!rev || rev.placesBack === 0) return row;
       return this.moveBack(tx, ctx, id, rev);
     });
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -724,7 +721,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.reject", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "REJECTED" }, reason }, tx);
       return row;
     });
-    if (row.status === "QUEUED") void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -773,10 +769,7 @@ export class OrdersService {
       return row;
     });
     if (stopPrinter) await this.sendStop(ctx, stopPrinter);
-    if (recallPrinter) {
-      await this.sendRecall(ctx, recallPrinter, id);
-      void this.scheduler.kick();
-    }
+    if (recallPrinter) await this.sendRecall(ctx, recallPrinter, id);
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -885,7 +878,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.attribute", targetType: "order", targetId: id, after: { attribution, retry: retry.id }, reason: note }, tx);
       return { failed, retry };
     });
-    void this.scheduler.kick();
     const [a, b] = await this.views(ctx, [failed, retry]);
     return { failed: a, retry: b };
   }
@@ -937,7 +929,6 @@ export class OrdersService {
       await this.storage.delete(key).catch(() => undefined);
       throw e;
     }
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 

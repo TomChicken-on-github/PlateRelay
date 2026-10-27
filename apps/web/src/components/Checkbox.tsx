@@ -25,6 +25,21 @@ export function Checkbox({ checked, onChange, children }: { checked: boolean; on
   );
 }
 
+/** MD3 radio button with a 48px touch target and its label. */
+export function Radio({ name, checked, onChange, children }: { name: string; checked: boolean; onChange: () => void; children: ReactNode }) {
+  return (
+    <label className="group relative -ml-3 flex min-h-12 w-full cursor-pointer items-center gap-1 text-body-m">
+      <input type="radio" name={name} className="peer absolute size-12 cursor-pointer opacity-0" checked={checked} onChange={onChange} />
+      <span className="relative grid size-12 flex-none place-items-center rounded-full before:absolute before:inset-1 before:rounded-full before:bg-on-surface before:opacity-0 before:transition-opacity group-hover:before:opacity-8 peer-focus-visible:before:opacity-12 peer-focus-visible:outline-2 peer-focus-visible:outline-primary">
+        <i className={cx("relative grid size-5 place-items-center rounded-full border-2 border-solid transition-colors duration-150 ease-standard", checked ? "border-primary" : "border-on-variant")}>
+          <i className={cx("size-2.5 rounded-full bg-primary transition-transform duration-150 ease-standard", checked ? "scale-100" : "scale-0")} />
+        </i>
+      </span>
+      <span>{children}</span>
+    </label>
+  );
+}
+
 /** Compact 22px checkbox used inside list rows (plates). */
 export function RowCheckbox({ checked, disabled, onChange, label, danger }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string; danger?: boolean }) {
   return (

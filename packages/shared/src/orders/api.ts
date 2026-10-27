@@ -269,6 +269,8 @@ export interface PrinterView {
   trays: ReportedTray[] | null;
   lastSeenAt: string | null;
   job: { orderId: number; fileName: string; plate: { index: number; count: number }; owner: PersonView; status: string } | null;
+  /** 建议下一单: the queued order suggested for this idle printer; only with order:dispatch, null otherwise. */
+  suggestion: OrderView | null;
 }
 
 /** GET /api/todo */
@@ -276,6 +278,8 @@ export interface TodoView {
   store: { order: OrderView; printer: PrinterView | null; since: string | null }[];
   clear: { printer: PrinterView; order: OrderView | null; since: string }[];
   errors: { printer: PrinterView; order: OrderView | null; since: string }[];
+  /** 确认派单: idle printers with a suggested next order, waiting for Staff to confirm. */
+  dispatch: { printer: PrinterView; order: OrderView; since: string }[];
   /** 跳单提醒: queued orders passed over by later ones for longer than the rule allows. */
   skipped: { order: OrderView; since: string }[];
 }

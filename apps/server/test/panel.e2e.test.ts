@@ -135,7 +135,7 @@ describe("panel API", () => {
     const [o] = (await submit(user).expect(201)).body.orders;
     await builder.post(`/api/orders/${o.id}/approve`).expect(200);
     t.commands.online = true;
-    await t.app.get(SchedulerService).kick();
+    await t.app.get(SchedulerService).dispatch(printerId);
     t.commands.online = false;
     assert.equal(await status(o.id), "PRINTING");
     await t.app.get(PrintersService).onStarted(printerId);
