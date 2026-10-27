@@ -206,6 +206,24 @@ describe("print rules", () => {
   });
 
   describe("修改文件", () => {
+    it("a revision brings its own parts for 跳过零件, and withdrawing it brings the old ones back", async () => {
+      const a = await queued(user);
+      const row = async () => (await t.db.select().from(orders).where(eq(orders.id, a)))[0];
+      const before = await row();
+      assert.equal(before.parts.length, 9);
+      const fewer = x2dTwoPlates((s) => s.replace(/\s*<object identify_id="407"[^>]*\/>/, ""));
+      await revise(user, a, fewer).expect(200);
+      const revised = await row();
+      assert.equal(revised.parts.length, 8);
+      assert.ok(!revised.parts.some((p) => p.id === 407));
+      assert.ok(revised.partsTopKey && revised.partsTopKey !== before.partsTopKey, "the new file's plate images");
+      await user.post(`/api/orders/${a}/withdraw`).expect(200);
+      const back = await row();
+      assert.equal(back.parts.length, 9);
+      assert.equal(back.partsTopKey, before.partsTopKey);
+      assert.equal(back.partsPickKey, before.partsPickKey);
+    });
+
     it("re-reviews a revision frozen in place, reviews it first, then moves it back by the time rule", async () => {
       const a = await queued(user);
       const b = await queued(other);

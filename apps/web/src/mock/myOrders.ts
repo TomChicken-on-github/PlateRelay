@@ -52,7 +52,11 @@ export type MyOrder = {
   canWithdraw?: boolean;
   /** Mock only; real builds read 版本记录 from the order detail. */
   vers?: Version[];
+  /** 跳过零件: absent when the plate cannot skip parts. */
+  parts?: PartsState;
 };
+
+export type PartsState = { total: number; skipped: number; allowed: boolean };
 
 export type OrderGroup = "act" | "pick" | "todo" | "end";
 
@@ -73,7 +77,7 @@ export const STATUS: Record<OrderStatus, { t: string; tone: "neutral" | "ok" | "
 
 export const myOrders = createStore<MyOrder[]>([
   { id: 1051, file: "齿轮箱外壳.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "1h 40m", g: 52, fil: [["#6155f5", "PETG"]], st: "pending", at: "10-24 09:12", canRevise: true, revs: 0 },
-  { id: 1048, file: "机械臂轴承座.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#00c0e8", "PLA"], ["#ffcc00", "PLA"]], st: "printing", at: "10-24 08:40", printer: "X2D-01", pct: 62, left: "1h 04m", eta: "10:58" },
+  { id: 1048, file: "机械臂轴承座.gcode.3mf", n: 1, model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#00c0e8", "PLA"], ["#ffcc00", "PLA"]], st: "printing", at: "10-24 08:40", printer: "X2D-01", pct: 62, left: "1h 04m", eta: "10:58", parts: { total: 9, skipped: 0, allowed: true } },
   {
     id: 1049, file: "机械臂轴承座-v2.gcode.3mf", n: 2, model: "X2D", nozzle: "0.4", time: "1h 32m", g: 36, fil: [["#6155f5", "PETG"]], st: "revising", at: "10-24 08:40", pos: 3, canRevise: true, canWithdraw: true, revs: 1,
     vers: [

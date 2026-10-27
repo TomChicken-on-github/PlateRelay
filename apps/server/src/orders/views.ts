@@ -123,6 +123,19 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
         redeemed: r.redeemedAt ? { by: people.get(r.redeemedBy), at: r.redeemedAt.toISOString() } : null,
         retryOf: r.retryOf,
         retriedAs: retryMap.get(r.id) ?? null,
+        parts:
+          r.partsTopKey && r.parts.length > 1
+            ? {
+                total: r.parts.length,
+                skipped: r.skippedParts.length,
+                allowed:
+                  r.status === "PRINTING" &&
+                  onThisPrinter &&
+                  (p?.state === "PRINTING" || p?.state === "ERROR_PAUSED") &&
+                  r.parts.length - r.skippedParts.length > 1 &&
+                  (can(ctx, "order:skip-parts:any") || (userId(ctx) === r.ownerId && can(ctx, "order:skip-parts:own"))),
+              }
+            : null,
         colourPref: r.colourPref,
         bedType: r.bedType,
         revisions: {

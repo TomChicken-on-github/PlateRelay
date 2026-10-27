@@ -7,6 +7,7 @@ import {
   ORDER_STATUSES,
   type OrderFilament,
   type OrderNozzle,
+  type OrderPart,
   PRINTER_STATES,
   type PrinterError,
   type ReportedNozzle,
@@ -49,7 +50,7 @@ export const colourPref = pgEnum("colour_pref", COLOUR_PREFS);
 export const versionState = pgEnum("version_state", VERSION_STATES);
 
 /* JSON column shapes live in @platerelay/shared because the API sends them as they are. */
-export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, PrinterError, ReportedNozzle, ReportedStorage, ReportedTray, RevisionInfo };
+export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, OrderPart, PrinterError, ReportedNozzle, ReportedStorage, ReportedTray, RevisionInfo };
 
 /* ---- accounts ---- */
 
@@ -217,6 +218,13 @@ export const orders = pgTable(
     printSeconds: integer("print_seconds").notNull(),
     weightGrams: real("weight_grams").notNull(),
     thumbnailKey: text("thumbnail_key"),
+    /** Printable objects of the plate; empty when the file does not label them, so parts cannot be skipped. */
+    parts: jsonb("parts").$type<OrderPart[]>().notNull().default([]),
+    /** Top view and pick map for 跳过零件 (storage keys); null when the file has none. */
+    partsTopKey: text("parts_top_key"),
+    partsPickKey: text("parts_pick_key"),
+    /** Part ids the printer was told to skip. */
+    skippedParts: jsonb("skipped_parts").$type<number[]>().notNull().default([]),
     formVersionId: integer("form_version_id").notNull().references(() => formVersions.id),
     answers: jsonb("answers").$type<AnswerSnapshot[]>().notNull(),
     /** FIFO key, set on approval. Kept after the order leaves the queue so a machine-fault retry can reuse it. */
@@ -290,6 +298,10 @@ export const orderVersions = pgTable(
     printSeconds: integer("print_seconds").notNull(),
     weightGrams: real("weight_grams").notNull(),
     thumbnailKey: text("thumbnail_key"),
+    /** 跳过零件: the version's parts and plate images, so a revision or restore brings its own. */
+    parts: jsonb("parts").$type<OrderPart[]>().notNull().default([]),
+    partsTopKey: text("parts_top_key"),
+    partsPickKey: text("parts_pick_key"),
     /** Counted towards revisions.max / modelSwitch.max; given back when it is withdrawn. */
     counted: boolean("counted").notNull().default(false),
     switched: boolean("switched").notNull().default(false),

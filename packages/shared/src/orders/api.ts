@@ -24,6 +24,12 @@ export interface OrderFilament {
   extruder: number | null;
 }
 
+/** A printable object on the order's plate; id is what the printer's skip command takes. */
+export interface OrderPart {
+  id: number;
+  name: string;
+}
+
 export type FormFieldType = "text" | "textarea" | "single" | "multi" | "number";
 
 export interface FormField {
@@ -120,6 +126,11 @@ export interface OrderView {
   redeemed: { by: PersonView | null; at: string } | null;
   retryOf: number | null;
   retriedAs: number | null;
+  /**
+   * 跳过零件: null when the plate cannot skip parts (one part, objects not labelled, no top view).
+   * `allowed` is whether this viewer can skip now: printing, and order:skip-parts:own / :any.
+   */
+  parts: { total: number; skipped: number; allowed: boolean } | null;
   /** 颜色要求 picked on submit. */
   colourPref: ColourPref;
   /** Build plate the submitter picked (only when 自选板 is allowed); null = as sliced. */
@@ -180,6 +191,15 @@ export interface OrderVersionView {
   at: string;
   /** Reject reason of a rejected revision. */
   reason: string | null;
+}
+
+/** GET /api/orders/:id/parts: what the 跳过零件 sheet draws. */
+export interface OrderPartsView {
+  parts: OrderPart[];
+  skipped: number[];
+  /** Top view of the plate, and the pick map whose pixels hold part ids as RGB (r + g·256 + b·65536). */
+  topUrl: string;
+  pickUrl: string;
 }
 
 export interface OrderTimelineEntry {

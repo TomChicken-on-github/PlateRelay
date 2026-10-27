@@ -16,9 +16,11 @@ export function Sheet({
   title,
   titleSize = "sm",
   icon,
+  iconTone,
   sub,
   footer,
   dismissible = true,
+  wide,
   children,
 }: {
   open: boolean;
@@ -26,9 +28,12 @@ export function Sheet({
   title: string;
   titleSize?: "sm" | "lg";
   icon?: string;
+  iconTone?: "primary" | "error";
   sub?: ReactNode;
   footer?: ReactNode;
   dismissible?: boolean;
+  /** 640px dialog instead of 400px on wide screens. */
+  wide?: boolean;
   children?: ReactNode;
 }) {
   const mobile = useMedia("(max-width: 640px)");
@@ -75,7 +80,7 @@ export function Sheet({
               "absolute flex flex-col gap-4 overflow-auto bg-sc-high shadow-[0_8px_24px_rgb(0_0_0/0.35)] outline-none",
               mobile
                 ? "inset-x-0 bottom-0 max-h-[85vh] rounded-t-[28px] px-6 pt-3 pb-[calc(24px+env(safe-area-inset-bottom,0px))]"
-                : "top-1/2 left-1/2 max-h-[calc(100vh-32px)] w-[min(400px,calc(100vw-32px))] rounded-[28px] p-6",
+                : cx("top-1/2 left-1/2 max-h-[calc(100vh-32px)] rounded-[28px] p-6", wide ? "w-[min(640px,calc(100vw-32px))]" : "w-[min(400px,calc(100vw-32px))]"),
             )}
             style={mobile ? undefined : { x: "-50%", y: "-50%" }}
             initial={mobile ? { y: "100%" } : { opacity: 0, scale: 0.92 }}
@@ -83,7 +88,7 @@ export function Sheet({
             exit={mobile ? { y: "100%", transition: exit } : { opacity: 0, scale: 0.96, transition: exit }}
           >
             {mobile && <div className="h-1 w-8 flex-none self-center rounded-sm bg-outline opacity-60" />}
-            {icon && <Icon name={icon} className="self-center text-primary" />}
+            {icon && <Icon name={icon} className={cx("self-center", iconTone === "error" ? "text-error" : "text-primary")} />}
             <h2 className={cx("m-0", titleSize === "lg" ? "text-headline-s font-normal" : "text-[20px] leading-7 font-medium", icon && "-mt-1 text-center")}>{title}</h2>
             {sub && <div className="-mt-2 text-note text-on-variant">{sub}</div>}
             {children}

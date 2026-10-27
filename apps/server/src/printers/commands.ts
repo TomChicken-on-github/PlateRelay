@@ -28,6 +28,8 @@ export interface PrinterCommands {
   stop(printerId: string): Promise<void>;
   /** Takes back a dispatched job that has not started printing; the printer stays clean and free. */
   recall(printerId: string, orderId: number): Promise<void>;
+  /** 跳过零件: part ids of the running job (Bambu skip_objects obj_list). */
+  skipParts(printerId: string, partIds: number[]): Promise<void>;
 }
 
 export const PRINTER_COMMANDS = Symbol("PRINTER_COMMANDS");
@@ -53,6 +55,9 @@ export class NoDaemonCommands implements PrinterCommands {
     throw new PrinterUnreachable(printerId);
   }
   async recall(printerId: string): Promise<void> {
+    throw new PrinterUnreachable(printerId);
+  }
+  async skipParts(printerId: string): Promise<void> {
     throw new PrinterUnreachable(printerId);
   }
 }

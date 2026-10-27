@@ -11,6 +11,7 @@ import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateM
 import { VersionList, useVersionDownload } from "../../components/VersionList";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
+import { SkipPartsSheet } from "../../components/SkipPartsSheet";
 import { useToast } from "../../components/Toast";
 import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
@@ -20,6 +21,7 @@ import { ADMIN_STATUS, ATTRIBUTION, type AdminOrder, CANCEL_WHY, adminOrders, an
 import type { Version } from "../../mock/myOrders";
 
 type Mode = "review" | "manage";
+type SheetType = "reject" | "cancel" | "attr" | "skip";
 type TabKey = "all" | "pending" | "queued" | "printing" | "pick" | "bad" | "end";
 const TABS: [TabKey, string][] = [["all", "全部"], ["pending", "待审核"], ["queued", "排队中"], ["printing", "打印中"], ["pick", "入库取件"], ["bad", "异常"], ["end", "已结束"]];
 const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", revising: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
@@ -370,7 +372,7 @@ const Big = ({ v, unit }: { v: ReactNode; unit?: string }) => (
 );
 const Small = ({ children }: { children: ReactNode }) => <b className="mt-1.5 block text-label-l font-medium">{children}</b>;
 
-function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminOrder; onReject: () => void; onCancel: () => void; onAttr: () => void }) {
+function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o: AdminOrder; onReject: () => void; onCancel: () => void; onAttr: () => void; onSkip: () => void }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [label, tone] = ADMIN_STATUS[o.st];
@@ -396,6 +398,7 @@ function Detail({ mode, o, onReject, onCancel, onAttr }: { mode: Mode; o: AdminO
           </Button>
         </>
       )}
+      {mode === "manage" && o.parts?.allowed && <Button variant="tonal" icon="skip_next" onClick={onSkip}>跳过零件</Button>}
       {mode === "manage" && live && <Button variant="outlined" icon="cancel" onClick={onCancel}>取消订单</Button>}
       {o.st === "failed" && !o.attributed && <Button icon="info" onClick={onAttr}>失败归因</Button>}
     </>
@@ -516,10 +519,10 @@ export function OrderAdminPage({ mode }: { mode: Mode }) {
   /* rows behind the sheets; the lists below keep their own subscription */
   const mock = adminOrders.use();
   const orders = LIVE ? ((mode === "review" ? live.review : live.manage).get() ?? []) : mock;
-  const [sheet, setSheet] = useState<{ type: "reject" | "cancel" | "attr"; id: number } | null>(null);
-  const [last, setLast] = useState<{ type: "reject" | "cancel" | "attr"; id: number }>({ type: "reject", id: 0 });
+  const [sheet, setSheet] = useState<{ type: SheetType; id: number } | null>(null);
+  const [last, setLast] = useState<{ type: SheetType; id: number }>({ type: "reject", id: 0 });
   const [key, setKey] = useState(0);
-  const open = (type: "reject" | "cancel" | "attr", oid: number) => {
+  const open = (type: SheetType, oid: number) => {
     setSheet({ type, id: oid });
     setLast({ type, id: oid });
     setKey((k) => k + 1);
@@ -532,7 +535,7 @@ export function OrderAdminPage({ mode }: { mode: Mode }) {
   return (
     <Page>
       {id && order ? (
-        <Detail mode={mode} o={order} onReject={() => open("reject", order.id)} onCancel={() => open("cancel", order.id)} onAttr={() => open("attr", order.id)} />
+        <Detail mode={mode} o={order} onReject={() => open("reject", order.id)} onCancel={() => open("cancel", order.id)} onAttr={() => open("attr", order.id)} onSkip={() => open("skip", order.id)} />
       ) : id && LIVE ? (
         order === null ? <Empty icon="search_off">找不到订单 #{id}</Empty> : <Empty icon="hourglass_top">正在加载订单 #{id}…</Empty>
       ) : mode === "review" ? (
@@ -554,6 +557,15 @@ export function OrderAdminPage({ mode }: { mode: Mode }) {
       />
       {target && (
         <>
+          <SkipPartsSheet
+            orderId={target.id}
+            sub={`${target.file} · ${target.printer ?? ""}`}
+            open={sheet?.type === "skip"}
+            onClose={() => {
+              close();
+              changed();
+            }}
+          />
           <PickSheet
             key={`c${key}`}
             open={sheet?.type === "cancel"}

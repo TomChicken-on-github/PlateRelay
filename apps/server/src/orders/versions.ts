@@ -9,7 +9,7 @@ export type VersionRow = typeof orderVersions.$inferSelect;
 /** The columns an order and its versions share: what the order prints. */
 export type VersionFields = Pick<
   OrderRow,
-  "fileId" | "plateIndex" | "plateCount" | "plateName" | "printerModel" | "printerModelId" | "nozzles" | "filaments" | "printSeconds" | "weightGrams" | "thumbnailKey"
+  "fileId" | "plateIndex" | "plateCount" | "plateName" | "printerModel" | "printerModelId" | "nozzles" | "filaments" | "printSeconds" | "weightGrams" | "thumbnailKey" | "parts" | "partsTopKey" | "partsPickKey"
 >;
 
 export function versionFields(r: VersionFields): VersionFields {
@@ -25,6 +25,9 @@ export function versionFields(r: VersionFields): VersionFields {
     printSeconds: r.printSeconds,
     weightGrams: r.weightGrams,
     thumbnailKey: r.thumbnailKey,
+    parts: r.parts,
+    partsTopKey: r.partsTopKey,
+    partsPickKey: r.partsPickKey,
   };
 }
 

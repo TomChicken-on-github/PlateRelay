@@ -262,6 +262,48 @@ describe("panel API", () => {
       assert.equal(todo.clear[0].printer.id, printerId);
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
     });
+
+    it("skips parts of a running print: owner or Staff, never all of them, only once sent", async () => {
+      const [queued] = (await submit(user).expect(201)).body.orders;
+      assert.deepEqual(queued.parts, { total: 9, skipped: 0, allowed: false });
+      await user.post(`/api/orders/${queued.id}/skip-parts`).send({ parts: [253] }).expect(409);
+      await user.post(`/api/orders/${queued.id}/cancel`).send({ reason: "测试" }).expect(200);
+
+      const id = await printing();
+      const view = (await user.get(`/api/orders/${id}/parts`).expect(200)).body;
+      assert.equal(view.parts.length, 9);
+      assert.deepEqual(view.parts[0], { id: 253, name: "Top-Cover-Cat-v100.stl" });
+      assert.equal((await request(t.app.getHttpServer()).get(view.pickUrl).expect(200)).headers["content-type"], "image/png");
+      assert.equal((await user.get(`/api/orders/${id}`).expect(200)).body.parts.allowed, true);
+      await other.get(`/api/orders/${id}/parts`).expect(404);
+      await other.post(`/api/orders/${id}/skip-parts`).send({ parts: [253] }).expect(404);
+
+      const unreachable = await user.post(`/api/orders/${id}/skip-parts`).send({ parts: [253] }).expect(503);
+      assert.equal(unreachable.body.code, "printer-unreachable");
+      assert.equal((await user.get(`/api/orders/${id}`).expect(200)).body.parts.skipped, 0, "nothing recorded when the command did not go out");
+
+      t.commands.sent = [];
+      t.commands.online = true;
+      await user.post(`/api/orders/${id}/skip-parts`).send({ parts: [999] }).expect(400);
+      const skipped = (await user.post(`/api/orders/${id}/skip-parts`).send({ parts: [253, 264] }).expect(200)).body;
+      assert.deepEqual(skipped.parts, { total: 9, skipped: 2, allowed: true });
+      assert.deepEqual(t.commands.sent, [{ printerId, cmd: "skip", arg: [253, 264] }]);
+      await user.post(`/api/orders/${id}/skip-parts`).send({ parts: [253] }).expect(400);
+      const all = await staff.post(`/api/orders/${id}/skip-parts`).send({ parts: [275, 308, 319, 330, 341, 396, 407] }).expect(409);
+      assert.equal(all.body.code, "skip-all");
+      await staff.post(`/api/orders/${id}/skip-parts`).send({ parts: [407] }).expect(200);
+      t.commands.online = false;
+
+      const detail = (await user.get(`/api/orders/${id}`).expect(200)).body;
+      assert.deepEqual(
+        detail.timeline.filter((e: { kind: string }) => e.kind === "skip-parts").map((e: { data: { parts: { id: number }[] } }) => e.data.parts.map((p) => p.id)),
+        [[253, 264], [407]],
+      );
+      const log = (await builder.get("/api/audit").query({ targetType: "order", targetId: String(id) }).expect(200)).body as { action: string; result: string }[];
+      assert.deepEqual(log.filter((e) => e.action === "order.skip-parts").map((e) => e.result).sort(), ["denied", "failed", "ok", "ok"]);
+      await builder.post(`/api/orders/${id}/cancel`).send({ reason: "测试" }).expect(200);
+      await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
+    });
   });
 
   describe("visibility and settings", () => {

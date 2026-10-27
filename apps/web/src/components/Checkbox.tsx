@@ -41,7 +41,7 @@ export function Radio({ name, checked, onChange, children }: { name: string; che
 }
 
 /** Compact 22px checkbox used inside list rows (plates). */
-export function RowCheckbox({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string }) {
+export function RowCheckbox({ checked, disabled, onChange, label, danger }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string; danger?: boolean }) {
   return (
     <span className="relative grid size-[22px] flex-none place-items-center">
       <input
@@ -52,10 +52,10 @@ export function RowCheckbox({ checked, disabled, onChange, label }: { checked: b
         onChange={(e) => onChange(e.target.checked)}
         className={cx(
           "m-0 size-[22px] cursor-pointer appearance-none rounded border-0 disabled:cursor-not-allowed disabled:opacity-38",
-          checked ? "bg-primary" : "bg-transparent shadow-[inset_0_0_0_2px_var(--md-outline)]",
+          checked ? (danger ? "bg-error" : "bg-primary") : "bg-transparent shadow-[inset_0_0_0_2px_var(--md-outline)]",
         )}
       />
-      <svg viewBox="0 -960 960 960" className={cx("pointer-events-none absolute size-4 text-on-primary", !checked && "hidden")} aria-hidden="true">
+      <svg viewBox="0 -960 960 960" className={cx("pointer-events-none absolute size-4", danger ? "text-on-error" : "text-on-primary", !checked && "hidden")} aria-hidden="true">
         {CHECK}
       </svg>
     </span>

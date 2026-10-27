@@ -2,7 +2,7 @@ import type { Gcode3mfErrorCode, Gcode3mfInfo, PlateInfo } from "./parse.js";
 
 /* JSON shapes of the panel's parse endpoint (POST /api/gcode3mf/parse). */
 
-export type ParsedPlate = Omit<PlateInfo, "thumbnail"> & {
+export type ParsedPlate = Omit<PlateInfo, "thumbnail" | "partsView"> & {
   /** Plate preview as a data: URL, null when the file has none. */
   thumbnailUrl: string | null;
 };

@@ -10,6 +10,7 @@ import { PhotoPlaceholder } from "../../components/ModelThumb";
 import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock, Thumb } from "../../components/OrderBits";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
+import { SkipPartsSheet } from "../../components/SkipPartsSheet";
 import { useToast } from "../../components/Toast";
 import { WavyProgress } from "../../components/WavyProgress";
 import { LIVE } from "../../lib/api";
@@ -40,6 +41,7 @@ function OrderStatusBlock({ o }: { o: MyOrder }) {
         <StatusBlock tone="ok" icon="print" title={`${o.printer} 打印中`} right={`${o.pct ?? 0}%${o.left ? ` · 剩余 ${o.left}` : ""}`}>
           <WavyProgress pct={o.pct ?? 0} className="mb-2" />
           {o.eta ? `预计 ${o.eta} 完成` : "完成后工作人员会铲件入库。"}
+          {o.parts?.skipped ? ` · 已跳过 ${o.parts.skipped} 个零件` : ""}
         </StatusBlock>
       );
     case "paused":
@@ -90,7 +92,7 @@ function recNodes(o: MyOrder, me: string, photo: string | null | undefined): Rec
   if (st === "queued") return [...N, { t: "排队", sys: true, s: `排队中 · 第 ${o.pos} 位`, tone: "cur", note: o.wait }, ...later("print", "stock", "pick")];
   N.push({ t: "排队", sys: true, s: "已派单", tone: "ok" });
   if (st === "printing" || st === "paused")
-    return [...N, { t: "打印", sys: true, s: st === "paused" ? `等待处理 · ${o.why}` : `${o.printer} 打印中 · ${o.pct}%`, tone: "cur", more: { printer: o.printer } }, ...later("stock", "pick")];
+    return [...N, { t: "打印", sys: true, s: st === "paused" ? `等待处理 · ${o.why}` : `${o.printer} 打印中 · ${o.pct}%`, tone: "cur", note: o.parts?.skipped ? `已跳过 ${o.parts.skipped} 个零件` : undefined, more: { printer: o.printer } }, ...later("stock", "pick")];
   if (st === "failed") {
     N.push({ t: "打印", sys: true, s: `${o.printer} 打印失败`, tone: "bad", note: o.reason, more: shot("失败时现场") });
     if (o.retried) N.push({ t: "重打", sys: true, s: `已派生新订单 #${o.retried}`, tone: "ok" });
@@ -239,7 +241,7 @@ function RestoreSheet({ o, v, rules, open, onClose, onConfirm }: { o: MyOrder; v
 
 /* ---------- page ---------- */
 
-type SheetState = { type: "detail" | "qr" | "cancel" | "retry" | "revise" | "withdraw" | "restore"; id: number } | null;
+type SheetState = { type: "detail" | "qr" | "cancel" | "retry" | "revise" | "withdraw" | "restore" | "skip"; id: number } | null;
 
 /** 版本记录 of the open order: the mock keeps them on the row, real builds read the order detail. */
 function useVersions(o: MyOrder | undefined, open: boolean): Version[] {
@@ -350,8 +352,9 @@ export function MyOrdersPage() {
                     <OrderHead id={x.id} chip={<StatusChip tone={s.tone}>{s.t}</StatusChip>} right={x.at} />
                     <OrderBody thumb={<Thumb fil={x.fil} url={x.thumb} alt={`#${x.id} 预览`} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
                     <OrderStatusBlock o={x} />
-                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || canWithdraw(x) || (LIVE && x.canCancel) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected") && (
+                    {(x.st === "ready" || x.st === "pending" || x.st === "revising" || x.st === "queued" || revisable(x) || canWithdraw(x) || (LIVE && x.canCancel) || (x.st === "failed" && !x.retried && !LIVE) || x.st === "rejected" || x.parts?.allowed) && (
                       <OrderActions>
+                        {x.parts?.allowed && <Button variant="tonal" icon="skip_next" onClick={(e) => (stop(e), open({ type: "skip", id: x.id }))}>跳过零件</Button>}
                         {x.st === "ready" && <Button icon="qr_code_2" onClick={(e) => (stop(e), open({ type: "qr", id: x.id }))}>出示取件码</Button>}
                         {revisable(x) && <Button variant="tonal" icon="upload_file" onClick={(e) => (stop(e), open({ type: "revise", id: x.id }))}>修改文件</Button>}
                         {canWithdraw(x) && <Button variant="outlined" icon="undo" onClick={(e) => (stop(e), open({ type: "withdraw", id: x.id }))}>撤回修改</Button>}
@@ -414,6 +417,8 @@ export function MyOrdersPage() {
           {restoring && (
             <RestoreSheet o={o} v={restoring} rules={rules} open={sheet?.type === "restore"} onClose={close} onConfirm={() => void confirmRestore()} />
           )}
+
+          <SkipPartsSheet orderId={o.id} sub={`${o.file} · ${o.printer ?? ""}`} open={sheet?.type === "skip"} onClose={close} />
 
           <Sheet open={sheet?.type === "qr"} onClose={close} title="取件码" footer={<Button variant="text" onClick={close}>关闭</Button>}>
             <div className="text-center text-note text-on-variant">{o.file} · #{o.id}</div>

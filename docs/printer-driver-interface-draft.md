@@ -282,6 +282,9 @@ interface PrinterDriver {
   pause(commandId: string): Promise<CommandResult>;
   resume(commandId: string): Promise<CommandResult>;
   cancel(commandId: string): Promise<CommandResult>;
+  // 跳过零件：partIds 是 slice_info.config 里 <object identify_id>，也是 G-code 对象标签和 pick_N.png 像素里的 id。
+  // 拓竹：print.command = "skip_objects"，obj_list = partIds；上报里的 s_obj 是已跳过的 id【社区资料，未实测】
+  skipParts?(cmd: { commandId: string; partIds: number[] }): Promise<CommandResult>;
 
   // 延时摄影（见 §10.4）
   listTimelapses?(): Promise<TimelapseFile[]>;            // 列出设备存储里的延时摄影文件
@@ -531,6 +534,7 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 11. `ipcam_timelapse`、`ipcam_get_media_info`、`ipcam_delete_oldest_timelapse` 在 P1 上是否生效；下发打印任务时能否直接带上"开启延时摄影"的参数。
 12. 下发多盘 `.gcode.3mf` 时，如何指定只打其中某一盘（命令里的参数格式）。
 13. 各机型上报里，存储介质是否在位、可写、剩余空间分别由哪些字段表达（X2D：内置存储 + U 盘；P1：SD 卡）；P1 拔卡后下发任务会怎样。
+14. `skip_objects`：`obj_list` 是只带这次要跳的 id 还是要带上全部已跳过的；`s_obj` 什么时候更新；暂停中能不能跳；首层没打完时能不能跳（这是控制命令，实测前要用户同意）。
 
 ---
 
