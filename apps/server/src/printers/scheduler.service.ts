@@ -51,10 +51,19 @@ export class SchedulerService {
     return out;
   }
 
+  /** Every queued order this printer could take now, in queue order: what Staff pick from when they dispatch. */
+  async candidates(printerId: string, db: Db = this.db, rules?: QueueRules): Promise<OrderRow[]> {
+    rules ??= await this.settings.get("queue.rules");
+    const [p] = await db.select().from(printers).where(eq(printers.id, printerId));
+    if (!p) return [];
+    const queued = await db.select().from(orders).where(eq(orders.status, "QUEUED")).orderBy(asc(orders.queueSeq), asc(orders.id));
+    return queued.filter((o) => this.policy.pick(rules, [o], p) === o);
+  }
+
   /**
-   * Staff confirmed the suggestion: assigns the order to the printer and sends the job. `orderId` is
-   * the suggestion they saw; if it no longer is (someone else confirmed, the queue moved), nothing
-   * happens and they get the current one. Returns the order id, or null when the job could not be sent.
+   * Staff dispatch: assigns an order to the printer and sends the job. The suggestion is only the
+   * default; `orderId` may name any queued order the printer can take. Without it the current
+   * suggestion is sent. Returns the order id, or null when the job could not be sent.
    */
   async dispatch(printerId: string, opts: { ctx?: Ctx; orderId?: number; job?: DispatchJobOptions } = {}): Promise<number | null> {
     const ctx = opts.ctx ?? SYSTEM;
@@ -68,15 +77,16 @@ export class SchedulerService {
       await queueLock(tx);
       await tx.select({ id: orders.id }).from(orders).where(eq(orders.status, "QUEUED")).for("update");
       const sug = await this.suggestions(tx, rules);
-      const o = sug.get(p.id);
-      if (!o) throw new ApiError(HttpStatus.CONFLICT, "no-suggestion", "队列里没有这台打印机能打的订单", { printerId });
-      if (opts.orderId != null && o.id !== opts.orderId) {
-        throw new ApiError(HttpStatus.CONFLICT, "suggestion-changed", "建议的订单已经变了，请看一下新的", { printerId, orderId: o.id });
+      let o = sug.get(p.id);
+      if (opts.orderId != null) {
+        o = (await this.candidates(p.id, tx, rules)).find((x) => x.id === opts.orderId);
+        if (!o) throw new ApiError(HttpStatus.CONFLICT, "order-not-dispatchable", "这张单已经不在队列里，或这台打印机打不了", { printerId, orderId: opts.orderId });
       }
+      if (!o) throw new ApiError(HttpStatus.CONFLICT, "no-suggestion", "队列里没有这台打印机能打的订单", { printerId });
       const now = new Date();
       await transition(tx, ctx, o.id, "dispatch", { set: { printerId: p.id, startedAt: now, skippedSince: null }, data: { printer: p.name } });
       /* everything still queued ahead of it has just been passed over (跳单), except what another idle printer is suggested */
-      const others = [...sug.values()].filter((x) => x.id !== o.id).map((x) => x.id);
+      const others = [...sug.entries()].filter(([pid, x]) => pid !== p.id && x.id !== o.id).map(([, x]) => x.id);
       await tx
         .update(orders)
         .set({ skippedSince: now })

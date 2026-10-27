@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import type { DaemonAccessCode, EncryptedAccessCode, OrderView, PrinterView, TodoView } from "@platerelay/shared";
+import type { DaemonAccessCode, DispatchOptionsView, EncryptedAccessCode, OrderView, PrinterView, TodoView } from "@platerelay/shared";
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, SYSTEM, userId } from "../auth/actor.js";
@@ -293,8 +293,17 @@ export class PrintersService {
     return this.get(ctx, id);
   }
 
-  /** Staff confirmed the suggested next order: the job is sent now. */
-  async confirmDispatch(ctx: Ctx, id: string, orderId: number) {
+  /** 派单 picker: every queued order this printer can take, in queue order, and which one is suggested. */
+  async dispatchOptions(ctx: Ctx, id: string): Promise<DispatchOptionsView> {
+    const [p] = await this.db.select({ id: printers.id }).from(printers).where(eq(printers.id, id));
+    if (!p) throw notFound("打印机");
+    const rows = await this.scheduler.candidates(id);
+    const suggested = (await this.scheduler.suggestions()).get(id)?.id ?? null;
+    return { suggestedOrderId: suggested, orders: rows.length ? await this.orders.views(ctx, rows) : [] };
+  }
+
+  /** Staff dispatch: the suggestion or any other order the printer can take; the job is sent now. */
+  async confirmDispatch(ctx: Ctx, id: string, orderId?: number) {
     if (!this.commands.reachable(id)) throw new ApiError(HttpStatus.CONFLICT, "printer-unreachable", "打印机现在连不上");
     const sent = await this.scheduler.dispatch(id, { ctx, orderId });
     if (sent == null) throw new ApiError(HttpStatus.BAD_GATEWAY, "job-not-sent", "任务没发到打印机，订单已回到原位", { printerId: id, orderId });

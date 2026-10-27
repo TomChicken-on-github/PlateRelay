@@ -145,9 +145,10 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
         jobs.push(call("store", staff.post(`/api/orders/${id}/store`).attach("photo", JPEG, "p.jpg").field("slot", "A-1-1").field("bedCleared", "true")).then(() => confirmFreed(p.id)));
       } else if (p.state === "CLEARING_REQUIRED") jobs.push(call("clear-bed", staff.post(`/api/printers/${p.id}/clear-bed`)).then(() => confirmFreed(p.id)));
     }
-    /* Staff confirm the suggestion for the printer idle longest, twice at once: one wins, the other gets a 409 */
+    /* Staff send the current suggestion (no orderId) to the printer idle longest, twice at once: one wins, the other gets a 409.
+       Picking another order on purpose is a skip, so the burst always sends the suggestion. */
     const head = sugg[0];
-    if (head) for (let i = 0; i < 2; i++) go(head.order, (id) => call("confirm-dispatch", staff.post(`/api/printers/${head.printer}/dispatch`).send({ orderId: id })));
+    if (head) for (let i = 0; i < 2; i++) go(head.order, (id) => call("confirm-dispatch", staff.post(`/api/printers/${head.printer}/dispatch`).send({})));
     await Promise.all(jobs);
     await confirmAll();
     return touched;
@@ -162,12 +163,12 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
   /** A bed just cleared: two Staff confirm its suggestion at once, while the rest of the burst runs. */
   async function confirmFreed(printerId: string) {
     const d = (await suggestions()).find((x) => x.printer === printerId);
-    if (d) await Promise.all([0, 1].map(() => call("confirm-dispatch", staff.post(`/api/printers/${printerId}/dispatch`).send({ orderId: d.order }))));
+    if (d) await Promise.all([0, 1].map(() => call("confirm-dispatch", staff.post(`/api/printers/${printerId}/dispatch`).send({}))));
   }
 
   /** Staff confirm every suggestion one by one, as the scheduler used to dispatch on its own. */
   async function confirmAll() {
-    for (const d of await suggestions()) await call("confirm-dispatch", staff.post(`/api/printers/${d.printer}/dispatch`).send({ orderId: d.order }));
+    for (const d of await suggestions()) await call("confirm-dispatch", staff.post(`/api/printers/${d.printer}/dispatch`).send({}));
   }
 
   async function check(round: number, before: number[], touched: Set<number>) {

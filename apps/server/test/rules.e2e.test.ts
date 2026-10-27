@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { DEFAULT_QUEUE_RULES, type OrderDetail, type OrderPreview, type OrderView, type QueueRules, type ResourcesView, type TodoView } from "@platerelay/shared";
+import { DEFAULT_QUEUE_RULES, type DispatchOptionsView, type OrderDetail, type OrderPreview, type OrderView, type QueueRules, type ResourcesView, type TodoView } from "@platerelay/shared";
 import { desc, eq, inArray, ne } from "drizzle-orm";
 import { auditLog, orders, printers, settings } from "../src/db/schema.js";
 import { SchedulerService } from "../src/printers/scheduler.service.js";
@@ -165,27 +165,33 @@ describe("print rules", () => {
       assert.equal(t.commands.sent.filter((c) => c.cmd === "start").length, 0);
     });
 
-    it("sends the job when Staff confirm the suggestion they saw", async () => {
+    it("sends the suggestion by default, or any other order the printer can take", async () => {
       const a = await queued(user);
       const b = await queued(other);
+      const c = await queued(other);
+      await other.post(`/api/orders/${c}/cancel`).send({ reason: "不需要了" }).expect(200);
       await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
       await t.db.update(printers).set({ state: "IDLE" }).where(eq(printers.id, x2d));
-      await user.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(403);
-      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(409)).body.code, "printer-unreachable");
-      assert.equal(await status(a), "QUEUED");
+      await user.get(`/api/printers/${x2d}/dispatch-options`).expect(403);
+      const opts = (await staff.get(`/api/printers/${x2d}/dispatch-options`).expect(200)).body as DispatchOptionsView;
+      assert.equal(opts.suggestedOrderId, a);
+      assert.deepEqual(opts.orders.map((o) => o.id), [a, b]);
+      await user.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(403);
+      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(409)).body.code, "printer-unreachable");
+      assert.equal(await status(b), "QUEUED");
       t.commands.online = true;
-      const stale = await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(409);
-      assert.equal(stale.body.code, "suggestion-changed");
-      assert.equal(stale.body.orderId, a);
+      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: c }).expect(409)).body.code, "order-not-dispatchable");
       const sent = t.commands.sent.length;
-      const v = await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(200);
+      const v = await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(200);
       assert.equal(v.body.state, "PREPARING");
-      assert.equal(await status(a), "PRINTING");
+      assert.equal(await status(b), "PRINTING");
+      assert.equal(await status(a), "QUEUED");
+      assert.ok((await t.db.select().from(orders).where(eq(orders.id, a)))[0].skippedSince, "the suggestion Staff passed over counts as skipped");
       assert.deepEqual(t.commands.sent.slice(sent).map((c) => c.cmd), ["start"]);
       const [log] = await t.db.select().from(auditLog).where(eq(auditLog.action, "order.dispatch")).orderBy(desc(auditLog.at)).limit(1);
-      assert.equal(log.targetId, String(a));
+      assert.equal(log.targetId, String(b));
       assert.equal(log.actorType, "user");
-      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(409)).body.code, "printer-not-ready");
+      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(409)).body.code, "printer-not-ready");
     });
 
     it("suggests different orders to different idle printers", async () => {

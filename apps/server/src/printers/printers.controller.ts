@@ -123,12 +123,19 @@ export class PrintersController {
     return this.printers.clearBed(ctx, id);
   }
 
-  /** 确认派单: send the suggested next order; orderId is the suggestion the confirmer saw. */
+  /** 派单 picker: the orders this printer can take, suggestion marked. */
+  @Get("printers/:id/dispatch-options")
+  @RequirePerm("order:dispatch")
+  dispatchOptions(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string) {
+    return this.printers.dispatchOptions(ctx, id);
+  }
+
+  /** 派单: send the order Staff picked to this printer; without orderId, the current suggestion. */
   @Post("printers/:id/dispatch")
   @HttpCode(200)
   @RequirePerm("order:dispatch")
   dispatch(@ReqCtx() ctx: Ctx, @Param("id", Id) id: string, @Body() body: unknown) {
-    return this.printers.confirmDispatch(ctx, id, parse(z.object({ orderId: z.number().int().positive() }), body).orderId);
+    return this.printers.confirmDispatch(ctx, id, parse(z.object({ orderId: z.number().int().positive().optional() }), body).orderId);
   }
 
   @Get("todo")
