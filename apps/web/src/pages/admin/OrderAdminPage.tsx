@@ -26,7 +26,7 @@ const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", revising: 
 
 const ATTR_IDS = ["machine", "model"] as const;
 
-/** Large preview: the stored plate image, or the placeholder drawing. */
+/** Plate preview: the stored plate image, or the placeholder drawing. */
 function Preview({ o }: { o: AdminOrder }) {
   return o.thumb ? <img src={o.thumb} alt={`#${o.id} 预览`} className="block size-full object-contain" /> : <ModelPreview c1={o.fil[0]?.[0] ?? "var(--md-outline)"} />;
 }
@@ -199,10 +199,15 @@ function RowCells({ o, pos, handle }: { o: AdminOrder; pos?: number; handle?: Re
         #{o.id}
         {pos != null && <small className="ml-1 text-body-s font-normal text-on-variant">第 {pos} 位</small>}
       </b>
-      <div className="min-w-0 max-md:col-span-full">
-        <div className="truncate text-label-l font-medium">{o.file}</div>
-        <div className="text-body-s text-on-variant">
-          {o.model} · {o.nozzle} mm · {o.time} · {o.g} g
+      <div className="flex min-w-0 items-center gap-3 py-2 max-md:col-span-full">
+        <span className="size-11 flex-none overflow-hidden rounded-lg bg-sc-high" aria-hidden="true">
+          <Preview o={o} />
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-label-l font-medium">{o.file}</div>
+          <div className="text-body-s text-on-variant">
+            {o.model} · {o.nozzle} mm · {o.time} · {o.g} g
+          </div>
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-2 max-md:col-start-1">
