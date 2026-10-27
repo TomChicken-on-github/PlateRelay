@@ -148,7 +148,7 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
     /* Staff send the current suggestion (no orderId) to the printer idle longest, twice at once: one wins, the other gets a 409.
        Picking another order on purpose is a skip, so the burst always sends the suggestion. */
     const head = sugg[0];
-    if (head) for (let i = 0; i < 2; i++) go(head.order, (id) => call("confirm-dispatch", staff.post(`/api/printers/${head.printer}/dispatch`).send({})));
+    if (head) for (let i = 0; i < 2; i++) go(head.order, () => call("confirm-dispatch", staff.post(`/api/printers/${head.printer}/dispatch`).send({})));
     await Promise.all(jobs);
     await confirmAll();
     return touched;
