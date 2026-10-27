@@ -207,10 +207,6 @@ export const orders = pgTable(
     status: orderStatus("status").notNull(),
     ownerId: uuid("owner_id").notNull().references(() => users.id),
     fileId: uuid("file_id").notNull().references(() => files.id),
-    /** Plates submitted together (the first upload's file id). Only 修改文件 uses it: the group's file is replaced as a whole. */
-    groupId: uuid("group_id").notNull(),
-    /** The order whose 修改文件 split this plate off; it queues as a new submission. */
-    splitFrom: integer("split_from"),
     plateIndex: integer("plate_index").notNull(),
     plateCount: integer("plate_count").notNull(),
     plateName: text("plate_name").notNull().default(""),
@@ -265,7 +261,6 @@ export const orders = pgTable(
   (t) => [
     index("orders_status_queue").on(t.status, t.queueSeq, t.id),
     index("orders_owner").on(t.ownerId, t.submittedAt),
-    index("orders_group").on(t.groupId),
     uniqueIndex("orders_retry_of").on(t.retryOf),
   ],
 );

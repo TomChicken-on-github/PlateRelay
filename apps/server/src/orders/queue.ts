@@ -16,6 +16,10 @@ const QUEUE_LOCK = 4_701_001;
 /**
  * Serializes everything that reorders the queue or takes from it, until the transaction ends. Row locks
  * alone are not enough: a reader waiting on a row lock may still see the old order of the keys.
+ *
+ * Lock order, for every writer: printer rows (by id), then this lock, then order rows. Dispatch,
+ * revise/restore, group revise, approve and reorder take it; paths that only change one order's status
+ * (withdraw, reject, cancel, printer events) lock printer then order and never need it.
  */
 export async function queueLock(tx: Db) {
   await tx.execute(sql`select pg_advisory_xact_lock(${QUEUE_LOCK})`);

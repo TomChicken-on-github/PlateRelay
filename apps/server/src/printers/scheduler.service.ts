@@ -4,14 +4,13 @@ import { AuditService } from "../audit/audit.service.js";
 import { SYSTEM } from "../auth/actor.js";
 import { DB, type Db } from "../db/db.js";
 import { files, orders, printers } from "../db/schema.js";
-import { inQueue } from "../orders/queue.js";
+import { inQueue, queueLock } from "../orders/queue.js";
 import { transition } from "../orders/transition.js";
 import { QUEUE_POLICY, type QueuePolicy } from "../rules/queue-policy.js";
 import { SettingsService } from "../settings/settings.service.js";
 import { PRINTER_COMMANDS, type PrinterCommands } from "./commands.js";
 import { hasWritableStorage } from "./compat.js";
 import { lockPrinter, movePrinter } from "./printer-state.js";
-import { queueLock } from "../orders/queue.js";
 
 /**
  * Global FIFO queue: an idle printer open to submitters takes the first

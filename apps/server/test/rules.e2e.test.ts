@@ -258,35 +258,6 @@ describe("print rules", () => {
       await builder.get(`/api/orders/${a}/versions/4/file`).expect(200);
     });
 
-    it("replaces a group's file: a split-off plate is a new order at the end, a dropped one is cancelled", async () => {
-      const a = await queued(user);
-      const b = await queued(other);
-      const group = (ag: Agent, id: number, file: Buffer, plan: unknown) => ag.post(`/api/orders/${id}/revise-group`).attach("file", file, "猫耳外壳-拆盘.gcode.3mf").field("plan", JSON.stringify(plan));
-
-      await group(user, a, x2dTwoPlates(), { map: [{ order: b, plate: 1 }], add: [2] }).expect(409);
-      await group(other, a, x2dTwoPlates(), { map: [{ order: a, plate: 1 }], add: [2] }).expect(404);
-      await group(user, a, x2dTwoPlates(), { map: [{ order: a, plate: 1 }], add: [1] }).expect(400);
-      await group(user, a, x2dTwoPlates(), { map: [{ order: a, plate: null }], add: [2] }).expect(400);
-
-      const [ra, split] = (await group(user, a, x2dPlate1Plus(5), { map: [{ order: a, plate: 1 }], add: [2] }).expect(200)).body.orders as OrderView[];
-      assert.deepEqual([ra.id, ra.status, ra.revision!.placesBack], [a, "PENDING_REVIEW", 0]);
-      assert.deepEqual([split.status, split.plate.index, split.groupId], ["PENDING_REVIEW", 2, ra.groupId]);
-      const c = await queued(other);
-      await builder.post(`/api/orders/${a}/approve`).expect(200);
-      await builder.post(`/api/orders/${split.id}/approve`).expect(200);
-      let pos = await positions();
-      assert.deepEqual([pos.get(a), pos.get(b), pos.get(c), pos.get(split.id)], [1, 2, 3, 4], "the split plate queues like a new submission");
-
-      /* drop one plate of the group: that order is cancelled, the other is replaced in place */
-      const res = (await group(user, a, x2dPlate1Plus(5), { map: [{ order: a, plate: null }, { order: split.id, plate: 1 }], add: [] }).expect(200)).body.orders as OrderView[];
-      assert.deepEqual(res.map((o) => [o.id, o.status]), [[split.id, "PENDING_REVIEW"], [a, "CANCELLED"]]);
-      pos = await positions();
-      assert.equal(pos.get(a), undefined);
-      assert.equal(pos.get(split.id), 3, "frozen in its own place");
-      /* a finished or cancelled plate cannot start a group revision */
-      assert.equal((await group(user, a, x2dTwoPlates(), { map: [{ order: split.id, plate: 1 }], add: [] }).expect(409)).body.code, "order-state-conflict");
-    });
-
     it("keeps the stored order right when several revisions freeze and unfreeze in any order", async () => {
       const [a, b, c, d, e] = [await queued(user), await queued(user), await queued(other), await queued(user), await queued(other)];
       const keys = async () => new Map((await t.db.select({ id: orders.id, seq: orders.queueSeq }).from(orders).where(inArray(orders.id, [a, b, c, d, e]))).map((o) => [o.id, o.seq!]));
