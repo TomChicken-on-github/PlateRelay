@@ -90,6 +90,18 @@ export const OWNERS: Record<string, [string, string]> = {
   "PR-0139": ["陈一帆", "超声波传感器支架.gcode.3mf"],
 };
 
+/** An order an idle printer can take, as the 派单 dialog lists it. */
+export type DispatchOption = { orderId: number; file: string; owner: string; n: number; time: string; pos?: number };
+
+/* Prototype: queued orders each idle printer can take, the suggestion first. */
+export const DISPATCH_OPTIONS: Record<string, DispatchOption[]> = {
+  "P1S-05": [
+    { orderId: 1052, file: "云台支架.gcode.3mf", owner: "王可", n: 1, time: "1h 20m", pos: 2 },
+    { orderId: 1053, file: "线材收纳夹.gcode.3mf", owner: "李想", n: 2, time: "35m", pos: 3 },
+    { orderId: 1055, file: "摄像头底座.gcode.3mf", owner: "陈一帆", n: 1, time: "2h 05m", pos: 5 },
+  ],
+};
+
 /* Prototype: what a confirmed 派单 changed, by printer id, laid over PRINTERS. */
 export const dispatched = createStore<Record<string, Partial<Printer>>>({});
 

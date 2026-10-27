@@ -17,7 +17,7 @@ export const AUDIT_ACTIONS: readonly { value: string; label: string }[] = [
   { value: "order.attribute", label: "记录失败归因并创建重打订单" },
   { value: "order.store", label: "铲件入库" },
   { value: "order.redeem", label: "核销取件" },
-  { value: "order.dispatch", label: "自动派单" },
+  { value: "order.dispatch", label: "派单" },
   { value: "order.dispatch.failed", label: "派单发送失败并返回队列" },
   { value: "pickup.issue", label: "签发取件码" },
   { value: "queue.reorder", label: "调整排队顺序" },

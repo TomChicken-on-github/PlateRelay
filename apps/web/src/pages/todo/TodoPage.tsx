@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { Checkbox, Radio } from "../../components/Checkbox";
 import { FilterTabs, StatusChip } from "../../components/Chip";
+import { DispatchSheet } from "../../components/DispatchSheet";
 import { Field, Select } from "../../components/Field";
 import { ModelThumb, ShotThumb } from "../../components/ModelThumb";
 import { Empty, OrderActions, OrderBody, OrderCard, OrderGrid, OrderHead, PlateMeta, StatusBlock } from "../../components/OrderBits";
@@ -98,23 +99,6 @@ function StockSheet({ task, open, onClose, onDone }: { task: Task; open: boolean
         <em className="not-italic text-error"> *</em>
       </Checkbox>
     </Sheet>
-  );
-}
-
-function DispatchSheet({ task, open, busy, onClose, onDone }: { task: Task; open: boolean; busy: boolean; onClose: () => void; onDone: () => void }) {
-  return (
-    <Sheet
-      open={open}
-      onClose={onClose}
-      title={`派单到 ${task.printer}`}
-      sub={`#${task.order} · ${task.file} · 第 ${task.n} 盘 · ${task.time} · ${task.owner}`}
-      footer={
-        <>
-          <Button variant="text" onClick={onClose}>取消</Button>
-          <Button disabled={busy} onClick={onDone}>确认派单</Button>
-        </>
-      }
-    />
   );
 }
 
@@ -306,7 +290,15 @@ export function TodoPage() {
 
       {task && (
         <>
-          <DispatchSheet key={`d${key}`} task={task} busy={busy} open={sheet?.type === "dispatch"} onClose={close} onDone={() => void done(printersApi.dispatch(task.printerId ?? task.printer, task.order), `#${task.order} 已派到 ${task.printer}`)} />
+          <DispatchSheet
+            key={`d${key}`}
+            printerId={task.printerId ?? task.printer}
+            printerName={task.printer}
+            busy={busy}
+            open={sheet?.type === "dispatch"}
+            onClose={close}
+            onConfirm={(o) => void done(printersApi.dispatch(task.printerId ?? task.printer, o), `#${o.orderId} 已派到 ${task.printer}`)}
+          />
           <StockSheet key={`s${key}`} task={task} open={sheet?.type === "stock"} onClose={close} onDone={(slot, photo) => void done(ordersApi.store(task, slot, photo), `#${task.order} 已入库到 ${slot}，${task.printer} 已释放`)} />
           <HmsSheet
             key={`h${key}`}

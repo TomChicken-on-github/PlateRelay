@@ -1,6 +1,6 @@
-import { type DaemonKeyView, type EncryptedAccessCode, encryptAccessCode, type PrinterView } from "@platerelay/shared";
+import { type DaemonKeyView, type DispatchOptionsView, type EncryptedAccessCode, encryptAccessCode, type PrinterView } from "@platerelay/shared";
 import { FLEET_STATUS, type FleetPrinter, type FleetStatus, fleet } from "../mock/fleet";
-import { detailFor, dispatched, type Printer, type PrinterDetail, PRINTERS, starStore } from "../mock/printers";
+import { DISPATCH_OPTIONS, type DispatchOption, detailFor, dispatched, type Printer, type PrinterDetail, PRINTERS, starStore } from "../mock/printers";
 import { tasks } from "../mock/todo";
 import { LIVE, type Res, api } from "./api";
 import { resource } from "./live";
@@ -159,17 +159,31 @@ export const printersApi = {
     return refreshed(await api<null>(`/api/printers/${id}/maintenance`, { method: "POST", json: { on, reason } }));
   },
 
-  /** 确认派单: sends the suggested order to this idle printer. Nothing is dispatched without this. */
-  async dispatch(id: string, orderId: number): Promise<Done> {
+  /** Queued orders this idle printer can take, the suggestion first (`suggested` is its id). */
+  async dispatchOptions(id: string): Promise<Res<{ suggested: number | null; rows: DispatchOption[] }>> {
     if (!LIVE) {
       const p = PRINTERS.find((x) => x.id === id);
-      const s = p?.sug;
-      if (s) dispatched.set((m) => ({ ...m, [id]: { state: "PREPARING", sug: null, order: `#${s.orderId}`, who: s.owner, file: s.file, substage: "传输文件", left: s.time, used: "0m", progress: 0 } }));
+      const rows = DISPATCH_OPTIONS[id] ?? (p?.sug ? [p.sug] : []);
+      return { ok: true, data: { suggested: p?.sug?.orderId ?? null, rows } };
+    }
+    const r = await api<DispatchOptionsView>(`/api/printers/${id}/dispatch-options`);
+    if (!r.ok) return r;
+    const { suggestedOrderId: suggested, orders } = r.data;
+    const rows = orders
+      .map((v): DispatchOption => ({ orderId: v.id, file: v.fileName, owner: v.owner.name, n: v.plate.index, time: fmtDur(v.printSeconds), pos: v.queue?.position }))
+      .sort((a, b) => Number(b.orderId === suggested) - Number(a.orderId === suggested) || (a.pos ?? 0) - (b.pos ?? 0));
+    return { ok: true, data: { suggested, rows } };
+  },
+
+  /** 确认派单: sends the picked order (the suggestion or any other it can take) to this idle printer. Nothing is dispatched without this. */
+  async dispatch(id: string, o: DispatchOption): Promise<Done> {
+    if (!LIVE) {
+      dispatched.set((m) => ({ ...m, [id]: { state: "PREPARING", sug: null, order: `#${o.orderId}`, who: o.owner, file: o.file, substage: "传输文件", left: o.time, used: "0m", progress: 0 } }));
       tasks.set((t) => t.filter((x) => !(x.kind === "dispatch" && x.printer === id)));
       return ok;
     }
-    const r = await api<null>(`/api/printers/${id}/dispatch`, { method: "POST", json: { orderId } });
-    /* a stale suggestion (409 suggestion-changed) also needs the fresh one */
+    const r = await api<null>(`/api/printers/${id}/dispatch`, { method: "POST", json: { orderId: o.orderId } });
+    /* an order taken meanwhile (409 order-not-dispatchable) also needs fresh options */
     await Promise.all([printersLive.refresh(), orders.todo.refresh(), orders.overview.refresh()]);
     return r.ok ? ok : r;
   },
