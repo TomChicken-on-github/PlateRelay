@@ -287,6 +287,29 @@ describe("print rules", () => {
       assert.equal((await group(user, a, x2dTwoPlates(), { map: [{ order: split.id, plate: 1 }], add: [] }).expect(409)).body.code, "order-state-conflict");
     });
 
+    it("keeps the stored order right when several revisions freeze and unfreeze in any order", async () => {
+      const [a, b, c, d, e] = [await queued(user), await queued(user), await queued(other), await queued(user), await queued(other)];
+      const keys = async () => new Map((await t.db.select({ id: orders.id, seq: orders.queueSeq }).from(orders).where(inArray(orders.id, [a, b, c, d, e]))).map((o) => [o.id, o.seq!]));
+      const order = async () => [...(await keys()).entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id);
+
+      await revise(user, b, x2dPlate1Plus(20)).expect(200); // +20 min: one place back once approved
+      await revise(user, d, x2dPlate1Plus(5)).expect(200); // keeps its place
+      await revise(user, a, x2dPlate1Plus(40)).expect(200); // two places back
+      assert.deepEqual(await order(), [a, b, c, d, e], "frozen orders keep their keys");
+      assert.deepEqual([...(await positions()).entries()].sort((x, y) => x[1] - y[1]).map(([id]) => id), [a, b, c, d, e]);
+
+      /* unfreeze in a different order than they froze */
+      await user.post(`/api/orders/${d}/withdraw`).expect(200);
+      await builder.post(`/api/orders/${b}/approve`).expect(200);
+      assert.deepEqual(await order(), [a, c, b, d, e]);
+      await builder.post(`/api/orders/${a}/approve`).expect(200);
+      assert.deepEqual(await order(), [c, b, a, d, e]);
+      const k = await keys();
+      assert.equal(new Set(k.values()).size, 5, "no two orders share a key");
+      const pos = await positions();
+      assert.deepEqual([c, b, a, d, e].map((id) => pos.get(id)), [1, 2, 3, 4, 5]);
+    });
+
     it("lets small changes through without review when 轻微修改自动审核 is on", async () => {
       await setRules((r) => (r.revisions.autoApproveMinor = true));
       const a = await queued(user);
