@@ -469,7 +469,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.withdraw", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending[0].n }, after: { status: "QUEUED", version: back.n } }, tx);
       return row;
     });
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -529,7 +528,6 @@ export class OrdersService {
       return r.row;
     });
     if (recalled) await this.sendRecall(ctx, recalled, cur.id);
-    if (recalled || !d.review) void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -644,7 +642,6 @@ export class OrdersService {
       if (!rev || rev.placesBack === 0) return row;
       return this.moveBack(tx, ctx, id, rev);
     });
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -699,7 +696,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.reject", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "REJECTED" }, reason }, tx);
       return row;
     });
-    if (row.status === "QUEUED") void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -748,10 +744,7 @@ export class OrdersService {
       return row;
     });
     if (stopPrinter) await this.sendStop(ctx, stopPrinter);
-    if (recallPrinter) {
-      await this.sendRecall(ctx, recallPrinter, id);
-      void this.scheduler.kick();
-    }
+    if (recallPrinter) await this.sendRecall(ctx, recallPrinter, id);
     return (await this.views(ctx, [row]))[0];
   }
 
@@ -801,7 +794,6 @@ export class OrdersService {
       await this.audit.record(ctx, { action: "order.attribute", targetType: "order", targetId: id, after: { attribution, retry: retry.id }, reason: note }, tx);
       return { failed, retry };
     });
-    void this.scheduler.kick();
     const [a, b] = await this.views(ctx, [failed, retry]);
     return { failed: a, retry: b };
   }
@@ -853,7 +845,6 @@ export class OrdersService {
       await this.storage.delete(key).catch(() => undefined);
       throw e;
     }
-    void this.scheduler.kick();
     return (await this.views(ctx, [row]))[0];
   }
 
