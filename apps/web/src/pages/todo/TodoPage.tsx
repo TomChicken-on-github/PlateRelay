@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
-import { Checkbox } from "../../components/Checkbox";
+import { Checkbox, Radio } from "../../components/Checkbox";
 import { FilterTabs, StatusChip } from "../../components/Chip";
 import { Field, Select } from "../../components/Field";
 import { ModelThumb, ShotThumb } from "../../components/ModelThumb";
@@ -12,9 +12,11 @@ import { useToast } from "../../components/Toast";
 import { LIVE, type Res } from "../../lib/api";
 import { t } from "../../lib/motion";
 import { ordersApi, useTasks } from "../../lib/ordersApi";
-import { CELLS, ROWS, STOP_WHY, type Task, ZONES } from "../../mock/todo";
+import { CELLS, ERROR_ACTION_LABEL, ROWS, STOP_WHY, type Task, ZONES } from "../../mock/todo";
 
 type TabKey = "all" | Task["kind"];
+type SheetType = "stock" | "stop" | "hms";
+const WAIT_MS = 60e3;
 const KIND = { stock: { t: "铲件入库", tone: "ok" }, err: { t: "报错处理", tone: "err" }, clear: { t: "清理热床", tone: "neutral" }, skip: { t: "跳单提醒", tone: "warn" } } as const;
 
 const SLOT_SELECT = "w-full box-border rounded-lg border-0 bg-transparent py-3 pr-1 pl-3 text-[16px] leading-6 text-on-surface outline-0 shadow-[inset_0_0_0_1px_var(--md-outline)] focus:shadow-[inset_0_0_0_2px_var(--md-primary)] disabled:opacity-50";
@@ -98,6 +100,43 @@ function StockSheet({ task, open, onClose, onDone }: { task: Task; open: boolean
   );
 }
 
+/** The error's own options, in the printer's order; unknown ones are left out because the server would refuse them. */
+const errorActions = (task: Task) => {
+  const a = (task.actions?.length ? task.actions : ["RESUME"]).filter((x) => x in ERROR_ACTION_LABEL);
+  return a.includes("STOP") ? a : [...a, "STOP"];
+};
+
+function HmsSheet({ task, open, busy, onClose, onPick }: { task: Task; open: boolean; busy: boolean; onClose: () => void; onPick: (action: string) => void }) {
+  const [pick, setPick] = useState("");
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={`${task.printer} · 去处理`}
+      sub={
+        <>
+          {task.err}
+          {task.hms && <span className="block font-num text-body-s">HMS {task.hms}</span>}
+        </>
+      }
+      footer={
+        <>
+          <Button variant="text" onClick={onClose}>取消</Button>
+          <Button disabled={!pick || busy} onClick={() => onPick(pick)}>确定</Button>
+        </>
+      }
+    >
+      <div role="radiogroup" aria-label="处理方式" className="flex flex-col">
+        {errorActions(task).map((a) => (
+          <Radio key={a} name="hms" checked={pick === a} onChange={() => setPick(a)}>
+            {ERROR_ACTION_LABEL[a]}
+          </Radio>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
 function StopSheet({ task, open, onClose, onDone }: { task: Task; open: boolean; onClose: () => void; onDone: (why: string) => void }) {
   const [why, setWhy] = useState("");
   return (
@@ -121,14 +160,38 @@ function StopSheet({ task, open, onClose, onDone }: { task: Task; open: boolean;
 }
 
 export function TodoPage() {
-  const { rows: list0, loading, error } = useTasks();
+  /* errors waiting for the printer to report it recovered, by task id, with when the action was sent */
+  const [waiting, setWaiting] = useState<Record<string, number>>({});
+  const [poll, setPoll] = useState<number | undefined>(undefined);
+  const { rows: list0, loading, error } = useTasks(poll);
   const toast = useToast();
   const [tab, setTab] = useState<TabKey>("all");
-  const [sheet, setSheet] = useState<{ type: "stock" | "stop"; id: string } | null>(null);
-  const [last, setLast] = useState<{ type: "stock" | "stop"; id: string }>({ type: "stock", id: "" });
+  const [sheet, setSheet] = useState<{ type: SheetType; id: string } | null>(null);
+  const [last, setLast] = useState<{ type: SheetType; id: string }>({ type: "stock", id: "" });
   const [key, setKey] = useState(0);
 
-  const open = (s: { type: "stock" | "stop"; id: string }) => {
+  /* an error leaves the list when the printer recovers, whether from here or from its own screen */
+  const stopped = useRef(new Set<string>());
+  const prevErr = useRef<Task[]>([]);
+  useEffect(() => {
+    const errs = list0.filter((x) => x.kind === "err");
+    const gone = prevErr.current.filter((p) => !errs.some((x) => x.id === p.id) && !stopped.current.delete(p.id));
+    prevErr.current = errs;
+    if (gone.length) {
+      toast(gone.map((x) => `${x.printer} 已恢复，#${x.order} 继续打印`).join("；"));
+      setWaiting((w) => Object.fromEntries(Object.entries(w).filter(([id]) => !gone.some((x) => x.id === id))));
+    }
+    setPoll(Object.keys(waiting).length ? 3e3 : errs.length ? 10e3 : undefined);
+  }, [list0, waiting, toast]);
+  /* a printer that never reports back gets its button back */
+  useEffect(() => {
+    const ids = Object.keys(waiting);
+    if (!ids.length) return;
+    const tm = window.setTimeout(() => setWaiting((w) => Object.fromEntries(Object.entries(w).filter(([, at]) => Date.now() - at < WAIT_MS))), WAIT_MS);
+    return () => window.clearTimeout(tm);
+  }, [waiting]);
+
+  const open = (s: { type: SheetType; id: string }) => {
     setSheet(s);
     setLast(s);
     setKey((k) => k + 1);
@@ -195,10 +258,10 @@ export function TodoPage() {
                     ) : x.kind === "clear" ? (
                       <Button icon="check" disabled={busy} onClick={() => void done(ordersApi.clearBed(x), `${x.printer} 已清台，可以接下一单`)}>已清理热床</Button>
                     ) : (
-                      <>
-                        <Button variant="outlined" icon="stop" iconFill onClick={() => open({ type: "stop", id: x.id })}>停止打印</Button>
-                        <Button icon="play_arrow" iconFill disabled={busy} onClick={() => void done(ordersApi.resume(x), `${x.printer} 已继续打印 #${x.order}`)}>已处理，继续</Button>
-                      </>
+                      <Button icon={x.id in waiting ? undefined : "build"} disabled={x.id in waiting} onClick={() => open({ type: "hms", id: x.id })}>
+                        {x.id in waiting && <span className="size-[18px] flex-none animate-spin rounded-full border-2 border-solid border-current border-r-transparent motion-reduce:animate-none" />}
+                        去处理
+                      </Button>
                     )}
                   </OrderActions>}
                 </OrderCard>
@@ -219,16 +282,33 @@ export function TodoPage() {
       {task && (
         <>
           <StockSheet key={`s${key}`} task={task} open={sheet?.type === "stock"} onClose={close} onDone={(slot, photo) => void done(ordersApi.store(task, slot, photo), `#${task.order} 已入库到 ${slot}，${task.printer} 已释放`)} />
+          <HmsSheet
+            key={`h${key}`}
+            task={task}
+            open={sheet?.type === "hms"}
+            busy={busy}
+            onClose={close}
+            onPick={async (a) => {
+              if (a === "STOP") return open({ type: "stop", id: task.id });
+              setBusy(true);
+              const r = await ordersApi.resolve(task, a);
+              setBusy(false);
+              if (!r.ok) return toast(r.error.message || "操作失败，请重试");
+              setSheet(null);
+              setWaiting((w) => ({ ...w, [task.id]: Date.now() }));
+            }}
+          />
           <StopSheet
             key={`p${key}`}
             task={task}
             open={sheet?.type === "stop"}
             onClose={close}
-            onDone={(why) =>
+            onDone={(why) => (
+              stopped.current.add(task.id),
               void done(ordersApi.stop(task, why), (d) =>
                 d.commandSent ? `#${task.order} 已停止，记为打印失败` : `#${task.order} 已记为打印失败；停止命令没发到 ${task.printer}，请在打印机屏幕上停止`,
               )
-            }
+            )}
           />
         </>
       )}
