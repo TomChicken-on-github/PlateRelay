@@ -12,12 +12,13 @@ import { useToast } from "../../components/Toast";
 import { LIVE, type Res } from "../../lib/api";
 import { t } from "../../lib/motion";
 import { ordersApi, useTasks } from "../../lib/ordersApi";
+import { printersApi } from "../../lib/printersApi";
 import { CELLS, ERROR_ACTION_LABEL, ROWS, STOP_WHY, type Task, ZONES } from "../../mock/todo";
 
 type TabKey = "all" | Task["kind"];
-type SheetType = "stock" | "stop" | "hms";
+type SheetType = "dispatch" | "stock" | "stop" | "hms";
 const WAIT_MS = 60e3;
-const KIND = { stock: { t: "铲件入库", tone: "ok" }, err: { t: "报错处理", tone: "err" }, clear: { t: "清理热床", tone: "neutral" }, skip: { t: "跳单提醒", tone: "warn" } } as const;
+const KIND = { dispatch: { t: "确认派单", tone: "ok" }, stock: { t: "铲件入库", tone: "ok" }, err: { t: "报错处理", tone: "err" }, clear: { t: "清理热床", tone: "neutral" }, skip: { t: "跳单提醒", tone: "warn" } } as const;
 
 const SLOT_SELECT = "w-full box-border rounded-lg border-0 bg-transparent py-3 pr-1 pl-3 text-[16px] leading-6 text-on-surface outline-0 shadow-[inset_0_0_0_1px_var(--md-outline)] focus:shadow-[inset_0_0_0_2px_var(--md-primary)] disabled:opacity-50";
 
@@ -97,6 +98,23 @@ function StockSheet({ task, open, onClose, onDone }: { task: Task; open: boolean
         <em className="not-italic text-error"> *</em>
       </Checkbox>
     </Sheet>
+  );
+}
+
+function DispatchSheet({ task, open, busy, onClose, onDone }: { task: Task; open: boolean; busy: boolean; onClose: () => void; onDone: () => void }) {
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={`派单到 ${task.printer}`}
+      sub={`#${task.order} · ${task.file} · 第 ${task.n} 盘 · ${task.time} · ${task.owner}`}
+      footer={
+        <>
+          <Button variant="text" onClick={onClose}>取消</Button>
+          <Button disabled={busy} onClick={onDone}>确认派单</Button>
+        </>
+      }
+    />
   );
 }
 
@@ -221,6 +239,7 @@ export function TodoPage() {
         items={(
           [
             ["all", "全部"],
+            ["dispatch", "确认派单"],
             ["stock", "铲件入库"],
             ["err", "报错处理"],
             ["skip", "跳单提醒"],
@@ -235,7 +254,11 @@ export function TodoPage() {
                 <OrderCard interactive={false} className="flex-1">
                   <OrderHead id={x.order} chip={<StatusChip tone={KIND[x.kind].tone}>{KIND[x.kind].t}</StatusChip>} right={x.printer} />
                   <OrderBody thumb={x.thumb ? <img src={x.thumb} alt={`#${x.order} 预览`} className="block size-full object-contain" /> : <ModelThumb c1={x.fil[0]?.[0] ?? "var(--md-outline)"} slot={false} />} name={x.file} meta={<PlateMeta parts={[`第 ${x.n} 盘 · ${x.model} · ${x.nozzle} mm`, `${x.time} · ${x.g} g`]} fil={x.fil} />} />
-                  {x.kind === "stock" ? (
+                  {x.kind === "dispatch" ? (
+                    <StatusBlock icon="print" title={`${x.printer} 空闲`} right={`已空闲 ${x.since}`}>
+                      {x.pos ? `队列第 ${x.pos} 位 · ` : ""}{x.owner}
+                    </StatusBlock>
+                  ) : x.kind === "stock" ? (
                     <StatusBlock icon="inventory_2" title="打印完成，等待铲件入库" right={`已等 ${x.since}`}>
                       {x.printer} 在入库前不会释放，下一单会等它。取件人：{x.owner}
                     </StatusBlock>
@@ -253,7 +276,9 @@ export function TodoPage() {
                     </StatusBlock>
                   )}
                   {x.kind !== "skip" && <OrderActions>
-                    {x.kind === "stock" ? (
+                    {x.kind === "dispatch" ? (
+                      <Button icon="play_arrow" iconFill disabled={busy} onClick={() => open({ type: "dispatch", id: x.id })}>确认派单</Button>
+                    ) : x.kind === "stock" ? (
                       <Button icon="inventory_2" onClick={() => open({ type: "stock", id: x.id })}>铲件入库</Button>
                     ) : x.kind === "clear" ? (
                       <Button icon="check" disabled={busy} onClick={() => void done(ordersApi.clearBed(x), `${x.printer} 已清台，可以接下一单`)}>已清理热床</Button>
@@ -281,6 +306,7 @@ export function TodoPage() {
 
       {task && (
         <>
+          <DispatchSheet key={`d${key}`} task={task} busy={busy} open={sheet?.type === "dispatch"} onClose={close} onDone={() => void done(printersApi.dispatch(task.printerId ?? task.printer, task.order), `#${task.order} 已派到 ${task.printer}`)} />
           <StockSheet key={`s${key}`} task={task} open={sheet?.type === "stock"} onClose={close} onDone={(slot, photo) => void done(ordersApi.store(task, slot, photo), `#${task.order} 已入库到 ${slot}，${task.printer} 已释放`)} />
           <HmsSheet
             key={`h${key}`}

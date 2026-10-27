@@ -261,6 +261,7 @@ function toTasks(t: TodoView): Task[] {
     thumb: o ? thumb(o) : null,
   });
   return [
+    ...(t.dispatch ?? []).map((x): Task => ({ id: `d${x.printer.id}`, kind: "dispatch", since: fmtSince(x.since), pos: x.order.queue?.position, ...base(x.order, x.printer) })),
     ...t.store.map((x): Task => ({ id: `s${x.order.id}`, kind: "stock", since: fmtSince(x.since), ...base(x.order, x.printer) })),
     ...t.clear.map((x): Task => ({ id: `c${x.printer.id}`, kind: "clear", since: fmtSince(x.since), ...base(x.order, x.printer) })),
     ...t.errors.map(

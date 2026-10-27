@@ -1,9 +1,10 @@
 import { type DaemonKeyView, type EncryptedAccessCode, encryptAccessCode, type PrinterView } from "@platerelay/shared";
 import { FLEET_STATUS, type FleetPrinter, type FleetStatus, fleet } from "../mock/fleet";
-import { detailFor, type Printer, type PrinterDetail, PRINTERS, starStore } from "../mock/printers";
+import { detailFor, dispatched, type Printer, type PrinterDetail, PRINTERS, starStore } from "../mock/printers";
+import { tasks } from "../mock/todo";
 import { LIVE, type Res, api } from "./api";
 import { resource } from "./live";
-import { fmtAt, live as orders, shortModel } from "./ordersApi";
+import { fmtAt, fmtDur, live as orders, shortModel } from "./ordersApi";
 
 /*
  * Printers for 概况, the device page and 打印机管理. The panel only knows what the printer's daemon
@@ -40,6 +41,7 @@ export function toPrinter(v: PrinterView): Printer {
     error: v.state === "ERROR_PAUSED" ? { code: v.error?.vendorCode ?? "", module: v.error?.module ?? "", msg: v.error?.message ?? (v.error ? v.error.vendorCode : "打印机报错，等待工作人员处理"), at: fmtAt(v.error?.raisedAt) } : undefined,
     serial: v.serial ?? undefined,
     ip: v.ip ?? undefined,
+    sug: v.suggestion ? { orderId: v.suggestion.id, file: v.suggestion.fileName, owner: v.suggestion.owner.name, n: v.suggestion.plate.index, time: fmtDur(v.suggestion.printSeconds) } : null,
   };
 }
 
@@ -79,7 +81,8 @@ type Rows<T> = { rows: T[]; loading: boolean; error: string | null };
 /* Printer views are not audited and states move on their own, so the printer pages poll. */
 export function usePrinters(): Rows<Printer> {
   const stars = starStore.use();
-  if (!LIVE) return { rows: PRINTERS.map((p) => ({ ...p, star: !!stars[p.id] })), loading: false, error: null };
+  const sent = dispatched.use();
+  if (!LIVE) return { rows: PRINTERS.map((p) => ({ ...p, ...sent[p.id], star: !!stars[p.id] })), loading: false, error: null };
   const s = printersLive.use(15e3);
   return { rows: (s.data ?? []).map(toPrinter), loading: s.loading && !s.data, error: s.error };
 }
@@ -154,6 +157,21 @@ export const printersApi = {
   async maintenance(id: string, on: boolean, reason?: string): Promise<Done> {
     if (!LIVE) return fleet.set((s) => s.map((x) => (x.id === id ? { ...x, st: on ? "maint" : "idle", job: on ? (reason ?? "") : "—", why: reason } : x))), ok;
     return refreshed(await api<null>(`/api/printers/${id}/maintenance`, { method: "POST", json: { on, reason } }));
+  },
+
+  /** 确认派单: sends the suggested order to this idle printer. Nothing is dispatched without this. */
+  async dispatch(id: string, orderId: number): Promise<Done> {
+    if (!LIVE) {
+      const p = PRINTERS.find((x) => x.id === id);
+      const s = p?.sug;
+      if (s) dispatched.set((m) => ({ ...m, [id]: { state: "PREPARING", sug: null, order: `#${s.orderId}`, who: s.owner, file: s.file, substage: "传输文件", left: s.time, used: "0m", progress: 0 } }));
+      tasks.set((t) => t.filter((x) => !(x.kind === "dispatch" && x.printer === id)));
+      return ok;
+    }
+    const r = await api<null>(`/api/printers/${id}/dispatch`, { method: "POST", json: { orderId } });
+    /* a stale suggestion (409 suggestion-changed) also needs the fresh one */
+    await Promise.all([printersLive.refresh(), orders.todo.refresh(), orders.overview.refresh()]);
+    return r.ok ? ok : r;
   },
 
   /** Stops the print on the printer's current order; the order fails with the reason. */

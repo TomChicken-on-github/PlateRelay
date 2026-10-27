@@ -66,12 +66,14 @@ function versionsOf(o: AdminOrder): Version[] {
 function RejectSheet({ order, open, onClose, onDone }: { order?: AdminOrder; open: boolean; onClose: () => void; onDone: () => void }) {
   const [why, setWhy] = useState("");
   const toast = useToast();
+  /* a rejected revision falls back to the version before it and keeps its place */
+  const rev = order?.rev;
   return (
     <Sheet
       open={open && !!order}
       onClose={onClose}
-      title={`驳回 #${order?.id}`}
-      sub="驳回原因会发给选手，让对方改完重新提交。"
+      title={rev ? `驳回第 ${rev.n + 1} 版 #${order?.id}` : `驳回 #${order?.id}`}
+      sub={rev ? `订单退回第 ${rev.n} 版，${rev.pos ? `保留第 ${rev.pos} 位` : ""}继续排队。驳回原因会发给选手。` : "驳回原因会发给选手，让对方改完重新提交。"}
       footer={
         <>
           <Button variant="text" onClick={onClose}>返回</Button>
@@ -82,7 +84,7 @@ function RejectSheet({ order, open, onClose, onDone }: { order?: AdminOrder; ope
               if (!order) return;
               const r = await ordersApi.reject(order.id, why.trim());
               if (!r.ok) return toast(r.error.message || "驳回失败，请重试");
-              toast(`#${order.id} 已驳回，已通知选手`);
+              toast(rev ? `#${order.id} 已退回第 ${rev.n} 版，继续排队` : `#${order.id} 已驳回，已通知选手`);
               onDone();
             }}
           >

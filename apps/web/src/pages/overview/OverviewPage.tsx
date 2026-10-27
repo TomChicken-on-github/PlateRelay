@@ -1,12 +1,15 @@
 import { LayoutGroup } from "motion/react";
 import { useLayoutEffect, useRef, useState } from "react";
+import { Button } from "../../components/Button";
 import { SelectChip } from "../../components/Chip";
 import { FigmaIcon, type FigmaIconName } from "../../components/icons/FigmaIcon";
 import { Page, PageHeader } from "../../components/Page";
+import { Sheet } from "../../components/Sheet";
+import { useToast } from "../../components/Toast";
 import { cx } from "../../lib/cx";
 import { useCounts } from "../../lib/ordersApi";
-import { usePrinters } from "../../lib/printersApi";
-import type { PrinterState } from "../../mock/printers";
+import { printersApi, usePrinters } from "../../lib/printersApi";
+import type { Printer, PrinterState } from "../../mock/printers";
 import { PrinterCard } from "./PrinterCard";
 
 /* Masonry like the Figma board: round-robin into N columns. Cards stay between CARD_MIN and CARD_MAX;
@@ -56,6 +59,18 @@ export function OverviewPage() {
   const { rows: PRINTERS } = usePrinters();
   const { stats } = useCounts();
   const { ref, cols, cardW, maxW } = useMasonry();
+  const toast = useToast();
+  /* 确认派单: nothing is sent until Staff confirm the suggestion */
+  const [dlg, setDlg] = useState<Printer | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const dispatch = async (p: Printer) => {
+    const s = p.sug!;
+    setDlg(null);
+    setBusy(p.id);
+    const r = await printersApi.dispatch(p.id, s.orderId);
+    setBusy(null);
+    toast(r.ok ? `#${s.orderId} 已派到 ${p.name ?? p.id}` : r.error.message || "派单失败，请重试");
+  };
 
   const n = (s: PrinterState) => PRINTERS.filter((p) => p.state === s).length;
   const starred = PRINTERS.filter((p) => p.star);
@@ -113,7 +128,7 @@ export function OverviewPage() {
               {columns.map((col, i) => (
                 <div key={i} className="flex min-w-0 max-w-[540px] flex-1 flex-col gap-4">
                   {col.map((p) => (
-                    <PrinterCard key={p.id} p={p} zoom={zoom} />
+                    <PrinterCard key={p.id} p={p} zoom={zoom} busy={busy === p.id} onDispatch={setDlg} />
                   ))}
                 </div>
               ))}
@@ -121,6 +136,20 @@ export function OverviewPage() {
           </LayoutGroup>
         </section>
       </Page>
+      <Sheet
+        open={!!dlg}
+        onClose={() => setDlg(null)}
+        icon={<FigmaIcon name="queue" className="size-6" />}
+        titleSize="lg"
+        title={`派单到 ${dlg?.name ?? dlg?.id ?? ""}`}
+        sub={dlg?.sug && `#${dlg.sug.orderId} · ${dlg.sug.file} · 第 ${dlg.sug.n} 盘 · ${dlg.sug.time} · ${dlg.sug.owner}`}
+        footer={
+          <>
+            <Button variant="text" onClick={() => setDlg(null)}>取消</Button>
+            <Button variant="text" onClick={() => dlg && void dispatch(dlg)}>确认派单</Button>
+          </>
+        }
+      />
     </div>
   );
 }
