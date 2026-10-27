@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import type { QueueRules } from "@platerelay/shared";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, SYSTEM } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
@@ -67,18 +67,20 @@ export class SchedulerService {
       /* wait for any queue move or other confirmation in progress, then read the queue as it is after it */
       await queueLock(tx);
       await tx.select({ id: orders.id }).from(orders).where(eq(orders.status, "QUEUED")).for("update");
-      const o = (await this.suggestions(tx, rules)).get(p.id);
+      const sug = await this.suggestions(tx, rules);
+      const o = sug.get(p.id);
       if (!o) throw new ApiError(HttpStatus.CONFLICT, "no-suggestion", "队列里没有这台打印机能打的订单", { printerId });
       if (opts.orderId != null && o.id !== opts.orderId) {
         throw new ApiError(HttpStatus.CONFLICT, "suggestion-changed", "建议的订单已经变了，请看一下新的", { printerId, orderId: o.id });
       }
       const now = new Date();
       await transition(tx, ctx, o.id, "dispatch", { set: { printerId: p.id, startedAt: now, skippedSince: null }, data: { printer: p.name } });
-      /* everything still queued ahead of it has just been passed over (跳单) */
+      /* everything still queued ahead of it has just been passed over (跳单), except what another idle printer is suggested */
+      const others = [...sug.values()].filter((x) => x.id !== o.id).map((x) => x.id);
       await tx
         .update(orders)
         .set({ skippedSince: now })
-        .where(and(eq(orders.status, "QUEUED"), isNull(orders.skippedSince), sql`(${orders.queueSeq}, ${orders.id}) < (${o.queueSeq}, ${o.id})`));
+        .where(and(eq(orders.status, "QUEUED"), isNull(orders.skippedSince), sql`(${orders.queueSeq}, ${orders.id}) < (${o.queueSeq}, ${o.id})`, others.length ? notInArray(orders.id, others) : undefined));
       await movePrinter(tx, p, "dispatch", { currentOrderId: o.id, error: null });
       await this.audit.record(ctx, { action: "order.dispatch", targetType: "order", targetId: o.id, after: { printerId: p.id } }, tx);
       const [f] = await tx.select({ key: files.key, sha256: files.sha256 }).from(files).where(eq(files.id, o.fileId));

@@ -198,6 +198,9 @@ describe("print rules", () => {
       await t.db.update(printers).set({ state: "IDLE", stateSince: new Date() }).where(eq(printers.id, x2d));
       const items = (await todo()).dispatch;
       assert.deepEqual(items.map((d) => [d.printer.id, d.order.id]), [[x2d2, a], [x2d, b]], "the printer idle longest takes the head");
+      t.commands.online = true;
+      await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(200);
+      assert.equal((await t.db.select().from(orders).where(eq(orders.id, a)))[0].skippedSince, null, "the head is waiting for X2D-02's confirmation, not passed over");
       await t.db.update(printers).set({ openToContestants: false }).where(eq(printers.id, x2d2));
     });
   });

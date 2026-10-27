@@ -278,13 +278,13 @@ export class OrdersService {
     const fleet = await this.openFleet();
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE"));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
-    /* same items as GET /todo: plates to store, beds to clear with nothing to store, errors, passed-over orders */
+    /* same items as GET /todo: suggestions to confirm, plates to store, beds to clear with nothing to store, errors, passed-over orders */
     const todo = awaiting.length + fleet.filter((p) => p.state === "ERROR_PAUSED" || (p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))).length;
     const rules = await this.settings.get("queue.rules");
     const now = new Date();
     const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)))).filter((o) => this.policy.remindSkipped(rules, o, now)).length;
     const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
-    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped };
+    return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped + (await this.scheduler.suggestions()).size };
   }
 
   /**
