@@ -27,6 +27,8 @@ export const PERMISSIONS = [
   /** 铲件入库 and confirming a bed is clear. */
   "order:store",
   "order:redeem",
+  /** Confirm the suggested next order for an idle printer, which sends the job (no automatic dispatch). */
+  "order:dispatch",
   /** See printer error details and resolve them (continue, ignore…). */
   "printer:operate",
   /** Stop a print; the stopped order fails with the chosen reason. */
@@ -58,7 +60,7 @@ const USER: Permission[] = [
   "queue:wait:view",
 ];
 
-const STAFF: Permission[] = [...USER, "order:store", "order:redeem", "printer:operate", "printer:stop"];
+const STAFF: Permission[] = [...USER, "order:store", "order:redeem", "order:dispatch", "printer:operate", "printer:stop"];
 
 export const PRESET_ROLES: Record<RoleId, { name: string; permissions: readonly Permission[] }> = {
   user: { name: "User", permissions: USER },

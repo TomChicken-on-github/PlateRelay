@@ -8,7 +8,7 @@ import { modulusBytes } from "../daemons/daemons.service.js";
 import { DB, type Db } from "../db/db.js";
 import { daemons, files, orders, type PrinterError, printers } from "../db/schema.js";
 import { OrdersService } from "../orders/orders.service.js";
-import { orderEvent, transition } from "../orders/transition.js";
+import { type OrderRow, orderEvent, transition } from "../orders/transition.js";
 import { loadPeople } from "../orders/views.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "./commands.js";
 import { lockPrinter, movePrinter, pausedMs, type PrinterRow } from "./printer-state.js";
@@ -58,6 +58,10 @@ export class PrintersService {
     const manage = can(ctx, "printer:manage");
     const operate = can(ctx, "printer:operate");
     const daemonIds = [...new Set(rows.map((p) => p.daemonId).filter((x): x is string => !!x))];
+    /* 建议下一单, for the people who confirm it */
+    const sug = can(ctx, "order:dispatch") && rows.some((p) => p.state === "IDLE") ? await this.scheduler.suggestions() : new Map<string, OrderRow>();
+    const mine = rows.map((p) => sug.get(p.id)).filter((o): o is OrderRow => !!o);
+    const sugViews = new Map(mine.length ? (await this.orders.views(ctx, mine)).map((v) => [v.id, v]) : []);
     const keyOf = new Map(manage && daemonIds.length ? (await this.db.select({ id: daemons.id, keyId: daemons.keyId }).from(daemons).where(inArray(daemons.id, daemonIds))).map((d) => [d.id, d.keyId]) : []);
     return rows.map((p) => {
       const j = p.currentOrderId != null ? jobMap.get(p.currentOrderId) : undefined;
@@ -88,6 +92,7 @@ export class PrintersService {
         trays: p.trays,
         lastSeenAt: p.lastSeenAt?.toISOString() ?? null,
         job: j ? { orderId: j.id, fileName: j.fileName, plate: { index: j.plateIndex, count: j.plateCount }, owner: people.owner(ctx, j.ownerId), status: j.status } : null,
+        suggestion: sugViews.get(sug.get(p.id)?.id ?? -1) ?? null,
       };
     });
   }
@@ -197,7 +202,6 @@ export class PrintersService {
       await this.audit.record(ctx, { action: on ? "printer.maintenance.on" : "printer.maintenance.off", targetType: "printer", targetId: id, before: { state: cur.state }, after: { state: next.state }, reason }, tx);
       return next;
     });
-    if (!on) void this.scheduler.kick();
     return (await this.views(ctx, [p]))[0];
   }
 
@@ -219,7 +223,6 @@ export class PrintersService {
       await this.audit.record(ctx, { action: "printer.open", targetType: "printer", targetId: id, before: { open: cur.openToContestants }, after: { open } }, tx);
       return next;
     });
-    if (open) void this.scheduler.kick();
     return (await this.views(ctx, [p]))[0];
   }
 
@@ -287,11 +290,18 @@ export class PrintersService {
       await movePrinter(tx, p, "cleared", { currentOrderId: null });
       await this.audit.record(ctx, { action: "printer.clear-bed", targetType: "printer", targetId: id, before: { orderId: p.currentOrderId } }, tx);
     });
-    void this.scheduler.kick();
     return this.get(ctx, id);
   }
 
-  /** 待办: plates to store, beds to clear, errors to handle, orders passed over too long (跳单提醒). */
+  /** Staff confirmed the suggested next order: the job is sent now. */
+  async confirmDispatch(ctx: Ctx, id: string, orderId: number) {
+    if (!this.commands.reachable(id)) throw new ApiError(HttpStatus.CONFLICT, "printer-unreachable", "打印机现在连不上");
+    const sent = await this.scheduler.dispatch(id, { ctx, orderId });
+    if (sent == null) throw new ApiError(HttpStatus.BAD_GATEWAY, "job-not-sent", "任务没发到打印机，订单已回到原位", { printerId: id, orderId });
+    return this.get(ctx, id);
+  }
+
+  /** 待办: suggested jobs to confirm, plates to store, beds to clear, errors to handle, orders passed over too long (跳单提醒). */
   async todo(ctx: Ctx): Promise<TodoView> {
     const rules = await this.settings.get("queue.rules");
     const now = new Date();
@@ -299,6 +309,8 @@ export class PrintersService {
       this.policy.remindSkipped(rules, o, now),
     );
     const busy = await this.db.select().from(printers).where(inArray(printers.state, ["CLEARING_REQUIRED", "ERROR_PAUSED"])).orderBy(asc(printers.stateSince));
+    const idle = can(ctx, "order:dispatch") ? await this.db.select().from(printers).where(eq(printers.state, "IDLE")).orderBy(asc(printers.stateSince), asc(printers.name)) : [];
+    const ready = (await this.views(ctx, idle)).filter((p) => p.suggestion);
     const awaiting = await this.db.select().from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE")).orderBy(asc(orders.printedAt));
     const onBeds = busy.map((p) => p.currentOrderId).filter((x): x is number => x != null);
     const bedOrders = onBeds.length ? await this.db.select().from(orders).where(inArray(orders.id, onBeds)) : [];
@@ -306,6 +318,7 @@ export class PrintersService {
     const pViews = new Map((await this.views(ctx, busy)).map((p) => [p.id, p]));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
     return {
+      dispatch: ready.map((p) => ({ printer: p, order: p.suggestion!, since: p.stateSince })),
       store: awaiting.map((o) => ({ order: views.get(o.id)!, printer: o.printerId ? (pViews.get(o.printerId) ?? null) : null, since: o.printedAt?.toISOString() ?? null })),
       clear: busy
         .filter((p) => p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))

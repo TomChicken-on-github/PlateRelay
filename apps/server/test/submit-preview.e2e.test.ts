@@ -58,7 +58,7 @@ describe("submit page API", () => {
     const [a, b] = (await submit(other).expect(201)).body.orders;
     await builder.post(`/api/orders/${a.id}/approve`).expect(200);
     const stats = (await user.get("/api/overview").expect(200)).body as OverviewStats;
-    assert.deepEqual(stats, { pendingReview: 2, queued: 1, waitingCompatible: 0, todo: 0 });
+    assert.deepEqual(stats, { pendingReview: 2, queued: 1, waitingCompatible: 0, todo: 1 }, "the idle X2D has a suggestion to confirm");
     const p = await preview(user);
     assert.equal(p.queue.length, 1);
     assert.equal(p.queue.aheadSeconds, a.printSeconds);
@@ -69,7 +69,7 @@ describe("submit page API", () => {
     /* the order approved above is the queue head; print and store it */
     const [p] = await t.db.select().from(printers);
     t.commands.online = true;
-    await t.app.get(SchedulerService).kick();
+    await t.app.get(SchedulerService).dispatch(p.id);
     t.commands.online = false;
     const id = (await t.db.select().from(printers).where(eq(printers.id, p.id)))[0].currentOrderId!;
     assert.equal((await other.get(`/api/orders/${id}`).expect(200)).body.storePhotoUrl, null, "not stored yet");

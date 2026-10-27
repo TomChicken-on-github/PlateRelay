@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { DEFAULT_QUEUE_RULES, type OrderDetail, type OrderPreview, type OrderView, type QueueRules, type ResourcesView, type TodoView } from "@platerelay/shared";
-import { eq, inArray, ne } from "drizzle-orm";
+import { desc, eq, inArray, ne } from "drizzle-orm";
 import { auditLog, orders, printers, settings } from "../src/db/schema.js";
 import { SchedulerService } from "../src/printers/scheduler.service.js";
 import { PrintersService } from "../src/printers/printers.service.js";
@@ -144,16 +144,64 @@ describe("print rules", () => {
       assert.equal(o.colourPref, "similar", "颜色要求 defaults to 相近");
     });
 
-    it("dispatches only to open printers", async () => {
+  });
+
+  describe("建议派单", () => {
+    const todo = async () => (await staff.get("/api/todo").expect(200)).body as TodoView;
+    const status = async (id: number) => (await t.db.select().from(orders).where(eq(orders.id, id)))[0].status;
+
+    it("only suggests; nothing is sent until Staff confirm, and closed printers get no suggestion", async () => {
       const id = await queued(user);
       await builder.post(`/api/printers/${x2d}/open`).send({ open: false }).expect(200);
       await t.db.update(printers).set({ state: "IDLE" }).where(eq(printers.id, x2d));
       t.commands.online = true;
-      await t.app.get(SchedulerService).kick();
-      assert.equal((await t.db.select().from(orders).where(eq(orders.id, id)))[0].status, "QUEUED");
+      assert.equal((await todo()).dispatch.length, 0);
       await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
-      await new Promise((r) => setTimeout(r, 50));
-      assert.equal((await t.db.select().from(orders).where(eq(orders.id, id)))[0].status, "PRINTING");
+      const items = (await todo()).dispatch;
+      assert.deepEqual(items.map((d) => [d.printer.id, d.order.id]), [[x2d, id]]);
+      assert.equal(((await staff.get(`/api/printers/${x2d}`).expect(200)).body as { suggestion: OrderView | null }).suggestion?.id, id);
+      assert.equal(((await user.get(`/api/printers/${x2d}`).expect(200)).body as { suggestion: OrderView | null }).suggestion, null, "submitters do not see it");
+      assert.equal(await status(id), "QUEUED");
+      assert.equal(t.commands.sent.filter((c) => c.cmd === "start").length, 0);
+    });
+
+    it("sends the job when Staff confirm the suggestion they saw", async () => {
+      const a = await queued(user);
+      const b = await queued(other);
+      await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
+      await t.db.update(printers).set({ state: "IDLE" }).where(eq(printers.id, x2d));
+      await user.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(403);
+      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(409)).body.code, "printer-unreachable");
+      assert.equal(await status(a), "QUEUED");
+      t.commands.online = true;
+      const stale = await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(409);
+      assert.equal(stale.body.code, "suggestion-changed");
+      assert.equal(stale.body.orderId, a);
+      const sent = t.commands.sent.length;
+      const v = await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: a }).expect(200);
+      assert.equal(v.body.state, "PREPARING");
+      assert.equal(await status(a), "PRINTING");
+      assert.deepEqual(t.commands.sent.slice(sent).map((c) => c.cmd), ["start"]);
+      const [log] = await t.db.select().from(auditLog).where(eq(auditLog.action, "order.dispatch")).orderBy(desc(auditLog.at)).limit(1);
+      assert.equal(log.targetId, String(a));
+      assert.equal(log.actorType, "user");
+      assert.equal((await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(409)).body.code, "printer-not-ready");
+    });
+
+    it("suggests different orders to different idle printers", async () => {
+      const x2d2 = await addPrinter("X2D-02", "N6");
+      await t.db.update(printers).set({ openToContestants: true }).where(eq(printers.id, x2d2));
+      await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
+      const a = await queued(user);
+      const b = await queued(other);
+      await t.db.update(printers).set({ state: "IDLE", stateSince: new Date(Date.now() - 60e3) }).where(eq(printers.id, x2d2));
+      await t.db.update(printers).set({ state: "IDLE", stateSince: new Date() }).where(eq(printers.id, x2d));
+      const items = (await todo()).dispatch;
+      assert.deepEqual(items.map((d) => [d.printer.id, d.order.id]), [[x2d2, a], [x2d, b]], "the printer idle longest takes the head");
+      t.commands.online = true;
+      await staff.post(`/api/printers/${x2d}/dispatch`).send({ orderId: b }).expect(200);
+      assert.equal((await t.db.select().from(orders).where(eq(orders.id, a)))[0].skippedSince, null, "the head is waiting for X2D-02's confirmation, not passed over");
+      await t.db.update(printers).set({ openToContestants: false }).where(eq(printers.id, x2d2));
     });
   });
 
@@ -323,7 +371,7 @@ describe("print rules", () => {
       assert.ok(t.commands.sent.some((c) => c.cmd === "recall" && c.arg === a));
 
       await builder.post(`/api/orders/${a}/approve`).expect(200);
-      await new Promise((r) => setTimeout(r, 50));
+      await t.app.get(SchedulerService).dispatch(x2d);
       await t.app.get(PrintersService).onStarted(x2d);
       const res = await revise(user, a, x2dPlate1Plus(5)).expect(409);
       assert.equal(res.body.code, "order-state-conflict");
@@ -340,20 +388,15 @@ describe("print rules", () => {
       t.commands.online = true;
       const a = await queued(user);
       await t.app.get(SchedulerService).dispatch(x2d);
-      await queued(other);
+      const b = await queued(other);
       const c = await queued(other);
       const v = (await revise(user, a, x2dPlate1Plus(5)).expect(200)).body as OrderView;
       assert.equal(v.revision!.placesBack, 1, "within the time rule, plus one for the recall");
-      /* the freed printer takes the next order at once; close it so the rest stays queued */
-      await new Promise((r) => setTimeout(r, 50));
-      await builder.post(`/api/printers/${x2d}/open`).send({ open: false }).expect(200);
-      await t.db.update(printers).set({ state: "IDLE", currentOrderId: null }).where(eq(printers.id, x2d));
       await builder.post(`/api/orders/${a}/approve`).expect(200);
       const pos = await positions();
-      assert.ok(pos.get(c)! < pos.get(a)!, "moved behind the order that was after it");
+      assert.ok(pos.get(b)! < pos.get(a)! && pos.get(a)! < pos.get(c)!, "moved behind the order that was after it, one place only");
 
-      await builder.post(`/api/printers/${x2d}/open`).send({ open: true }).expect(200);
-      await new Promise((r) => setTimeout(r, 50));
+      await t.app.get(SchedulerService).dispatch(x2d);
       const [p] = await t.db.select().from(printers).where(eq(printers.id, x2d));
       assert.equal(p.state, "PREPARING");
       const first = p.currentOrderId!;
@@ -361,10 +404,10 @@ describe("print rules", () => {
       assert.equal((await mine.get(`/api/orders/${first}`).expect(200)).body.canCancelOwn, true);
       await mine.post(`/api/orders/${first}/cancel`).send({ reason: "不需要了" }).expect(200);
       assert.ok(t.commands.sent.some((c) => c.cmd === "recall" && c.arg === first));
-      await new Promise((r) => setTimeout(r, 50));
+      await t.app.get(SchedulerService).dispatch(x2d);
       const [p2] = await t.db.select().from(printers).where(eq(printers.id, x2d));
       const next = p2.currentOrderId!;
-      assert.notEqual(next, first, "the printer took the next order");
+      assert.notEqual(next, first, "Staff sent the next suggestion");
       await t.app.get(PrintersService).onStarted(x2d);
       const owner = next === a ? user : other;
       assert.equal((await owner.get(`/api/orders/${next}`).expect(200)).body.canCancelOwn, false);

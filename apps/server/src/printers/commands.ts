@@ -9,6 +9,12 @@ export interface JobCommand {
 }
 
 /**
+ * What Staff add when confirming a dispatch, on top of the order's own file. Empty for now: the
+ * filament mapping dialog (which slot feeds which filament, not built yet) will put its result here.
+ */
+export type DispatchJobOptions = Record<never, never>;
+
+/**
  * What the panel asks a printer to do, through its daemon. The daemon link
  * (WebSocket, brief §5.6) implements this in a later change; until then no
  * printer is reachable and nothing is ever sent to a real printer.
