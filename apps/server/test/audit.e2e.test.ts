@@ -40,7 +40,7 @@ async function fixture(t: TestApp) {
   const other = await t.as("user");
   const admin = await t.as("coreteam");
   const p = (await admin.agent.post("/api/printers").send({ name: "Audit X2D", ip: "192.0.2.10", serial: "AUDIT00001" }).expect(201)).body.id as string;
-  await t.db.update(printers).set({ model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }], storage: [{ medium: "internal", present: true, writable: true }], state: "IDLE" }).where(eq(printers.id, p));
+  await t.db.update(printers).set({ openToContestants: true, model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }], storage: [{ medium: "internal", present: true, writable: true }], state: "IDLE" }).where(eq(printers.id, p));
   const submitted = (await submit(owner.agent).expect(201)).body.orders as { id: number }[];
   const id = submitted[0].id;
   async function dispatch() {

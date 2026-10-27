@@ -68,6 +68,7 @@ export function toFleet(v: PrinterView): FleetPrinter {
     why: v.maintenanceReason ?? undefined,
     daemonId: v.daemonId,
     code: v.accessCode,
+    open: v.openToContestants,
   };
 }
 
@@ -129,9 +130,15 @@ export const printersApi = {
     return refreshed(await api<null>(`/api/printers/${id}/star`, { method: "POST", json: { starred } }));
   },
 
-  async create(input: PrinterInput): Promise<Done> {
+  async create(input: PrinterInput): Promise<Res<PrinterView | null>> {
     if (!LIVE) return ok;
-    return refreshed(await api<null>("/api/printers", { method: "POST", json: input }));
+    return refreshed(await api<PrinterView>("/api/printers", { method: "POST", json: input }));
+  },
+
+  /** 开放给选手. */
+  async setOpen(id: string, open: boolean): Promise<Done> {
+    if (!LIVE) return fleet.set((s) => s.map((x) => (x.id === id ? { ...x, open } : x))), ok;
+    return refreshed(await api<null>(`/api/printers/${id}/open`, { method: "POST", json: { open } }));
   },
 
   async update(id: string, input: PrinterInput): Promise<Done> {

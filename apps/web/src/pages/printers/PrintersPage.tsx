@@ -5,6 +5,7 @@ import { Field, Select, TextInput } from "../../components/Field";
 import { Icon } from "../../components/icons/Icon";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
+import { Switch } from "../../components/Switch";
 import { useToast } from "../../components/Toast";
 import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
@@ -19,9 +20,11 @@ const COLS = "grid-cols-[minmax(0,1.2fr)_88px_110px_minmax(0,1fr)_120px_minmax(0
 type Form = {
   isNew: boolean; orig?: string; pid?: string; id: string; model: string; ip: string; sn: string; code: string;
   /** Server builds: the daemon the printer is under, and the stored code's state (never the code). */
-  daemon: string; was?: { daemon: string; sn: string; code: AccessCodeState | null };
+  daemon: string; was?: { daemon: string; sn: string; code: AccessCodeState | null; pub: boolean };
+  /** 开放给选手 */
+  pub: boolean;
 };
-const EMPTY: Form = { isNew: true, id: "", model: "", ip: "", sn: "", code: "", daemon: "" };
+const EMPTY: Form = { isNew: true, id: "", model: "", ip: "", sn: "", code: "", daemon: "", pub: false };
 type Found = (typeof FOUND)[number];
 
 /** Spinner used while the LAN scan runs. */
@@ -82,21 +85,27 @@ function FormSheet({ init, open, onClose }: { init: Form; open: boolean; onClose
         input.accessCode = sealed.data;
       }
       const r = f.isNew ? await printersApi.create(input) : await printersApi.update(f.pid!, input);
-      setSaving(false);
       if (!r.ok) {
+        setSaving(false);
         /* the daemon made a new key since the form opened: reload it so the next try uses it */
         if (r.error.code === "daemon-key-changed") void refreshDaemonKeys();
         return toast(r.error.message || "保存失败，请重试");
       }
+      const pid = f.isNew ? r.data?.id : f.pid;
+      if (pid && f.pub !== (f.was?.pub ?? false)) {
+        const o = await printersApi.setOpen(pid, f.pub);
+        if (!o.ok) toast(o.error.message || "开放给选手没有保存，请重试");
+      }
+      setSaving(false);
       const codeNote = input.accessCode ? "，访问码已加密保存" : stored && moved ? "，原访问码已失效" : "";
       toast(f.isNew ? `已添加 ${input.name}${codeNote}，型号和喷嘴等 daemon 连上后由打印机上报` : `${input.name} 已保存${codeNote}`);
       return onClose();
     }
     if (f.isNew) {
-      fleet.set((s) => [...s, { id: f.id.trim(), model: f.model || "连接后读取", ip: f.ip.trim(), sn: f.sn.trim().slice(0, 6) + "••••••", nozzle: "连接后读取", st: "idle", job: "—" }]);
+      fleet.set((s) => [...s, { id: f.id.trim(), model: f.model || "连接后读取", ip: f.ip.trim(), sn: f.sn.trim().slice(0, 6) + "••••••", nozzle: "连接后读取", st: "idle", job: "—", open: f.pub }]);
       toast(`已添加 ${f.id.trim()}`);
     } else {
-      fleet.set((s) => s.map((p) => (p.id === f.orig ? { ...p, id: f.id.trim(), ip: f.ip.trim() } : p)));
+      fleet.set((s) => s.map((p) => (p.id === f.orig ? { ...p, id: f.id.trim(), ip: f.ip.trim(), open: f.pub } : p)));
       toast(f.code.trim() ? `${f.id.trim()} 已保存，访问码已更新` : `${f.id.trim()} 已保存`);
     }
     onClose();
@@ -216,6 +225,13 @@ function FormSheet({ init, open, onClose }: { init: Form; open: boolean; onClose
           />
         )}
       </Field>
+      <div className="flex items-center gap-4 rounded-xl bg-sc-high px-4 py-3">
+        <span className="min-w-0 flex-1">
+          <b className="block text-label-l font-medium">开放给选手</b>
+          <small className="block text-body-s text-on-variant">{f.pub ? "选手的订单可以派到这台，它也计入提交页的「本场可用资源」" : "只用于内部打印，不派选手的订单，也不出现在「本场可用资源」里"}</small>
+        </span>
+        <Switch checked={f.pub} label="开放给选手" onChange={(v) => setF((s) => ({ ...s, pub: v }))} />
+      </div>
     </Sheet>
   );
 }
@@ -273,7 +289,7 @@ export function PrintersPage() {
   const edit = (p: FleetPrinter) => {
     const sn = p.sn === "—" ? "" : p.sn.replace(/•/g, "");
     const daemon = p.daemonId ?? "";
-    setForm({ isNew: false, orig: p.name ?? p.id, pid: p.id, id: p.name ?? p.id, model: p.model, ip: p.ip === "—" ? "" : p.ip, sn, code: "", daemon, was: { daemon, sn, code: p.code ?? null } });
+    setForm({ isNew: false, orig: p.name ?? p.id, pid: p.id, id: p.name ?? p.id, model: p.model, ip: p.ip === "—" ? "" : p.ip, sn, code: "", daemon, pub: !!p.open, was: { daemon, sn, code: p.code ?? null, pub: !!p.open } });
     open("form", p.id);
   };
   const add = () => {
@@ -329,7 +345,10 @@ export function PrintersPage() {
                     COLS,
                   )}
                 >
-                  <span className="font-num text-label-l font-semibold max-md:col-start-1">{x.name ?? x.id}</span>
+                  <span className="flex min-w-0 items-center gap-2 font-num text-label-l font-semibold max-md:col-start-1">
+                    {x.name ?? x.id}
+                    {!x.open && <StatusChip className="bg-transparent font-sans shadow-[inset_0_0_0_1px_var(--md-outline-variant)]">仅内部</StatusChip>}
+                  </span>
                   <span className="text-body-s text-on-variant max-md:hidden">{x.model}</span>
                   <span className="max-md:col-start-2 max-md:row-start-1">
                     <StatusChip tone={tone}>{label}</StatusChip>

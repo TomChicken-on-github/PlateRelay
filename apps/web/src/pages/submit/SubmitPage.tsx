@@ -9,14 +9,17 @@ import { Icon } from "../../components/icons/Icon";
 import { FilamentDots, ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
-import type { FormView, OrderPreview, OrderView, ParsedUpload } from "@platerelay/shared";
+import { BED_TYPES, BED_TYPE_LABEL, COLOUR_PREFS, COLOUR_PREF_LABEL, type ColourPref, DEFAULT_COLOUR_PREF, type FormView, type OrderPreview, type OrderView, type ParsedUpload, type PlateCheck, type ResourcesView } from "@platerelay/shared";
 import { LinearIndeterminate } from "../../components/WavyProgress";
 import { useToast } from "../../components/Toast";
 import { LIVE, api } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { fmtDur, live, shortModel } from "../../lib/ordersApi";
-import { PRINTERS } from "../../mock/printers";
+import { useResources } from "../../lib/resourcesApi";
+import { useRules } from "../../lib/rulesApi";
+import { Segmented } from "../../components/Segmented";
+import { ResourcesPanel } from "./ResourcesPanel";
 
 const MOCK_QUEUE_AHEAD = 7, MAX_MB = 200;
 
@@ -50,16 +53,16 @@ function useFields() {
   return fields;
 }
 
-type Plate = { n: number; model: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; thumb?: string | null };
+type Plate = { n: number; model: string; modelId?: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; thumb?: string | null; check?: PlateCheck };
 
 /* Canned result for the "使用示例文件" demo; real files go to the panel's parse endpoint. */
 const SAMPLE = {
   name: "机械臂轴承座.gcode.3mf",
   mb: 38.4,
   plates: [
-    { n: 1, model: "X2D", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#00c0e8", "PLA"], ["#ffcc00", "PLA"]], st: "ok" },
-    { n: 2, model: "X2D", nozzle: "0.4", time: "1h 12m", g: 31, fil: [["#6155f5", "PETG"]], st: "warn", note: "预计排队较长：该机型当前只有 1 台空闲后可用" },
-    { n: 3, model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "err", note: "没有可用的 H2D 打印机（故障中），暂时不能提交这一盘" },
+    { n: 1, model: "X2D", modelId: "N6", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#0088ff", "PLA"], ["#ffcc00", "PLA"]], st: "ok" },
+    { n: 2, model: "X2D", modelId: "N6", nozzle: "0.4", time: "1h 12m", g: 31, fil: [["#6155f5", "PETG"]], st: "ok", check: { block: [], missingColours: ["#6155f5"] } },
+    { n: 3, model: "H2D", modelId: "O1D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "err", note: "本场的 H2D 没有 0.6 mm 喷嘴。请改用 0.4 mm 重新切片后再提交这一盘。" },
   ] as Plate[],
 };
 
@@ -73,6 +76,7 @@ function plateBase(r: ParsedUpload, p: ParsedUpload["plates"][number]): Plate {
   return {
     n: p.index,
     model: shortModel(r.printerModel, p.printerModelId),
+    modelId: p.printerModelId,
     nozzle: [...new Set(p.nozzles.map((z) => z.diameter))].join(" / "),
     time: fmt(Math.round(p.printSeconds / 60)),
     g: Math.round(p.weightGrams),
@@ -86,33 +90,40 @@ function plateBase(r: ParsedUpload, p: ParsedUpload["plates"][number]): Plate {
    submitted: it waits in the queue like the server's 等待兼容的打印机, so it is a warning, not a block. */
 function previewPlates(r: OrderPreview): Plate[] {
   return r.plates.map((p) => {
-    const plate = plateBase(r, p);
+    const plate = { ...plateBase(r, p), check: p.check };
+    if (p.check.block.length) return { ...plate, st: "err", note: p.check.block.join("；") };
     if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
     if (p.availability.state !== "ok") return { ...plate, st: "warn", note: p.availability.message };
     return plate;
   });
 }
 
-/* Prototype: availability from the mock printer list. */
-function toPlates(r: ParsedUpload): Plate[] {
-  const model = r.printerModel?.replace(/^Bambu Lab\s+/, "") ?? r.plates[0]?.printerModelId ?? "未知机型";
-  const fleet = PRINTERS.filter((p) => p.model === r.printerModel);
+/* Prototype: the mock 可用资源 table stands in for the server's check (model only). */
+function toPlates(r: ParsedUpload, res: ResourcesView | null): Plate[] {
   return r.plates.map((p) => {
-    const plate: Plate = {
-      n: p.index,
-      model,
-      nozzle: [...new Set(p.nozzles.map((z) => z.diameter))].join(" / "),
-      time: fmt(Math.round(p.printSeconds / 60)),
-      g: Math.round(p.weightGrams),
-      fil: p.filaments.map((f) => [f.color, f.type]),
-      st: "ok",
-      thumb: p.thumbnailUrl,
-    };
-    if (!fleet.length) return { ...plate, st: "err", note: `没有 ${model} 打印机，暂时不能提交这一盘` };
+    const plate = plateBase(r, p);
+    if (res && !res.models.some((m) => m.model === plate.model && !m.hidden)) return { ...plate, st: "err", note: `本场没有开放 ${plate.model}` };
     if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
     return plate;
   });
 }
+
+/** What the plate looks like under the chosen 颜色要求: missing colours matter only for 一致. */
+function withColour(p: Plate, pref: ColourPref, mode: ResourcesView["colourMissing"]): Plate {
+  const missing = p.check?.missingColours ?? [];
+  if (p.st === "err" || !missing.length) return p;
+  const types = [...new Set(p.fil.filter(([c]) => missing.includes(c.slice(0, 7).toLowerCase())).map(([, t]) => t))].join(" / ");
+  const what = `本场没有这个颜色的 ${types}`;
+  if (pref === "exact") return mode === "block" ? { ...p, st: "err", note: `${what}。颜色要求是「一致」，不能提交这一盘。` } : { ...p, st: "warn", note: `${what}。颜色要求是「一致」，要等审核确认补料，可能多等一会。` };
+  if (pref === "similar") return { ...p, note: p.note ?? `${what}，会用最接近的颜色打印。` };
+  return p;
+}
+
+const COLOUR_HINT: Record<ColourPref, string> = {
+  exact: "只用和切片一样的颜色。本场没有这个颜色时，要等审核确认补料",
+  similar: "本场没有这个颜色时，用同色系里最接近的",
+  any: "任意颜色都可以，派单最快",
+};
 
 /* Prototype builds still parse real files on the server, only availability is mocked. */
 async function parseOnServer<T>(url: string, f: File): Promise<T> {
@@ -196,6 +207,13 @@ function Notice({ agree, onAgree }: { agree: boolean; onAgree: (v: boolean) => v
   );
 }
 
+/** "你的文件：2 盘符合，1 盘耗材待确认，1 盘机型或喷嘴不符" */
+function FileFit({ plates }: { plates: Plate[] }) {
+  const bad = plates.filter((p) => p.st === "err").length, warn = plates.filter((p) => p.st === "warn").length, ok = plates.length - bad - warn;
+  const parts = [ok && <><b>{ok} 盘</b>符合</>, warn && <><b>{warn} 盘</b>需要注意</>, bad && <><b>{bad} 盘</b>不能提交</>].filter(Boolean);
+  return <>你的文件：{parts.map((x, i) => <span key={i}>{i ? "，" : ""}{x}</span>)}</>;
+}
+
 function Step({ n, title, right, done, children }: { n: number; title: string; right?: string; done?: boolean; children: React.ReactNode }) {
   return (
     <motion.section layout="position" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0, transition: t("medium4", "emphasizedDecelerate") }} className="flex flex-col gap-4 rounded-xl bg-sc p-5 max-sm:p-4">
@@ -228,15 +246,23 @@ export function SubmitPage() {
   const [done, setDone] = useState<{ id: string; n: number; model: string; time: string }[] | null>(null);
   const [sumOpen, setSumOpen] = useState(false);
   const [over, setOver] = useState(false);
+  const [colour, setColour] = useState<ColourPref>(DEFAULT_COLOUR_PREF);
+  const [bed, setBed] = useState("");
+  const [fileBed, setFileBed] = useState<string | null>(null);
+  const [resOpen, setResOpen] = useState(true);
+  const [resTab, setResTab] = useState<"models" | "materials">("models");
   const fin = useRef<HTMLInputElement>(null);
+  const res = useResources().data;
+  const rules = useRules();
 
-  const plates = phase === "parsed" ? parsed : [];
+  const plates = phase === "parsed" ? parsed.map((p) => withColour(p, colour, res?.colourMissing ?? "warn")) : [];
   const sel = plates.filter((p) => pick[p.n] && p.st !== "err");
 
   const show = (ps: Plate[]) => {
     setParsed(ps);
     setPick(Object.fromEntries(ps.map((p) => [p.n, p.st !== "err"])));
     setPhase("parsed");
+    setResOpen(false);
   };
   const load = async (f: File | typeof SAMPLE) => {
     const mb = f instanceof File ? f.size / 1048576 : f.mb;
@@ -245,14 +271,19 @@ export function SubmitPage() {
     if (mb > MAX_MB) return setError(`文件 ${mb.toFixed(0)} MB，超过 ${MAX_MB} MB 上限。`);
     setFile({ name: f.name, mb });
     setPhase("parsing");
-    if (!(f instanceof File)) return void setTimeout(() => show(f.plates), 1100);
+    if (!(f instanceof File)) return void setTimeout(() => (setFileBed("Textured PEI Plate"), show(f.plates)), 1100);
     try {
       if (LIVE) {
         const r = await parseOnServer<OrderPreview>("/api/orders/preview", f);
         setUpload(f);
         setQueue(r.queue);
+        setFileBed(r.bedType);
         show(previewPlates(r));
-      } else show(toPlates(await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f)));
+      } else {
+        const r = await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f);
+        setFileBed(r.bedType);
+        show(toPlates(r, res));
+      }
     } catch (e) {
       setPhase("idle");
       setFile(null);
@@ -270,6 +301,8 @@ export function SubmitPage() {
     setAll(false);
     setAgree(false);
     setDone(null);
+    setBed("");
+    setFileBed(null);
   };
 
   const fieldErr = (f: FieldDef) => {
@@ -298,6 +331,8 @@ export function SubmitPage() {
     body.append("file", upload);
     body.append("answers", JSON.stringify(Object.fromEntries(FIELDS.map((f) => [f.id, f.type === "number" && form[f.id] ? Number(form[f.id]) : (form[f.id] ?? "")]))));
     body.append("plates", JSON.stringify(sel.map((p) => p.n)));
+    body.append("colour", colour);
+    if (rules?.allowPlateChoice && bed) body.append("bedType", bed);
     setSending(true);
     const r = await api<{ orders: OrderView[] }>("/api/orders", { method: "POST", body });
     setSending(false);
@@ -316,6 +351,7 @@ export function SubmitPage() {
           ["将生成", phase === "parsed" ? `${sel.length} 张订单` : "—"],
           ["预计总用时", sel.length ? fmt(total) : "—"],
           ["预计总用量", sel.length ? `${grams} g` : "—"],
+          ["颜色要求", COLOUR_PREF_LABEL[colour]],
           ["队列前方", `${queue.length} 项`],
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between gap-3 text-body-m">
@@ -371,6 +407,17 @@ export function SubmitPage() {
         ) : (
           <motion.div key="form" exit={{ opacity: 0, transition: t("short3", "emphasizedAccelerate") }} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div className="flex min-w-0 flex-col gap-4">
+              {res?.show && (
+                <ResourcesPanel
+                  view={res}
+                  open={resOpen}
+                  onOpen={setResOpen}
+                  tab={resTab}
+                  onTab={setResTab}
+                  used={new Set(plates.map((p) => p.modelId ?? ""))}
+                  fit={phase === "parsed" ? <FileFit plates={plates} /> : undefined}
+                />
+              )}
               <Step n={1} title="上传文件" right="只收 .gcode.3mf" done={phase === "parsed"}>
                 {phase === "idle" ? (
                   <>
@@ -395,7 +442,7 @@ export function SubmitPage() {
                     >
                       <Icon name="upload_file" size={40} className="text-primary" />
                       <div className="text-title-m font-medium">拖入 .gcode.3mf 文件，或点击选择</div>
-                      <div className="max-w-[420px] text-note text-on-variant">请自行切片后导出，选好目标机型、喷嘴和耗材；文件最大 {MAX_MB} MB。多个打印板会自动拆成各自独立的订单。</div>
+                      <div className="max-w-[420px] text-note text-on-variant">{res?.show ? "请按上方「本场可用资源」选好机型、喷嘴和耗材，" : "请"}自行切片后导出，选好目标机型、喷嘴和耗材；文件最大 {MAX_MB} MB。多个打印板会自动拆成各自独立的订单。</div>
                       <div className="mt-1 flex flex-wrap justify-center gap-2">
                         <Button variant="tonal">选择文件</Button>
                         {!LIVE && (
@@ -499,6 +546,22 @@ export function SubmitPage() {
                       );
                     })}
                   </ul>
+                  <div className="flex flex-col gap-2 rounded-xl bg-sc-high px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                      <b className="text-label-l font-medium">颜色要求</b>
+                      <Segmented radio label="颜色要求" value={colour} onChange={setColour} items={COLOUR_PREFS.map((k) => ({ key: k, label: COLOUR_PREF_LABEL[k] }))} />
+                    </div>
+                    <div className="text-body-s text-on-variant">{COLOUR_HINT[colour]}。对这次提交的所有盘生效。</div>
+                  </div>
+                  {rules?.allowPlateChoice && (
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl bg-sc-high px-4 py-3">
+                      <b className="text-label-l font-medium">热床板</b>
+                      <select aria-label="热床板" value={bed} onChange={(e) => setBed(e.target.value)} className="h-9 rounded-lg border-0 bg-transparent px-3 text-label-l text-on-surface shadow-[inset_0_0_0_1px_var(--md-outline)] outline-0 focus:shadow-[inset_0_0_0_2px_var(--md-primary)]">
+                        <option value="">按文件{fileBed ? `（${BED_TYPE_LABEL[fileBed] ?? fileBed}）` : ""}</option>
+                        {BED_TYPES.map((b) => <option key={b} value={b}>{BED_TYPE_LABEL[b]}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </Step>
               )}
 

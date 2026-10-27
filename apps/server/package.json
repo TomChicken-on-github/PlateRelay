@@ -12,6 +12,7 @@
     "start": "node --env-file-if-exists=.env dist/src/main.js",
     "dev": "pnpm build && node --env-file-if-exists=.env --watch-path=dist dist/src/main.js",
     "test": "pnpm build && node --test --test-concurrency=1 \"dist/test/**/*.test.js\"",
+    "test:stress": "pnpm build && node --test dist/test/queue-stress.pg.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "user:create": "pnpm build && node --env-file-if-exists=.env dist/src/cli/create-user.js",
     "db:generate": "drizzle-kit generate",

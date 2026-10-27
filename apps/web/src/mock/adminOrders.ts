@@ -1,5 +1,5 @@
 import { createStore } from "../lib/store";
-import type { Fil, OrderStatus } from "./myOrders";
+import type { Fil, OrderStatus, Version } from "./myOrders";
 
 export type AdminOrder = {
   id: number;
@@ -25,20 +25,28 @@ export type AdminOrder = {
   retried?: number;
   /** Filled in by the detail request. */
   answers?: [string, string][];
+  /** 版本记录 (real builds: from the order detail). */
+  vers?: Version[];
   log?: [string, string][];
   /** Owner's own order: approving it is still allowed, the server checks permissions. */
   mine?: boolean;
+  /** 颜色要求 label, and the plate's colours not on offer when it is 一致. */
+  colour?: string;
+  missing?: Fil;
+  /** A revision waiting for re-review: the version before it and where the order goes when approved. */
+  rev?: { n: number; file: string; model: string; time: string; g: number; fil: Fil; pos?: number; back: number | "tail" };
 };
 
 export const ADMIN_STATUS: Record<OrderStatus, [string, "neutral" | "ok" | "err"]> = {
-  pending: ["待审核", "neutral"], queued: ["排队中", "neutral"], printing: ["打印中", "ok"], paused: ["等待处理", "neutral"], awaiting: ["待入库", "neutral"],
+  pending: ["待审核", "neutral"], revising: ["修改审核中", "neutral"], queued: ["排队中", "neutral"], printing: ["打印中", "ok"], paused: ["等待处理", "neutral"], awaiting: ["待入库", "neutral"],
   ready: ["可取件", "ok"], rejected: ["已驳回", "err"], failed: ["打印失败", "err"], done: ["已完成", "neutral"], cancelled: ["已取消", "neutral"],
 };
 
 /* Shared by 审核队列 and 订单管理 */
 export const adminOrders = createStore<AdminOrder[]>([
   { id: 1056, file: "齿轮箱外壳.gcode.3mf", owner: "Tom_Chicken", model: "X2D", nozzle: "0.4", time: "1h 40m", g: 52, mb: 14.2, fil: [["#6155f5", "PETG"]], st: "pending", at: "10-24 09:12" },
-  { id: 1055, file: "轴承盖.gcode.3mf", owner: "林小满", model: "P1S", nozzle: "0.4", time: "0h 48m", g: 21, mb: 6.8, fil: [["#00c0e8", "PLA"]], st: "pending", at: "10-24 09:05" },
+  { id: 1055, file: "轴承盖.gcode.3mf", owner: "林小满", model: "P1S", nozzle: "0.4", time: "0h 48m", g: 21, mb: 6.8, fil: [["#00c0e8", "PLA"]], st: "pending", at: "10-24 09:05", colour: "一致", missing: [["#00c0e8", "PLA"]] },
+  { id: 1053, file: "夹爪连杆 v2.gcode.3mf", owner: "王雨桐", model: "X2D", nozzle: "0.4", time: "1h 58m", g: 44, mb: 16.1, fil: [["#0088ff", "PLA"]], st: "revising", at: "10-24 08:30", rev: { n: 1, file: "夹爪连杆.gcode.3mf", model: "X2D", time: "1h 30m", g: 37, fil: [["#0088ff", "PLA"]], pos: 2, back: 2 } },
   { id: 1052, file: "机械臂轴承座.gcode.3mf", plate: "第 3 盘 / 共 3 盘", owner: "周浩然", model: "H2D", nozzle: "0.6", time: "3h 25m", g: 96, mb: 38.5, fil: [["#00c0e8", "PLA"]], st: "queued", at: "10-24 08:40" },
   { id: 1051, file: "机械臂轴承座.gcode.3mf", plate: "第 2 盘 / 共 3 盘", owner: "周浩然", model: "X2D", nozzle: "0.4", time: "1h 12m", g: 31, mb: 38.5, fil: [["#6155f5", "PETG"]], st: "queued", at: "10-24 08:40" },
   { id: 1050, file: "云台支架.gcode.3mf", owner: "王雨桐", model: "X2D", nozzle: "0.4", time: "2h 05m", g: 58, mb: 21.0, fil: [["#ffb300", "PLA"]], st: "queued", at: "10-24 08:22" },

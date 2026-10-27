@@ -36,7 +36,7 @@ describe("submit page API", () => {
     assert.deepEqual(p.queue, { length: 0, aheadSeconds: 0 });
 
     const res = await builder.post("/api/printers").send({ name: "X2D-01", ip: "192.0.2.10", serial: "SNX2D010001" }).expect(201);
-    await t.db.update(printers).set({ model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }] }).where(eq(printers.id, res.body.id));
+    await t.db.update(printers).set({ openToContestants: true, model: "Bambu Lab X2D", modelId: "N6", nozzles: [{ extruder: 1, diameter: 0.4 }, { extruder: 2, diameter: 0.4 }] }).where(eq(printers.id, res.body.id));
     p = await preview(user);
     assert.ok(p.plates.every((x) => x.availability.state === "unavailable"), "compatible but offline");
 
