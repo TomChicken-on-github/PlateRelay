@@ -25,7 +25,8 @@ export function Sheet({
   onClose: () => void;
   title: string;
   titleSize?: "sm" | "lg";
-  icon?: string;
+  /** A Material Symbols name, or a node such as a FigmaIcon. */
+  icon?: string | ReactNode;
   sub?: ReactNode;
   footer?: ReactNode;
   dismissible?: boolean;
@@ -83,7 +84,7 @@ export function Sheet({
             exit={mobile ? { y: "100%", transition: exit } : { opacity: 0, scale: 0.96, transition: exit }}
           >
             {mobile && <div className="h-1 w-8 flex-none self-center rounded-sm bg-outline opacity-60" />}
-            {icon && <Icon name={icon} className="self-center text-primary" />}
+            {icon && (typeof icon === "string" ? <Icon name={icon} className="self-center text-primary" /> : <span className="flex self-center text-primary">{icon}</span>)}
             <h2 className={cx("m-0", titleSize === "lg" ? "text-headline-s font-normal" : "text-[20px] leading-7 font-medium", icon && "-mt-1 text-center")}>{title}</h2>
             {sub && <div className="-mt-2 text-note text-on-variant">{sub}</div>}
             {children}
