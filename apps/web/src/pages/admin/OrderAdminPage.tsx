@@ -72,7 +72,7 @@ function RejectSheet({ order, open, onClose, onDone }: { order?: AdminOrder; ope
     <Sheet
       open={open && !!order}
       onClose={onClose}
-      title={rev ? `驳回第 ${rev.n + 1} 版 #${order?.id}` : `驳回 #${order?.id}`}
+      title={rev ? `驳回修改申请 #${order?.id}` : `驳回申请 #${order?.id}`}
       sub={rev ? `订单退回第 ${rev.n} 版，${rev.pos ? `保留第 ${rev.pos} 位` : ""}继续排队。驳回原因会发给选手。` : "驳回原因会发给选手，让对方改完重新提交。"}
       footer={
         <>
