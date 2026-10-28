@@ -5,7 +5,8 @@ import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, userId } from "../auth/actor.js";
 import { ApiError, notFound } from "../common/errors.js";
 import { DB, type Db } from "../db/db.js";
-import { files, orders, pickupCodes } from "../db/schema.js";
+import { files, orders, orderVersions, pickupCodes } from "../db/schema.js";
+import { orderRow, shownVersion } from "./rows.js";
 import { STORAGE, type ObjectStorage } from "../storage/storage.js";
 import { transition } from "./transition.js";
 import { loadPeople, THUMB_TTL_S } from "./views.js";
@@ -75,8 +76,7 @@ export class PickupService {
     const code = normalizeCode(raw);
     const [pc] = code ? await db.select().from(pickupCodes).where(eq(pickupCodes.code, code)) : [];
     if (!pc) throw new ApiError(HttpStatus.NOT_FOUND, "pickup-code-invalid", "取件码无效");
-    const q = db.select().from(orders).where(eq(orders.id, pc.orderId));
-    const [o] = lock ? await q.for("update") : await q;
+    const o = (await orderRow(db, pc.orderId, lock))!;
     if (o.status === "COMPLETED") {
       const people = await loadPeople(db, [o.ownerId, o.redeemedBy]);
       throw new ApiError(HttpStatus.CONFLICT, "pickup-already-redeemed", "这张单已经核销过了", {
@@ -141,7 +141,8 @@ export class PickupService {
     const rows = await this.db
       .select({ id: orders.id, ownerId: orders.ownerId, at: orders.redeemedAt, file: files.fileName })
       .from(orders)
-      .innerJoin(files, eq(files.id, orders.fileId))
+      .innerJoin(orderVersions, shownVersion)
+      .innerJoin(files, eq(files.id, orderVersions.fileId))
       .where(and(eq(orders.status, "COMPLETED"), gte(orders.redeemedAt, since)))
       .orderBy(desc(orders.redeemedAt));
     const people = await loadPeople(this.db, rows.map((r) => r.ownerId));

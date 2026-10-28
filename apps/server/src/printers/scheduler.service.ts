@@ -5,8 +5,9 @@ import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, SYSTEM } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
 import { DB, type Db } from "../db/db.js";
-import { files, orders, printers } from "../db/schema.js";
+import { files, orders, orderVersions, printers } from "../db/schema.js";
 import { inQueue, queueLock } from "../orders/queue.js";
+import { orderRows, shownVersion } from "../orders/rows.js";
 import { type OrderRow, transition } from "../orders/transition.js";
 import { QUEUE_POLICY, type QueuePolicy } from "../rules/queue-policy.js";
 import { SettingsService } from "../settings/settings.service.js";
@@ -41,7 +42,7 @@ export class SchedulerService {
     const idle = (await db.select().from(printers).where(and(eq(printers.state, "IDLE"), eq(printers.openToContestants, true))).orderBy(asc(printers.stateSince), asc(printers.name))).filter(hasWritableStorage);
     const out = new Map<string, OrderRow>();
     if (!idle.length) return out;
-    let queued = await db.select().from(orders).where(eq(orders.status, "QUEUED")).orderBy(asc(orders.queueSeq), asc(orders.id));
+    let queued = await orderRows(db, eq(orders.status, "QUEUED"), { orderBy: [asc(orders.queueSeq), asc(orders.id)] });
     for (const p of idle) {
       const o = this.policy.pick(rules, queued, p);
       if (!o) continue;
@@ -104,8 +105,9 @@ export class SchedulerService {
   /** Position (1-based) and estimated print time ahead, for every order in the queue, frozen revisions included. */
   async queuePositions(db: Db = this.db): Promise<Map<number, { position: number; aheadSeconds: number }>> {
     const q = await db
-      .select({ id: orders.id, s: orders.printSeconds })
+      .select({ id: orders.id, s: orderVersions.printSeconds })
       .from(orders)
+      .innerJoin(orderVersions, shownVersion)
       .where(inQueue)
       .orderBy(asc(orders.queueSeq), asc(orders.id));
     const out = new Map<number, { position: number; aheadSeconds: number }>();

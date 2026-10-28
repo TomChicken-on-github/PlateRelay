@@ -101,7 +101,7 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
     const by = (f: (o: (typeof all)[number]) => boolean) => all.filter(f);
     const queued = by((o) => o.status === "QUEUED");
     const pending = by((o) => o.status === "PENDING_REVIEW");
-    const revising = pending.filter((o) => o.revision && o.queueSeq != null);
+    const revising = pending.filter((o) => o.pendingVersionId != null);
     const printing = by((o) => o.status === "PRINTING");
     const fleet = await t.db.select().from(printers).where(inArray(printers.id, printerIds));
     const sugg = await suggestions();
@@ -200,14 +200,15 @@ describe("queue under concurrent load (real PostgreSQL)", { skip: !URL && "set P
       assert.ok(o && o.status === "PRINTING" && o.printerId === p.id, `${where}: busy printer ${p.name} holds a printing order`);
     }
 
-    /* versions: one pending exactly while a file waits for review, and the order prints its current version */
+    /* versions: one pending exactly while a file waits for review, pointed at by the order, and a queued or frozen order holds an approved version */
     const vs = await t.db.select().from(orderVersions).where(inArray(orderVersions.orderId, all.map((o) => o.id)));
     for (const o of all) {
       const mine = vs.filter((v) => v.orderId === o.id);
       const pend = mine.filter((v) => v.state === "pending");
       assert.equal(pend.length, o.status === "PENDING_REVIEW" ? 1 : 0, `${where}: #${o.id} (${o.status}) has ${pend.length} pending versions`);
-      const cur = pend[0] ?? mine.filter((v) => v.state === "approved").sort((a, b) => b.n - a.n)[0];
-      if (cur && !["REJECTED", "CANCELLED"].includes(o.status)) assert.equal(cur.fileId, o.fileId, `${where}: #${o.id} prints its current version`);
+      if (pend.length) assert.equal(pend[0].id, o.pendingVersionId ?? o.activeVersionId, `${where}: #${o.id} points at the version under review`);
+      const active = mine.find((v) => v.id === o.activeVersionId);
+      if (o.status === "QUEUED" || o.status === "PRINTING" || o.pendingVersionId != null) assert.equal(active?.state, "approved", `${where}: #${o.id} prints an approved version`);
     }
 
     /* no queued order was ever passed over: every printer takes every order */

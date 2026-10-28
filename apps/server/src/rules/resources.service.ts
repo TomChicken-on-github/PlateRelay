@@ -3,7 +3,8 @@ import { type PlateCheck, type ResourceSettings, type ResourcesView, waitBucket 
 import { and, eq, isNotNull, or } from "drizzle-orm";
 import { type Ctx, can } from "../auth/actor.js";
 import { DB, type Db } from "../db/db.js";
-import { orders, printers } from "../db/schema.js";
+import { orders, orderVersions, printers } from "../db/schema.js";
+import { shownVersion } from "../orders/rows.js";
 import type { OrderRow } from "../orders/transition.js";
 import { compatible } from "../printers/compat.js";
 import type { PrinterRow } from "../printers/printer-state.js";
@@ -105,8 +106,9 @@ export class ResourcesService {
   /** Seconds of printing ahead per model: queued plates (frozen ones included) plus what is left of the running ones. */
   private async work(): Promise<Map<string, number>> {
     const rows = await this.db
-      .select({ modelId: orders.printerModelId, s: orders.printSeconds, status: orders.status, startedAt: orders.startedAt })
+      .select({ modelId: orderVersions.printerModelId, s: orderVersions.printSeconds, status: orders.status, startedAt: orders.startedAt })
       .from(orders)
+      .innerJoin(orderVersions, shownVersion)
       .where(or(eq(orders.status, "QUEUED"), eq(orders.status, "PRINTING"), and(eq(orders.status, "PENDING_REVIEW"), isNotNull(orders.queueSeq))));
     const now = Date.now();
     const work = new Map<string, number>();

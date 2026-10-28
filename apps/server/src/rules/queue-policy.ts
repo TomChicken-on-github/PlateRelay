@@ -68,7 +68,7 @@ export class ParamPolicy implements QueuePolicy {
     const counts = kind === "revision" || (kind === "model-switch" ? rules.modelSwitch.countsAsRevision : rules.modelSwitch.dualToSingleCounts);
     if (counts && r.max > 0 && o.revisionCount >= r.max) return { allowed: false, code: "revision-limit", message: `最多修改 ${r.max} 次` };
 
-    const base = r.baseline === "original" ? (o.originalPrintSeconds ?? o.printSeconds) : o.printSeconds;
+    const base = r.baseline === "original" ? o.originalPrintSeconds : o.printSeconds;
     const deltaSeconds = Math.round(next.printSeconds - base);
     let placesBack = revisionPlacesBack(r, deltaSeconds);
     if (dispatched && placesBack !== "tail") placesBack += r.dispatchedExtraPlaces;

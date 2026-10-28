@@ -6,8 +6,9 @@ import type { Ctx } from "../auth/actor.js";
 import { ApiError, notFound } from "../common/errors.js";
 import type { Db } from "../db/db.js";
 import { orderEvents, orders } from "../db/schema.js";
+import { type OrderRow, orderRow } from "./rows.js";
 
-export type OrderRow = typeof orders.$inferSelect;
+export type { OrderRow };
 type OrderSet = Omit<PgUpdateSetSource<typeof orders>, "id" | "status">;
 
 /**
@@ -65,7 +66,8 @@ export async function transition(tx: Db, ctx: Ctx, orderId: number, name: Transi
       status: cur.status,
     });
   }
-  const [row] = await tx.update(orders).set({ ...opts.set, status: t.to }).where(eq(orders.id, orderId)).returning();
+  await tx.update(orders).set({ ...opts.set, status: t.to }).where(eq(orders.id, orderId));
+  const row = (await orderRow(tx, orderId))!;
   await tx.insert(orderEvents).values({
     orderId,
     actorType: ctx.actor.type,

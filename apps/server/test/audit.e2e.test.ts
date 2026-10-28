@@ -33,6 +33,15 @@ async function failAudit(t: TestApp, action: string, run: () => Promise<void>) {
 const logs = (t: TestApp, action: string, id?: string | number) => t.db.select().from(auditLog).where(and(eq(auditLog.action, action), id === undefined ? undefined : eq(auditLog.targetId, String(id))));
 const submit = (a: Agent) => a.post("/api/orders").attach("file", x2dTwoPlates(), "audit.gcode.3mf").field("answers", JSON.stringify({ reason: "审计回归" }));
 const order = async (t: TestApp, id: number) => (await t.db.select().from(orders).where(eq(orders.id, id)))[0];
+/** Versions are immutable; these tests need one without a preview, so they go around the trigger. */
+async function dropThumbnail(t: TestApp, id: number) {
+  await t.db.execute(sql`set session_replication_role = replica`);
+  try {
+    await t.db.execute(sql`update order_versions set thumbnail_key = null where id = (select active_version_id from orders where id = ${id})`);
+  } finally {
+    await t.db.execute(sql`set session_replication_role = origin`);
+  }
+}
 const printer = async (t: TestApp, id: string) => (await t.db.select().from(printers).where(eq(printers.id, id)))[0];
 const timeline = (t: TestApp, id: number) => t.db.select().from(orderEvents).where(eq(orderEvents.orderId, id)).orderBy(orderEvents.id);
 async function fixture(t: TestApp) {
@@ -270,7 +279,7 @@ it("source signatures precede success audits; previews exclude owners and missin
   assert.equal((await logs(t, "order.file.download", f.id)).length, 1);
   await f.owner.agent.get("/api/orders/mine").expect(200);
   assert.deepEqual(await logs(t, "order.preview.view"), []);
-  await t.db.update(orders).set({ thumbnailKey: null }).where(eq(orders.id, f.submitted[1].id));
+  await dropThumbnail(t, f.submitted[1].id);
   await f.admin.agent.get("/api/review").expect(200);
   const preview = await logs(t, "order.preview.view");
   assert.equal(preview.length, 1);
@@ -295,7 +304,7 @@ it("postcommit preview audit failure cannot delete a stored photo; pickup lookup
   assert.equal(entries.length, before + 1);
   assert.equal(entries.at(-1)!.actorId, f.admin.id);
   assert.equal(entries.at(-1)!.device, "Audit lookup");
-  await t.db.update(orders).set({ thumbnailKey: null }).where(eq(orders.id, f.id));
+  await dropThumbnail(t, f.id);
   await f.admin.agent.get(`/api/pickup/${code}`).expect(200);
   assert.equal((await logs(t, "order.preview.view", f.id)).length, entries.length);
 }));
