@@ -22,12 +22,15 @@ import {
   bigint,
   bigserial,
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
   pgEnum,
   pgSequence,
   pgTable,
+  type PgTableExtraConfigValue,
   primaryKey,
   real,
   serial,
@@ -48,6 +51,13 @@ export const actorType = pgEnum("actor_type", ["user", "system", "daemon", "prin
 export const auditResult = pgEnum("audit_result", ["ok", "failed", "denied"]);
 export const colourPref = pgEnum("colour_pref", COLOUR_PREFS);
 export const versionState = pgEnum("version_state", VERSION_STATES);
+
+/** What the queue policy decided when a revision or restore was uploaded; RevisionInfo is built from it. */
+export interface VersionDecision {
+  deltaSeconds: number;
+  placesBack: number | "tail";
+  recalled: boolean;
+}
 
 /* JSON column shapes live in @platerelay/shared because the API sends them as they are. */
 export type { AnswerSnapshot, FormField, FormFieldType, OrderFilament, OrderNozzle, OrderPart, PrinterError, ReportedNozzle, ReportedStorage, ReportedTray, RevisionInfo };
@@ -200,29 +210,13 @@ export const files = pgTable("files", {
   createdAt: createdAt(),
 });
 
-/** One order per plate (brief §5.3); plates of one upload share file_id and nothing else. */
+/** One order per plate (brief §5.3). What it prints lives in order_versions; the order points at it. */
 export const orders = pgTable(
   "orders",
   {
     id: serial("id").primaryKey(),
     status: orderStatus("status").notNull(),
     ownerId: uuid("owner_id").notNull().references(() => users.id),
-    fileId: uuid("file_id").notNull().references(() => files.id),
-    plateIndex: integer("plate_index").notNull(),
-    plateCount: integer("plate_count").notNull(),
-    plateName: text("plate_name").notNull().default(""),
-    printerModel: text("printer_model"),
-    printerModelId: text("printer_model_id").notNull(),
-    nozzles: jsonb("nozzles").$type<OrderNozzle[]>().notNull(),
-    filaments: jsonb("filaments").$type<OrderFilament[]>().notNull(),
-    printSeconds: integer("print_seconds").notNull(),
-    weightGrams: real("weight_grams").notNull(),
-    thumbnailKey: text("thumbnail_key"),
-    /** Printable objects of the plate; empty when the file does not label them, so parts cannot be skipped. */
-    parts: jsonb("parts").$type<OrderPart[]>().notNull().default([]),
-    /** Top view and pick map for 跳过零件 (storage keys); null when the file has none. */
-    partsTopKey: text("parts_top_key"),
-    partsPickKey: text("parts_pick_key"),
     /** Part ids the printer was told to skip. */
     skippedParts: jsonb("skipped_parts").$type<number[]>().notNull().default([]),
     formVersionId: integer("form_version_id").notNull().references(() => formVersions.id),
@@ -257,25 +251,38 @@ export const orders = pgTable(
     colourPref: colourPref("colour_pref").notNull().default("similar"),
     /** Plate the submitter picked when 自选板 is allowed; null prints on the plate the file was sliced for. */
     bedType: text("bed_type"),
-    /** Print time of the first version, the baseline for revision penalties. */
-    originalPrintSeconds: integer("original_print_seconds"),
+    /** Print time of the first version, the baseline for revision penalties; a retry keeps its failed order's. */
+    originalPrintSeconds: integer("original_print_seconds").notNull(),
     revisionCount: integer("revision_count").notNull().default(0),
     modelSwitchCount: integer("model_switch_count").notNull().default(0),
-    /** Revision waiting for re-review (frozen in its place), cleared on approval. */
-    revision: jsonb("revision").$type<RevisionInfo>(),
     /** First time a later order was dispatched while this one stayed queued; cleared on dispatch. */
     skippedSince: ts("skipped_since"),
+    /**
+     * The version the order prints. Approved once the order has been reviewed; before its first review
+     * it is the submitted file waiting for that review. Never null after the creating transaction (a
+     * deferred trigger checks it); nullable here only because the order row has to exist first.
+     */
+    activeVersionId: integer("active_version_id"),
+    /** A revision waiting for re-review while the active version keeps the order's place. Only in PENDING_REVIEW. */
+    pendingVersionId: integer("pending_version_id"),
   },
-  (t) => [
+  /* typed, because orders and order_versions reference each other */
+  (t): PgTableExtraConfigValue[] => [
     index("orders_status_queue").on(t.status, t.queueSeq, t.id),
     index("orders_owner").on(t.ownerId, t.submittedAt),
     uniqueIndex("orders_retry_of").on(t.retryOf),
+    /* both pointers stay on the order's own versions */
+    foreignKey({ name: "orders_active_version_own", columns: [t.activeVersionId, t.id], foreignColumns: [orderVersions.id, orderVersions.orderId] }),
+    foreignKey({ name: "orders_pending_version_own", columns: [t.pendingVersionId, t.id], foreignColumns: [orderVersions.id, orderVersions.orderId] }),
+    check("orders_pending_in_review", sql`${t.pendingVersionId} is null or ${t.status} = 'PENDING_REVIEW'`),
   ],
 );
 
 /**
- * Every file an order has had (rules doc §3). The order row holds the version it prints; these keep
- * the others downloadable and restorable, and are what a withdrawn or rejected revision falls back to.
+ * Every file an order has had (rules doc §3), immutable: a trigger only lets the review decision
+ * (state, decided_*, reason) be set, once, and refuses deletes. The order points at them
+ * (active_version_id, pending_version_id), so revising, withdrawing, rejecting and restoring only move
+ * those pointers and never copy file data around.
  */
 export const orderVersions = pgTable(
   "order_versions",
@@ -302,6 +309,8 @@ export const orderVersions = pgTable(
     parts: jsonb("parts").$type<OrderPart[]>().notNull().default([]),
     partsTopKey: text("parts_top_key"),
     partsPickKey: text("parts_pick_key"),
+    /** For revisions and restores: the time difference and queue move decided at upload. */
+    decision: jsonb("decision").$type<VersionDecision>(),
     /** Counted towards revisions.max / modelSwitch.max; given back when it is withdrawn. */
     counted: boolean("counted").notNull().default(false),
     switched: boolean("switched").notNull().default(false),
@@ -310,7 +319,7 @@ export const orderVersions = pgTable(
     decidedAt: ts("decided_at"),
     reason: text("reason"),
   },
-  (t) => [uniqueIndex("order_versions_n").on(t.orderId, t.n)],
+  (t) => [uniqueIndex("order_versions_n").on(t.orderId, t.n), uniqueIndex("order_versions_id_order").on(t.id, t.orderId)],
 );
 
 /** Pickup codes: issued on demand, valid 10 minutes, a new one revokes the previous one. */

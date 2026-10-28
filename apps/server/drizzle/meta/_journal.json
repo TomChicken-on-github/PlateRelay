@@ -50,6 +50,20 @@
       "when": 1793099921333,
       "tag": "0006_skip_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793145318661,
+      "tag": "0007_version_pointers",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793145344053,
+      "tag": "0008_drop_order_copies",
+      "breakpoints": true
     }
   ]
 }

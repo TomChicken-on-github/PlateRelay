@@ -34,8 +34,9 @@ import { type Offer, ResourcesService } from "../rules/resources.service.js";
 import { SettingsService } from "../settings/settings.service.js";
 import { STORAGE, type ObjectStorage } from "../storage/storage.js";
 import { lockQueue, moveInQueue, queueLock } from "./queue.js";
+import { orderRow, orderRows, shownVersion } from "./rows.js";
 import { type OrderRow, orderEvent, transition } from "./transition.js";
-import { addVersion, currentOf, decide, lastApproved, pendingOf, type VersionFields, type VersionRow, versionFields, versionsOf } from "./versions.js";
+import { addVersion, createOrder, decide, undecided, type VersionFields, type VersionRow, versionFields, versionsOf } from "./versions.js";
 import { loadPeople, orderViews, THUMB_TTL_S, type ViewExtras } from "./views.js";
 
 /** Submit-page choices besides the form: 颜色要求 and, when allowed, the build plate. */
@@ -61,7 +62,7 @@ const PHOTO_TYPES: [string, number[], string][] = [
 ];
 
 /** Revision counts a superseded or withdrawn version gives back. */
-function refund(o: OrderRow, pending: VersionRow[]) {
+function refund(o: Pick<OrderRow, "revisionCount" | "modelSwitchCount">, pending: VersionRow[]) {
   return {
     revisionCount: o.revisionCount - pending.filter((v) => v.counted).length,
     modelSwitchCount: o.modelSwitchCount - pending.filter((v) => v.switched).length,
@@ -69,13 +70,12 @@ function refund(o: OrderRow, pending: VersionRow[]) {
 }
 
 /**
- * What a new upload is compared with: with a revision under review, the last approved version (the
- * revision is superseded and given back); otherwise the order as it is.
+ * What a new upload is compared with: always the active version. A revision under review is
+ * superseded and given back, and the order counts as queued again (that version was approved).
  */
 function baseFor(o: OrderRow, versions: VersionRow[]): OrderRow {
-  const pending = pendingOf(versions);
-  const back = o.revision ? lastApproved(versions) : undefined;
-  return { ...o, ...(back ? { ...versionFields(back), status: "QUEUED" as const } : {}), ...refund(o, pending.filter((v) => v.n > 1 || back)) };
+  const active = versions.find((v) => v.id === o.activeVersionId)!;
+  return { ...o, ...versionFields(active), ...(o.pendingVersionId != null ? { status: "QUEUED" as const, revision: null } : {}), ...refund(o, undecided(o, versions)) };
 }
 
 @Injectable()
@@ -117,7 +117,7 @@ export class OrdersService {
   }
 
   async mine(ctx: Ctx): Promise<OrderView[]> {
-    const rows = await this.db.select().from(orders).where(eq(orders.ownerId, userId(ctx)!)).orderBy(desc(orders.submittedAt), asc(orders.plateIndex));
+    const rows = await orderRows(this.db, eq(orders.ownerId, userId(ctx)!), { orderBy: [desc(orders.submittedAt), asc(orderVersions.plateIndex)] });
     return this.views(ctx, rows);
   }
 
@@ -131,11 +131,7 @@ export class OrdersService {
    * §3.3), then oldest first like the queue.
    */
   async reviewPool(ctx: Ctx): Promise<OrderDetail[]> {
-    const rows = await this.db
-      .select()
-      .from(orders)
-      .where(eq(orders.status, "PENDING_REVIEW"))
-      .orderBy(sql`${orders.revision} is null`, asc(orders.submittedAt), asc(orders.id));
+    const rows = await orderRows(this.db, eq(orders.status, "PENDING_REVIEW"), { orderBy: [sql`${orders.pendingVersionId} is null`, asc(orders.submittedAt), asc(orders.id)] });
     const exact = rows.filter((r) => r.colourPref === "exact");
     const missingColours = new Map<number, string[]>();
     if (exact.length) {
@@ -153,24 +149,18 @@ export class OrdersService {
     if (q.ownerId) where.push(eq(orders.ownerId, q.ownerId));
     if (q.q) {
       const like = `%${q.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-      const conds: SQL[] = [inArray(orders.fileId, this.db.select({ id: files.id }).from(files).where(ilike(files.fileName, like)))];
+      const conds: SQL[] = [inArray(orderVersions.fileId, this.db.select({ id: files.id }).from(files).where(ilike(files.fileName, like)))];
       const n = Number(q.q.replace(/^#/, ""));
       if (Number.isInteger(n) && n > 0) conds.push(eq(orders.id, n));
       where.push(or(...conds)!);
     }
-    const rows = await this.db
-      .select()
-      .from(orders)
-      .where(and(...where))
-      .orderBy(desc(orders.submittedAt), asc(orders.plateIndex))
-      .limit(q.limit)
-      .offset(q.offset);
+    const rows = await orderRows(this.db, and(...where), { orderBy: [desc(orders.submittedAt), asc(orderVersions.plateIndex)], limit: q.limit, offset: q.offset });
     const counts = await this.db.select({ status: orders.status, n: count() }).from(orders).groupBy(orders.status);
     return { orders: await this.views(ctx, rows), counts: Object.fromEntries(counts.map((c) => [c.status, c.n])) as Partial<Record<OrderStatus, number>> };
   }
 
   async detail(ctx: Ctx, id: number): Promise<OrderDetail> {
-    const [r] = await this.db.select().from(orders).where(eq(orders.id, id));
+    const r = await orderRow(this.db, id);
     if (!r) throw notFound("订单");
     const mine = r.ownerId === userId(ctx);
     if (!mine && !can(ctx, "order:view:any")) {
@@ -212,7 +202,7 @@ export class OrdersService {
       .orderBy(desc(orderVersions.n));
     for (const r of rows) {
       const mine = vs.filter((x) => x.v.orderId === r.id);
-      const cur = currentOf(mine.map((x) => x.v));
+      const cur = r.pendingVersionId ?? r.activeVersionId;
       const list: OrderVersionView[] = [];
       for (const { v, fileName, sizeBytes } of mine.reverse()) {
         list.push({
@@ -220,7 +210,7 @@ export class OrdersService {
           kind: v.kind,
           restoredFrom: v.restoredFrom,
           state: v.state,
-          current: v.n === cur?.n,
+          current: v.id === cur,
           fileName,
           sizeBytes,
           plate: { index: v.plateIndex, count: v.plateCount, name: v.plateName },
@@ -242,7 +232,12 @@ export class OrdersService {
 
   /** Signed link to the uploaded file. Opening someone else's model is a sensitive read and is audited. */
   async fileUrl(ctx: Ctx, id: number): Promise<string> {
-    const [r] = await this.db.select({ ownerId: orders.ownerId, key: files.key, name: files.fileName }).from(orders).innerJoin(files, eq(files.id, orders.fileId)).where(eq(orders.id, id));
+    const [r] = await this.db
+      .select({ ownerId: orders.ownerId, key: files.key, name: files.fileName })
+      .from(orders)
+      .innerJoin(orderVersions, shownVersion)
+      .innerJoin(files, eq(files.id, orderVersions.fileId))
+      .where(eq(orders.id, id));
     if (!r) throw notFound("订单");
     const mine = r.ownerId === userId(ctx);
     if (!mine && !can(ctx, "order:view:any") && !can(ctx, "order:review")) {
@@ -260,7 +255,7 @@ export class OrdersService {
   async preview(fileName: string, data: Buffer): Promise<OrderPreview> {
     const parsed = this.gcode3mf.parse(fileName, data);
     const offer = await this.resources.offer();
-    const queued = await this.db.select({ s: orders.printSeconds }).from(orders).where(eq(orders.status, "QUEUED"));
+    const queued = await this.db.select({ s: orderVersions.printSeconds }).from(orders).innerJoin(orderVersions, shownVersion).where(eq(orders.status, "QUEUED"));
     return {
       ...parsed,
       plates: parsed.plates.map((p) => ({
@@ -275,7 +270,11 @@ export class OrdersService {
   /** The numbers on top of 概况. */
   async overview(): Promise<OverviewStats> {
     const counts = await this.db.select({ status: orders.status, n: count() }).from(orders).where(inArray(orders.status, ["PENDING_REVIEW", "QUEUED"])).groupBy(orders.status);
-    const queued = await this.db.select({ printerModel: orders.printerModel, printerModelId: orders.printerModelId, nozzles: orders.nozzles }).from(orders).where(eq(orders.status, "QUEUED"));
+    const queued = await this.db
+      .select({ printerModel: orderVersions.printerModel, printerModelId: orderVersions.printerModelId, nozzles: orderVersions.nozzles })
+      .from(orders)
+      .innerJoin(orderVersions, shownVersion)
+      .where(eq(orders.status, "QUEUED"));
     const fleet = await this.openFleet();
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE"));
     const awaitingIds = new Set(awaiting.map((o) => o.id));
@@ -283,7 +282,7 @@ export class OrdersService {
     const todo = awaiting.length + fleet.filter((p) => p.state === "ERROR_PAUSED" || (p.state === "CLEARING_REQUIRED" && !(p.currentOrderId != null && awaitingIds.has(p.currentOrderId)))).length;
     const rules = await this.settings.get("queue.rules");
     const now = new Date();
-    const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)))).filter((o) => this.policy.remindSkipped(rules, o, now)).length;
+    const skipped = (await orderRows(this.db, and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)))).filter((o) => this.policy.remindSkipped(rules, o, now)).length;
     const n = (s: OrderStatus) => counts.find((c) => c.status === s)?.n ?? 0;
     return { pendingReview: n("PENDING_REVIEW"), queued: n("QUEUED"), waitingCompatible: queued.filter((o) => waitReason(o, fleet) !== null).length, todo: todo + skipped + (await this.scheduler.suggestions()).size };
   }
@@ -332,11 +331,18 @@ export class OrdersService {
         await tx.insert(files).values({ id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
         const created: OrderRow[] = [];
         for (const p of info.plates) {
-          const [o] = await tx
-            .insert(orders)
-            .values({
+          const o = await createOrder(
+            tx,
+            {
               status: "PENDING_REVIEW",
               ownerId: userId(ctx)!,
+              formVersionId: form.id,
+              answers,
+              colourPref: choices.colourPref,
+              bedType: choices.bedType,
+              originalPrintSeconds: Math.round(p.printSeconds),
+            },
+            {
               fileId,
               plateIndex: p.index,
               plateCount: parsed.plates.length,
@@ -351,14 +357,9 @@ export class OrdersService {
               parts: skippable(p) ? p.parts : [],
               partsTopKey: views.get(p.index)?.top ?? null,
               partsPickKey: views.get(p.index)?.pick ?? null,
-              formVersionId: form.id,
-              answers,
-              colourPref: choices.colourPref,
-              bedType: choices.bedType,
-              originalPrintSeconds: Math.round(p.printSeconds),
-            })
-            .returning();
-          await addVersion(tx, o.id, versionFields(o), { kind: "submit", state: "pending" });
+            },
+            { kind: "submit", state: "pending" },
+          );
           await orderEvent(tx, ctx, o.id, "submit", { plate: p.index, of: parsed.plates.length });
           await this.audit.record(ctx, { action: "order.submit", targetType: "order", targetId: o.id, after: { fileId, plate: p.index } }, tx);
           created.push(o);
@@ -461,9 +462,9 @@ export class OrdersService {
     const versions = await versionsOf(this.db, id);
     const from = versions.find((v) => v.n === n);
     if (!from) throw notFound("版本");
-    if (cur.revision) throw new ApiError(HttpStatus.CONFLICT, "revision-pending", "有修改正在审核，先撤回修改再恢复", { orderId: id });
+    if (cur.pendingVersionId != null) throw new ApiError(HttpStatus.CONFLICT, "revision-pending", "有修改正在审核，先撤回修改再恢复", { orderId: id });
     if (from.state !== "approved") throw new ApiError(HttpStatus.CONFLICT, "version-not-approved", "只能恢复审核通过的版本", { orderId: id, n });
-    if (currentOf(versions)?.n === n) throw new ApiError(HttpStatus.CONFLICT, "version-current", "这已经是当前版本", { orderId: id, n });
+    if (from.id === cur.activeVersionId) throw new ApiError(HttpStatus.CONFLICT, "version-current", "这已经是当前版本", { orderId: id, n });
     const printer = await this.dispatchedPrinter(cur);
     if (cur.status !== "QUEUED" && !printer) {
       throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "这张单现在不能恢复旧版本", { orderId: id, status: cur.status });
@@ -479,19 +480,19 @@ export class OrdersService {
   async withdraw(ctx: Ctx, id: number): Promise<OrderView> {
     await this.ownOrder(ctx, id, "order.withdraw");
     const row = await this.db.transaction(async (tx) => {
-      const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");
-      const versions = await versionsOf(tx, id);
-      const back = lastApproved(versions);
-      const pending = pendingOf(versions);
-      if (o.status !== "PENDING_REVIEW" || !o.revision || !back || !pending.length) {
+      const o = (await orderRow(tx, id, true))!;
+      if (o.status !== "PENDING_REVIEW" || o.pendingVersionId == null) {
         throw new ApiError(HttpStatus.CONFLICT, "nothing-to-withdraw", "没有正在审核的修改", { orderId: id, status: o.status });
       }
-      await decide(tx, pending.map((v) => v.id), "withdrawn", userId(ctx));
+      const versions = await versionsOf(tx, id);
+      const pending = versions.find((v) => v.id === o.pendingVersionId)!;
+      const back = versions.find((v) => v.id === o.activeVersionId)!;
+      await decide(tx, [pending.id], "withdrawn", userId(ctx));
       const { row } = await transition(tx, ctx, id, "withdraw", {
-        set: { ...versionFields(back), ...refund(o, pending), revision: null },
-        data: { n: pending[0].n, back: back.n },
+        set: { pendingVersionId: null, ...refund(o, [pending]) },
+        data: { n: pending.n, back: back.n },
       });
-      await this.audit.record(ctx, { action: "order.withdraw", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending[0].n }, after: { status: "QUEUED", version: back.n } }, tx);
+      await this.audit.record(ctx, { action: "order.withdraw", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending.n }, after: { status: "QUEUED", version: back.n } }, tx);
       return row;
     });
     return (await this.views(ctx, [row]))[0];
@@ -517,7 +518,7 @@ export class OrdersService {
   }
 
   private async ownOrder(ctx: Ctx, id: number, action: string): Promise<OrderRow> {
-    const [cur] = await this.db.select().from(orders).where(eq(orders.id, id));
+    const cur = await orderRow(this.db, id);
     if (!cur || cur.ownerId !== userId(ctx)) {
       if (cur) await this.audit.record(ctx, { action, targetType: "order", targetId: id, result: "denied", reason: "not-owner" });
       throw notFound("订单");
@@ -573,21 +574,24 @@ export class OrdersService {
       /* printer, then queue, then order row: the order every writer takes them in (see queue.ts) */
       const p = printer ? await lockPrinter(tx, printer.id) : undefined;
       await queueLock(tx);
-      const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");
-      if (o.status !== cur.status || o.fileId !== cur.fileId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
+      const o = (await orderRow(tx, id, true))!;
+      if (o.status !== cur.status || o.activeVersionId !== cur.activeVersionId || o.pendingVersionId !== cur.pendingVersionId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id, status: o.status });
       if (p) {
         if (p.state !== "PREPARING" || p.currentOrderId !== id) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "这张单已经开始打印，不能再改", { orderId: id });
         await movePrinter(tx, p, "recalled", { currentOrderId: null });
         recalled = p.id;
       }
       const [f] = await tx.select({ fileName: files.fileName }).from(files).where(eq(files.id, base.fileId));
-      const superseded = pendingOf(await versionsOf(tx, id));
-      await decide(tx, superseded.map((v) => v.id), "withdrawn", userId(ctx));
+      const versions = await versionsOf(tx, id);
+      /* an approved active version keeps the place while the new one is reviewed; before the first review there is none to keep */
+      const keeps = versions.find((v) => v.id === o.activeVersionId)?.state === "approved";
+      await decide(tx, undecided(o, versions).map((v) => v.id), "withdrawn", userId(ctx));
       if (opts.file && !(await tx.select({ id: files.id }).from(files).where(eq(files.id, opts.file.id!))).length) await tx.insert(files).values(opts.file);
       const ver = await addVersion(tx, id, fields, {
         kind: d.kind,
         state: d.review ? "pending" : "approved",
         restoredFrom: opts.restoredFrom,
+        decision: { deltaSeconds: d.deltaSeconds, placesBack: d.placesBack, recalled: !!printer },
         counted: d.counts,
         switched: d.isSwitch,
         decidedBy: userId(ctx),
@@ -602,14 +606,12 @@ export class OrdersService {
         recalled: !!printer,
       };
       const set = {
-        ...fields,
-        originalPrintSeconds: o.originalPrintSeconds ?? o.printSeconds,
+        ...(d.review && keeps ? { pendingVersionId: ver.id } : { activeVersionId: ver.id, pendingVersionId: null }),
         revisionCount: base.revisionCount + (d.counts ? 1 : 0),
         modelSwitchCount: base.modelSwitchCount + (d.isSwitch ? 1 : 0),
         printerId: null,
         startedAt: null,
         skippedSince: null,
-        revision: d.review ? info : null,
       };
       const fileName = opts.file?.fileName ?? null;
       const data_ = { n: info.n, version: ver.n, kind: d.kind, file: fileName, plate: fields.plateIndex, restoredFrom: opts.restoredFrom ?? null, deltaSeconds: d.deltaSeconds, placesBack: d.placesBack, recalled: !!printer, review: d.review };
@@ -654,15 +656,22 @@ export class OrdersService {
   async approve(ctx: Ctx, id: number): Promise<OrderView> {
     const row = await this.db.transaction(async (tx) => {
       await queueLock(tx);
-      const [pending] = await tx.select({ revision: orders.revision }).from(orders).where(eq(orders.id, id)).for("update");
-      const rev = pending?.revision ?? null;
+      const o = await orderRow(tx, id, true);
+      if (!o) throw notFound("订单");
+      const rev = o.revision;
       const { row } = await transition(tx, ctx, id, "approve", {
-        set: { reviewedBy: userId(ctx), reviewedAt: new Date(), queueSeq: sql`coalesce(${orders.queueSeq}, nextval('order_queue_seq'))`, revision: null },
+        set: {
+          reviewedBy: userId(ctx),
+          reviewedAt: new Date(),
+          queueSeq: sql`coalesce(${orders.queueSeq}, nextval('order_queue_seq'))`,
+          activeVersionId: o.pendingVersionId ?? o.activeVersionId,
+          pendingVersionId: null,
+        },
         data: rev ? { revision: rev.n, placesBack: rev.placesBack } : undefined,
         conflictCode: "already-reviewed",
         conflictMessage: "这张单已被他人审核",
       });
-      await decide(tx, pendingOf(await versionsOf(tx, id)).map((v) => v.id), "approved", userId(ctx));
+      await decide(tx, [o.pendingVersionId ?? o.activeVersionId!], "approved", userId(ctx));
       await this.audit.record(ctx, { action: "order.approve", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "QUEUED" } }, tx);
       if (!rev || rev.placesBack === 0) return row;
       return this.moveBack(tx, ctx, id, rev);
@@ -687,7 +696,7 @@ export class OrdersService {
       },
       tx,
     );
-    return (await tx.select().from(orders).where(eq(orders.id, id)))[0];
+    return (await orderRow(tx, id))!;
   }
 
   /**
@@ -696,19 +705,20 @@ export class OrdersService {
    */
   async reject(ctx: Ctx, id: number, reason: string): Promise<OrderView> {
     const row = await this.db.transaction(async (tx) => {
-      const [o] = await tx.select({ revision: orders.revision }).from(orders).where(eq(orders.id, id)).for("update");
+      const o = await orderRow(tx, id, true);
+      if (!o) throw notFound("订单");
       const versions = await versionsOf(tx, id);
-      const pending = pendingOf(versions);
-      const back = o?.revision ? lastApproved(versions) : undefined;
-      if (back) {
+      if (o.status === "PENDING_REVIEW" && o.pendingVersionId != null) {
+        const pending = versions.find((v) => v.id === o.pendingVersionId)!;
+        const back = versions.find((v) => v.id === o.activeVersionId)!;
         const { row } = await transition(tx, ctx, id, "rejectRevision", {
-          set: { ...versionFields(back), revision: null },
-          data: { reason, n: pending[0]?.n ?? null, back: back.n },
+          set: { pendingVersionId: null },
+          data: { reason, n: pending.n, back: back.n },
           conflictCode: "already-reviewed",
           conflictMessage: "这张单已被他人审核",
         });
-        await decide(tx, pending.map((v) => v.id), "rejected", userId(ctx), reason);
-        await this.audit.record(ctx, { action: "order.reject", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending[0]?.n }, after: { status: "QUEUED", version: back.n }, reason }, tx);
+        await decide(tx, [pending.id], "rejected", userId(ctx), reason);
+        await this.audit.record(ctx, { action: "order.reject", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW", version: pending.n }, after: { status: "QUEUED", version: back.n }, reason }, tx);
         return row;
       }
       const { row } = await transition(tx, ctx, id, "reject", {
@@ -717,7 +727,7 @@ export class OrdersService {
         conflictCode: "already-reviewed",
         conflictMessage: "这张单已被他人审核",
       });
-      await decide(tx, pending.map((v) => v.id), "rejected", userId(ctx), reason);
+      await decide(tx, undecided(o, versions).map((v) => v.id), "rejected", userId(ctx), reason);
       await this.audit.record(ctx, { action: "order.reject", targetType: "order", targetId: id, before: { status: "PENDING_REVIEW" }, after: { status: "REJECTED" }, reason }, tx);
       return row;
     });
@@ -744,7 +754,7 @@ export class OrdersService {
     let stopPrinter: string | null = null;
     let recallPrinter: string | null = null;
     const row = await this.db.transaction(async (tx) => {
-      const [o] = await tx.select().from(orders).where(eq(orders.id, id));
+      const o = (await orderRow(tx, id))!;
       const printer = o.status === "PRINTING" && o.printerId ? await lockPrinter(tx, o.printerId) : null;
       /* dispatched but still PREPARING has not started: the submitter may still cancel it */
       const early = printer?.state === "PREPARING" && printer.currentOrderId === id;
@@ -753,9 +763,11 @@ export class OrdersService {
       }
       const now = new Date();
       const { row, from } = await transition(tx, ctx, id, any ? "cancelAny" : "cancelOwn", {
-        set: { cancelledBy: userId(ctx), cancelledAt: now, cancelReason: reason, errorPausedMs: o.errorPausedMs + (printer ? pausedMs(printer, now) : 0) },
+        set: { cancelledBy: userId(ctx), cancelledAt: now, cancelReason: reason, errorPausedMs: o.errorPausedMs + (printer ? pausedMs(printer, now) : 0), pendingVersionId: null },
         data: { reason },
       });
+      /* whatever still waited for review goes with the order: a revision under review (the order then shows the version it held) or a first submission */
+      await decide(tx, undecided(o, await versionsOf(tx, id)).map((v) => v.id), "withdrawn", userId(ctx));
       if (early) {
         /* nothing on the bed yet: take the job back instead of stopping a print */
         await movePrinter(tx, printer, "recalled", { currentOrderId: null });
@@ -790,7 +802,7 @@ export class OrdersService {
 
   /** What the 跳过零件 sheet draws: the plate's parts, which are skipped, and its top view and pick map. */
   async parts(ctx: Ctx, id: number): Promise<OrderPartsView> {
-    const [r] = await this.db.select().from(orders).where(eq(orders.id, id));
+    const r = await orderRow(this.db, id);
     if (!r || (r.ownerId !== userId(ctx) && !can(ctx, "order:view:any"))) throw notFound("订单");
     if (!r.partsTopKey || !r.partsPickKey) throw new ApiError(HttpStatus.CONFLICT, "parts-unavailable", "这张单的文件不支持跳过零件");
     return {
@@ -807,7 +819,7 @@ export class OrdersService {
    * The command goes out first and only a sent command is recorded.
    */
   async skipParts(ctx: Ctx, id: number, partIds: number[]): Promise<OrderView> {
-    const [o] = await this.db.select().from(orders).where(eq(orders.id, id));
+    const o = await orderRow(this.db, id);
     if (!o) throw notFound("订单");
     const mine = o.ownerId === userId(ctx);
     if (!can(ctx, "order:skip-parts:any") && !(mine && can(ctx, "order:skip-parts:own"))) {
@@ -836,7 +848,8 @@ export class OrdersService {
     const row = await this.db.transaction(async (tx) => {
       const [cur] = await tx.select({ skipped: orders.skippedParts }).from(orders).where(eq(orders.id, id)).for("update");
       const skipped = [...new Set([...cur.skipped, ...ids])];
-      const [row] = await tx.update(orders).set({ skippedParts: skipped }).where(eq(orders.id, id)).returning();
+      await tx.update(orders).set({ skippedParts: skipped }).where(eq(orders.id, id));
+      const row = (await orderRow(tx, id))!;
       const named = o.parts.filter((x) => ids.includes(x.id));
       await orderEvent(tx, ctx, id, "skip-parts", { parts: named });
       await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, before: { skipped: cur.skipped }, after: { printerId: p.id, skipped } }, tx);
@@ -854,25 +867,29 @@ export class OrdersService {
    */
   async attribute(ctx: Ctx, id: number, attribution: FailureAttribution, note: string | null): Promise<{ failed: OrderView; retry: OrderView }> {
     const { failed, retry } = await this.db.transaction(async (tx) => {
-      const [o] = await tx.select().from(orders).where(eq(orders.id, id)).for("update");
+      const o = await orderRow(tx, id, true);
       if (!o) throw notFound("订单");
       if (o.status !== "FAILED") throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有打印失败的订单能归因", { orderId: id, status: o.status });
       if (o.attribution) throw new ApiError(HttpStatus.CONFLICT, "already-attributed", "这张单已经归因过了", { orderId: id, attribution: o.attribution });
-      const [failed] = await tx.update(orders).set({ attribution, attributedBy: userId(ctx), attributedAt: new Date() }).where(eq(orders.id, id)).returning();
+      await tx.update(orders).set({ attribution, attributedBy: userId(ctx), attributedAt: new Date() }).where(eq(orders.id, id));
+      const failed = (await orderRow(tx, id))!;
       const machine = attribution === "machine";
-      const { id: _id, status: _s, submittedAt: _at, ...copy } = o;
-      const [retry] = await tx
-        .insert(orders)
-        .values({
+      const [raw] = await tx.select().from(orders).where(eq(orders.id, id));
+      const { id: _id, status: _s, submittedAt: _at, activeVersionId: _a, pendingVersionId: _p, ...copy } = raw;
+      /* the retry's first version is the file that failed, as a new version of its own */
+      const retry = await createOrder(
+        tx,
+        {
           ...blank(copy),
           status: machine ? "QUEUED" : "PENDING_REVIEW",
           queueSeq: machine ? o.queueSeq : null,
           reviewedBy: machine ? o.reviewedBy : null,
           reviewedAt: machine ? o.reviewedAt : null,
           retryOf: id,
-        })
-        .returning();
-      await addVersion(tx, retry.id, versionFields(retry), { kind: "submit", state: machine ? "approved" : "pending", decidedBy: o.reviewedBy });
+        },
+        versionFields(o),
+        { kind: "submit", state: machine ? "approved" : "pending", decidedBy: o.reviewedBy },
+      );
       await orderEvent(tx, ctx, id, "attribute", { attribution, note, retry: retry.id });
       await orderEvent(tx, ctx, retry.id, "retry", { retryOf: id, attribution });
       await this.audit.record(ctx, { action: "order.attribute", targetType: "order", targetId: id, after: { attribution, retry: retry.id }, reason: note }, tx);
@@ -935,7 +952,7 @@ export class OrdersService {
 }
 
 /** A retry starts with a clean history: only the plate, file and answers carry over. */
-function blank(o: Omit<OrderRow, "id" | "status" | "submittedAt">) {
+function blank(o: Omit<typeof orders.$inferSelect, "id" | "status" | "submittedAt" | "activeVersionId" | "pendingVersionId">) {
   return {
     ...o,
     reviewedBy: null,
@@ -961,7 +978,6 @@ function blank(o: Omit<OrderRow, "id" | "status" | "submittedAt">) {
     attributedBy: null,
     attributedAt: null,
     skippedParts: [],
-    revision: null,
     skippedSince: null,
   };
 }

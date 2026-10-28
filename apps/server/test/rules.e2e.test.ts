@@ -3,6 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { DEFAULT_QUEUE_RULES, type OrderDetail, type OrderPreview, type OrderView, type QueueRules, type ResourcesView, type TodoView } from "@platerelay/shared";
 import { desc, eq, inArray, ne } from "drizzle-orm";
 import { auditLog, orders, printers, settings } from "../src/db/schema.js";
+import { orderRow } from "../src/orders/rows.js";
 import { SchedulerService } from "../src/printers/scheduler.service.js";
 import { PrintersService } from "../src/printers/printers.service.js";
 import { PLATE1_SECONDS, startApp, type TestApp, x2dPlate1Plus, x2dTwoPlates } from "./helpers.js";
@@ -60,7 +61,7 @@ describe("print rules", () => {
 
   /* each test starts from an empty queue and the default rules */
   beforeEach(async () => {
-    await t.db.update(orders).set({ status: "CANCELLED", queueSeq: null }).where(ne(orders.status, "CANCELLED"));
+    await t.db.update(orders).set({ status: "CANCELLED", queueSeq: null, pendingVersionId: null }).where(ne(orders.status, "CANCELLED"));
     await t.db.update(printers).set({ state: "MAINTENANCE", currentOrderId: null });
     await t.db.delete(settings).where(inArray(settings.key, ["queue.rules", "resources"]));
     t.commands.online = false;
@@ -208,7 +209,7 @@ describe("print rules", () => {
   describe("修改文件", () => {
     it("a revision brings its own parts for 跳过零件, and withdrawing it brings the old ones back", async () => {
       const a = await queued(user);
-      const row = async () => (await t.db.select().from(orders).where(eq(orders.id, a)))[0];
+      const row = async () => (await orderRow(t.db, a))!;
       const before = await row();
       assert.equal(before.parts.length, 9);
       const fewer = x2dTwoPlates((s) => s.replace(/\s*<object identify_id="407"[^>]*\/>/, ""));

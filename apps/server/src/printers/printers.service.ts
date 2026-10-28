@@ -6,8 +6,9 @@ import { type Ctx, can, SYSTEM, userId } from "../auth/actor.js";
 import { ApiError, notFound } from "../common/errors.js";
 import { modulusBytes } from "../daemons/daemons.service.js";
 import { DB, type Db } from "../db/db.js";
-import { daemons, files, orders, type PrinterError, printers } from "../db/schema.js";
+import { daemons, files, orders, orderVersions, type PrinterError, printers } from "../db/schema.js";
 import { OrdersService } from "../orders/orders.service.js";
+import { orderRows, shownVersion } from "../orders/rows.js";
 import { type OrderRow, orderEvent, transition } from "../orders/transition.js";
 import { loadPeople } from "../orders/views.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "./commands.js";
@@ -48,9 +49,10 @@ export class PrintersService {
     const ids = rows.map((p) => p.currentOrderId).filter((x): x is number => x != null);
     const jobs = ids.length
       ? await this.db
-          .select({ id: orders.id, ownerId: orders.ownerId, status: orders.status, plateIndex: orders.plateIndex, plateCount: orders.plateCount, fileName: files.fileName })
+          .select({ id: orders.id, ownerId: orders.ownerId, status: orders.status, plateIndex: orderVersions.plateIndex, plateCount: orderVersions.plateCount, fileName: files.fileName })
           .from(orders)
-          .innerJoin(files, eq(files.id, orders.fileId))
+          .innerJoin(orderVersions, shownVersion)
+          .innerJoin(files, eq(files.id, orderVersions.fileId))
           .where(inArray(orders.id, ids))
       : [];
     const jobMap = new Map(jobs.map((j) => [j.id, j]));
@@ -305,15 +307,15 @@ export class PrintersService {
   async todo(ctx: Ctx): Promise<TodoView> {
     const rules = await this.settings.get("queue.rules");
     const now = new Date();
-    const skipped = (await this.db.select().from(orders).where(and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince))).orderBy(asc(orders.skippedSince))).filter((o) =>
+    const skipped = (await orderRows(this.db, and(eq(orders.status, "QUEUED"), isNotNull(orders.skippedSince)), { orderBy: [asc(orders.skippedSince)] })).filter((o) =>
       this.policy.remindSkipped(rules, o, now),
     );
     const busy = await this.db.select().from(printers).where(inArray(printers.state, ["CLEARING_REQUIRED", "ERROR_PAUSED"])).orderBy(asc(printers.stateSince));
     const idle = can(ctx, "order:dispatch") ? await this.db.select().from(printers).where(eq(printers.state, "IDLE")).orderBy(asc(printers.stateSince), asc(printers.name)) : [];
     const ready = (await this.views(ctx, idle)).filter((p) => p.suggestion);
-    const awaiting = await this.db.select().from(orders).where(eq(orders.status, "PRINTED_AWAITING_STORAGE")).orderBy(asc(orders.printedAt));
+    const awaiting = await orderRows(this.db, eq(orders.status, "PRINTED_AWAITING_STORAGE"), { orderBy: [asc(orders.printedAt)] });
     const onBeds = busy.map((p) => p.currentOrderId).filter((x): x is number => x != null);
-    const bedOrders = onBeds.length ? await this.db.select().from(orders).where(inArray(orders.id, onBeds)) : [];
+    const bedOrders = onBeds.length ? await orderRows(this.db, inArray(orders.id, onBeds)) : [];
     const views = new Map<number, OrderView>((await this.orders.views(ctx, [...awaiting, ...bedOrders.filter((o) => o.status !== "PRINTED_AWAITING_STORAGE"), ...skipped])).map((v) => [v.id, v]));
     const pViews = new Map((await this.views(ctx, busy)).map((p) => [p.id, p]));
     const awaitingIds = new Set(awaiting.map((o) => o.id));

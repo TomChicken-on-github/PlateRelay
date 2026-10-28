@@ -1,7 +1,7 @@
 import type { PlateAvailability } from "@platerelay/shared";
-import type { orders, printers } from "../db/schema.js";
+import type { orderVersions, printers } from "../db/schema.js";
 
-type O = Pick<typeof orders.$inferSelect, "printerModelId" | "nozzles">;
+type O = Pick<typeof orderVersions.$inferSelect, "printerModelId" | "nozzles">;
 type P = Pick<typeof printers.$inferSelect, "modelId" | "nozzles" | "storage" | "state">;
 
 /** Same printer model and, for every extruder the plate uses, the same nozzle diameter. */

@@ -1,7 +1,8 @@
 import type { AuditLogView } from "@platerelay/shared";
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/db.js";
-import { auditLog, daemons, files, orders, printers } from "../db/schema.js";
+import { auditLog, daemons, files, orders, orderVersions, printers } from "../db/schema.js";
+import { shownVersion } from "../orders/rows.js";
 import { loadPeople } from "../orders/views.js";
 
 type AuditRow = typeof auditLog.$inferSelect;
@@ -32,7 +33,7 @@ export async function auditViews(db: Db, rows: AuditRow[]): Promise<AuditLogView
     loadPeople(db, [...rows.filter((r) => r.actorType === "user").map((r) => r.actorId).filter(isUuid), ...targetIds("user")]),
     printerIds.length ? db.select({ id: printers.id, name: printers.name }).from(printers).where(inArray(printers.id, printerIds)) : [],
     daemonIds.length ? db.select({ id: daemons.id, name: daemons.name }).from(daemons).where(inArray(daemons.id, daemonIds)) : [],
-    orderIds.length ? db.select({ id: orders.id, fileName: files.fileName }).from(orders).leftJoin(files, eq(files.id, orders.fileId)).where(inArray(orders.id, orderIds)) : [],
+    orderIds.length ? db.select({ id: orders.id, fileName: files.fileName }).from(orders).leftJoin(orderVersions, shownVersion).leftJoin(files, eq(files.id, orderVersions.fileId)).where(inArray(orders.id, orderIds)) : [],
   ]);
   const printerNames = new Map(printerRows.map((r) => [r.id, r.name]));
   const daemonNames = new Map(daemonRows.map((r) => [r.id, r.name]));
