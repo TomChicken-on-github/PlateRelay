@@ -55,7 +55,7 @@ const PAGE_PERMS: [prefix: string, perms: string[]][] = [
   ["/printers", ["overview:view"]],
   ["/submit", ["order:submit"]],
   ["/orders", ["order:submit", "order:cancel:own"]],
-  ["/todo", ["order:store", "printer:operate"]],
+  ["/todo", ["order:store", "printer:operate", "order:dispatch"]],
   ["/scan", ["order:redeem"]],
   ["/review", ["order:review"]],
   ["/manage/orders", ["order:view:any"]],

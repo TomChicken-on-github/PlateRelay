@@ -40,6 +40,8 @@ export type Printer = {
   lastSeen?: string;
   maintNote?: string;
   error?: { code: string; module: string; msg: string; at: string };
+  /** 建议下一单 for an idle printer; only Staff and up see it, and nothing is sent until they confirm. */
+  sug?: { orderId: number; file: string; owner: string; n: number; time: string } | null;
 };
 
 const EMPTY = (s: string): Spool => ({ s, m: null, c: "00000000", r: null });
@@ -72,7 +74,7 @@ export const PRINTERS: Printer[] = [
   { id: "P1S-05", model: "Bambu Lab P1S", state: "IDLE",
     nozzles: [{ n: "喷嘴", d: 0.4, cur: 28, tgt: 0 }], bed: [26, 0], chamber: null,
     ams: [{ s: "A1", m: "PLA", c: "F2F2F2FF", r: 95 }, { s: "A2", m: "PLA", c: "111111FF", r: 88 }, EMPTY("A3"), EMPTY("A4")],
-    ext: null, order: null },
+    ext: null, order: null, sug: { orderId: 1052, file: "云台支架.gcode.3mf", owner: "王可", n: 1, time: "1h 20m" } },
   { id: "P2S-03", model: "Bambu Lab P2S", state: "OFFLINE", lastSeen: "2026-10-23 10:48:59",
     nozzles: [{ n: "喷嘴", d: 0.4, cur: null, tgt: null }], bed: [null, null], chamber: null, ams: [], ext: null, order: null },
   { id: "X1C-02", model: "Bambu Lab X1C", state: "MAINTENANCE", maintNote: "更换 0.4 硬化钢喷嘴",
@@ -87,6 +89,21 @@ export const OWNERS: Record<string, [string, string]> = {
   "PR-0138": ["李想", "花盆托盘.gcode.3mf"],
   "PR-0139": ["陈一帆", "超声波传感器支架.gcode.3mf"],
 };
+
+/** An order an idle printer can take, as the 派单 dialog lists it. */
+export type DispatchOption = { orderId: number; file: string; owner: string; n: number; time: string; pos?: number };
+
+/* Prototype: queued orders each idle printer can take, the suggestion first. */
+export const DISPATCH_OPTIONS: Record<string, DispatchOption[]> = {
+  "P1S-05": [
+    { orderId: 1052, file: "云台支架.gcode.3mf", owner: "王可", n: 1, time: "1h 20m", pos: 2 },
+    { orderId: 1053, file: "线材收纳夹.gcode.3mf", owner: "李想", n: 2, time: "35m", pos: 3 },
+    { orderId: 1055, file: "摄像头底座.gcode.3mf", owner: "陈一帆", n: 1, time: "2h 05m", pos: 5 },
+  ],
+};
+
+/* Prototype: what a confirmed 派单 changed, by printer id, laid over PRINTERS. */
+export const dispatched = createStore<Record<string, Partial<Printer>>>({});
 
 export const starStore = createStore<Record<string, boolean>>(Object.fromEntries(PRINTERS.map((p) => [p.id, !!p.star])));
 

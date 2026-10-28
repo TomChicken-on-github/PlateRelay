@@ -62,7 +62,7 @@ function Row({ icon, tone, children }: { icon: FigmaIconName; tone?: "nz" | "bd"
 const temp = (c: number | null, t: number | null) => (c == null ? "— / —" : `${c} / ${t || "—"}°C`);
 
 /** Printer card, exact Figma layout: header, 424px media row (camera 220x123 + data 188) zoomed to the card width, job, banner. */
-export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
+export function PrinterCard({ p, zoom, busy, onDispatch }: { p: Printer; zoom: number; busy?: boolean; onDispatch?: (p: Printer) => void }) {
   const navigate = useNavigate();
   const off = p.state === "OFFLINE";
   const o: [string, string] | null = p.order ? (p.file ? [p.who ?? "", p.file] : (OWNERS[p.order] ?? null)) : null;
@@ -190,6 +190,11 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
           热床未清空
         </Banner>
       )}
+      {p.state === "IDLE" && p.sug && onDispatch && (
+        <Banner tone="sug" icon="queue" action={{ label: "派单", busy, onClick: () => onDispatch(p) }}>
+          建议下一单 #{p.sug.orderId}
+        </Banner>
+      )}
       {p.state === "UNMANAGED_PRINTING" && (
         <Banner tone="warn" icon="lock" action={{ label: "查看详情", onClick: open }}>
           检测到外部任务
@@ -205,12 +210,12 @@ export function PrinterCard({ p, zoom }: { p: Printer; zoom: number }) {
   );
 }
 
-function Banner({ tone, icon, action, children }: { tone: "warn" | "err"; icon: "lock" | "error"; action?: { label: string; onClick: () => void }; children: React.ReactNode }) {
+function Banner({ tone, icon, action, children }: { tone: "warn" | "err" | "sug"; icon: FigmaIconName; action?: { label: string; busy?: boolean; onClick: () => void }; children: React.ReactNode }) {
   return (
     <div
       className={cx(
         "flex h-[42px] items-center gap-2.5 rounded-xl pr-3.5 pl-3 font-cjk text-[14px] leading-4 tracking-[0.4px]",
-        tone === "warn" ? "bg-banner-warn-bg text-banner-warn" : "bg-error-container font-bold text-error",
+        tone === "warn" ? "bg-banner-warn-bg text-banner-warn" : tone === "sug" ? "bg-secondary-container text-on-secondary-container" : "bg-error-container font-bold text-error",
       )}
     >
       <FigmaIcon name={icon} className="size-[18px]" />
@@ -218,9 +223,11 @@ function Banner({ tone, icon, action, children }: { tone: "warn" | "err"; icon: 
       {action && (
         <button
           type="button"
+          disabled={action.busy}
           onClick={action.onClick}
-          className="state-layer ml-auto h-8 rounded-xl border-0 bg-transparent px-3 py-1.5 font-sans text-label-l font-medium text-inherit shadow-[inset_0_0_0_1px_var(--md-btn-stroke)]"
+          className="state-layer ml-auto inline-flex h-8 items-center gap-1.5 rounded-xl border-0 bg-transparent px-3 py-1.5 font-sans text-label-l font-medium text-inherit shadow-[inset_0_0_0_1px_var(--md-btn-stroke)] disabled:cursor-default disabled:opacity-60"
         >
+          {action.busy && <span className="spin size-3.5 rounded-full border-2 border-solid border-current border-r-transparent" />}
           {action.label}
         </button>
       )}

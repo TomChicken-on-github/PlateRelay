@@ -273,6 +273,13 @@ export interface PrinterView {
   suggestion: OrderView | null;
 }
 
+/** GET /api/printers/:id/dispatch-options: what Staff can send to an idle printer, in queue order. */
+export interface DispatchOptionsView {
+  /** The system's suggestion; only a default, any of `orders` may be sent. */
+  suggestedOrderId: number | null;
+  orders: OrderView[];
+}
+
 /** GET /api/todo */
 export interface TodoView {
   store: { order: OrderView; printer: PrinterView | null; since: string | null }[];

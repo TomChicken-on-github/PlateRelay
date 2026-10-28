@@ -30,7 +30,7 @@ export const PERMISSIONS = [
   /** 铲件入库 and confirming a bed is clear. */
   "order:store",
   "order:redeem",
-  /** Confirm the suggested next order for an idle printer, which sends the job (no automatic dispatch). */
+  /** Send a queued order to an idle printer: the suggestion or any other it can take (no automatic dispatch). */
   "order:dispatch",
   /** See printer error details and resolve them (continue, ignore…). */
   "printer:operate",

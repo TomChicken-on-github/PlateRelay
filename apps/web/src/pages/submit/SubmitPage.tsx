@@ -53,7 +53,7 @@ function useFields() {
   return fields;
 }
 
-type Plate = { n: number; model: string; modelId?: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; thumb?: string | null; check?: PlateCheck };
+type Plate = { n: number; model: string; modelId?: string; nozzle: string; time: string; g: number; fil: [string, string][]; st: "ok" | "warn" | "err"; note?: string; res?: "models" | "materials"; thumb?: string | null; check?: PlateCheck };
 
 /* Canned result for the "使用示例文件" demo; real files go to the panel's parse endpoint. */
 const SAMPLE = {
@@ -62,7 +62,7 @@ const SAMPLE = {
   plates: [
     { n: 1, model: "X2D", modelId: "N6", nozzle: "0.4", time: "2h 00m", g: 48, fil: [["#0088ff", "PLA"], ["#ffcc00", "PLA"]], st: "ok" },
     { n: 2, model: "X2D", modelId: "N6", nozzle: "0.4", time: "1h 12m", g: 31, fil: [["#6155f5", "PETG"]], st: "ok", check: { block: [], missingColours: ["#6155f5"] } },
-    { n: 3, model: "H2D", modelId: "O1D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "err", note: "本场的 H2D 没有 0.6 mm 喷嘴。请改用 0.4 mm 重新切片后再提交这一盘。" },
+    { n: 3, model: "H2D", modelId: "O1D", nozzle: "0.6", time: "3h 25m", g: 96, fil: [["#0088ff", "PLA"]], st: "err", note: "本场的 H2D 没有 0.6 mm 喷嘴。请改用 0.4 mm 重新切片后再提交这一盘。", res: "models" },
   ] as Plate[],
 };
 
@@ -91,9 +91,9 @@ function plateBase(r: ParsedUpload, p: ParsedUpload["plates"][number]): Plate {
 function previewPlates(r: OrderPreview): Plate[] {
   return r.plates.map((p) => {
     const plate = { ...plateBase(r, p), check: p.check };
-    if (p.check.block.length) return { ...plate, st: "err", note: p.check.block.join("；") };
+    if (p.check.block.length) return { ...plate, st: "err", note: p.check.block.join("；"), res: "models" };
     if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
-    if (p.availability.state !== "ok") return { ...plate, st: "warn", note: p.availability.message };
+    if (p.availability.state !== "ok") return { ...plate, st: "warn", note: p.availability.message, res: "models" };
     return plate;
   });
 }
@@ -102,7 +102,7 @@ function previewPlates(r: OrderPreview): Plate[] {
 function toPlates(r: ParsedUpload, res: ResourcesView | null): Plate[] {
   return r.plates.map((p) => {
     const plate = plateBase(r, p);
-    if (res && !res.models.some((m) => m.model === plate.model && !m.hidden)) return { ...plate, st: "err", note: `本场没有开放 ${plate.model}` };
+    if (res && !res.models.some((m) => m.model === plate.model && !m.hidden)) return { ...plate, st: "err", note: `本场没有开放 ${plate.model}`, res: "models" };
     if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
     return plate;
   });
@@ -114,8 +114,8 @@ function withColour(p: Plate, pref: ColourPref, mode: ResourcesView["colourMissi
   if (p.st === "err" || !missing.length) return p;
   const types = [...new Set(p.fil.filter(([c]) => missing.includes(c.slice(0, 7).toLowerCase())).map(([, t]) => t))].join(" / ");
   const what = `本场没有这个颜色的 ${types}`;
-  if (pref === "exact") return mode === "block" ? { ...p, st: "err", note: `${what}。颜色要求是「一致」，不能提交这一盘。` } : { ...p, st: "warn", note: `${what}。颜色要求是「一致」，要等审核确认补料，可能多等一会。` };
-  if (pref === "similar") return { ...p, note: p.note ?? `${what}，会用最接近的颜色打印。` };
+  if (pref === "exact") return mode === "block" ? { ...p, st: "err", note: `${what}。颜色要求是「一致」，不能提交这一盘。`, res: "materials" } : { ...p, st: "warn", note: `${what}。颜色要求是「一致」，要等审核确认补料，可能多等一会。`, res: "materials" };
+  if (pref === "similar") return p.note ? p : { ...p, note: `${what}，会用最接近的颜色打印。`, res: "materials" };
   return p;
 }
 
@@ -251,6 +251,12 @@ export function SubmitPage() {
   const [fileBed, setFileBed] = useState<string | null>(null);
   const [resOpen, setResOpen] = useState(true);
   const [resTab, setResTab] = useState<"models" | "materials">("models");
+  const resRef = useRef<HTMLDivElement>(null);
+  const showRes = (tab: "models" | "materials") => {
+    setResTab(tab);
+    setResOpen(true);
+    resRef.current?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  };
   const fin = useRef<HTMLInputElement>(null);
   const res = useResources().data;
   const rules = useRules();
@@ -408,6 +414,7 @@ export function SubmitPage() {
           <motion.div key="form" exit={{ opacity: 0, transition: t("short3", "emphasizedAccelerate") }} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div className="flex min-w-0 flex-col gap-4">
               {res?.show && (
+                <div ref={resRef} className="scroll-mt-4">
                 <ResourcesPanel
                   view={res}
                   open={resOpen}
@@ -417,6 +424,7 @@ export function SubmitPage() {
                   used={new Set(plates.map((p) => p.modelId ?? ""))}
                   fit={phase === "parsed" ? <FileFit plates={plates} /> : undefined}
                 />
+                </div>
               )}
               <Step n={1} title="上传文件" right="只收 .gcode.3mf" done={phase === "parsed"}>
                 {phase === "idle" ? (
@@ -540,7 +548,16 @@ export function SubmitPage() {
                               </span>
                               <FilamentDots fil={p.fil} />
                             </div>
-                            {p.note && <div className={cx("text-body-s tracking-normal", p.st === "err" ? "text-error" : "text-warn")}>{p.note}</div>}
+                            {p.note && (
+                              <div className={cx("text-body-s tracking-normal", p.st === "err" ? "text-error" : p.st === "ok" ? "text-on-variant" : "text-warn")}>
+                                {p.note}
+                                {p.res && res?.show && (
+                                  <button type="button" onClick={() => showRes(p.res!)} className="ml-1 cursor-pointer appearance-none border-0 bg-transparent p-0 font-medium text-primary">
+                                    查看可用资源
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </li>
                       );
