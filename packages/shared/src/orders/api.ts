@@ -238,7 +238,8 @@ export type PlateAvailability =
 export interface OrderPreview extends Omit<ParsedUpload, "plates"> {
   /** check: the plate against 本场可用资源; plates with block entries cannot be submitted. */
   plates: (ParsedPlate & { availability: PlateAvailability; check: PlateCheck })[];
-  queue: { length: number; aheadSeconds: number };
+  /** Null when the viewer lacks queue:wait:view. */
+  queue: { length: number; aheadSeconds: number } | null;
 }
 
 /* ---- printers ---- */

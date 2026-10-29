@@ -182,13 +182,15 @@ describe("migration 0007/0008", () => {
           (order_id, n, kind, state, file_id, plate_index, plate_count, printer_model_id, nozzles, filaments, print_seconds, weight_grams)
           values (${order}, ${n}, ${n === 1 ? "submit" : "revision"}, ${state}::version_state, ${`00000000-0000-7000-8000-00000000000${file}`}, 1, 1, 'N6', '[]', '[]', ${s}, 1)`;
         const rev = JSON.stringify({ n: 2, kind: "revision", deltaSeconds: 1200, placesBack: 1, recalled: true });
-        /* 1: queued on v1 · 2: frozen revision v3 next to approved v1 · 3: re-uploaded before its first review · 4: rejected plate · 5: rejected revision */
+        /* 1: queued · 2: frozen revision · 3: first-review replacement · 4: rejected · 5: rejected revision · 6: cancelled first review · 7: cancelled revision */
         for (const q of [
           order(1, "QUEUED", "a", 100, null), version(1, 1, "approved", "a", 100),
           order(2, "PENDING_REVIEW", "c", 300, rev), version(2, 1, "approved", "a", 100), version(2, 2, "withdrawn", "b", 200), version(2, 3, "pending", "c", 300),
           order(3, "PENDING_REVIEW", "b", 200, rev), version(3, 1, "withdrawn", "a", 100), version(3, 2, "pending", "b", 200),
           order(4, "REJECTED", "a", 100, null), version(4, 1, "rejected", "a", 100),
           order(5, "QUEUED", "a", 100, null), version(5, 1, "approved", "a", 100), version(5, 2, "rejected", "b", 200),
+          order(6, "CANCELLED", "a", 100, null), version(6, 1, "pending", "a", 100),
+          order(7, "CANCELLED", "c", 300, rev), version(7, 1, "approved", "a", 100), version(7, 2, "pending", "c", 300),
         ]) await db.execute(q);
 
         await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -202,8 +204,14 @@ describe("migration 0007/0008", () => {
             { id: 3, active: 2, pending: null, s: 200, original: 100, decision: null },
             { id: 4, active: 1, pending: null, s: 100, original: 100, decision: null },
             { id: 5, active: 1, pending: null, s: 100, original: 100, decision: null },
+            { id: 6, active: 1, pending: null, s: 100, original: 100, decision: null },
+            { id: 7, active: 1, pending: null, s: 100, original: 100, decision: null },
           ],
         );
+        const cancelled = await db.execute(sql`select v.state from orders o join order_versions v on v.id = o.active_version_id where o.id in (6, 7) order by o.id`);
+        assert.deepEqual(cancelled.rows, [{ state: "withdrawn" }, { state: "approved" }]);
+        const withdrawn = await db.execute(sql`select state from order_versions where order_id = 7 and n = 2`);
+        assert.deepEqual(withdrawn.rows, [{ state: "withdrawn" }]);
         const cols = await db.execute(sql`select column_name from information_schema.columns where table_name = 'orders' and column_name in ('file_id', 'print_seconds', 'revision')`);
         assert.equal(cols.rows.length, 0, "the copies on orders are gone");
       } finally {

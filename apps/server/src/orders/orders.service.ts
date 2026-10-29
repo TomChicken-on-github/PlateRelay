@@ -252,7 +252,7 @@ export class OrdersService {
   /* ---------- submitting ---------- */
 
   /** What the submit page shows before anything is stored: plates, whether the fleet can print them, the queue. */
-  async preview(fileName: string, data: Buffer): Promise<OrderPreview> {
+  async preview(ctx: Ctx, fileName: string, data: Buffer): Promise<OrderPreview> {
     const parsed = this.gcode3mf.parse(fileName, data);
     const offer = await this.resources.offer();
     const queued = await this.db.select({ s: orderVersions.printSeconds }).from(orders).innerJoin(orderVersions, shownVersion).where(eq(orders.status, "QUEUED"));
@@ -263,7 +263,7 @@ export class OrdersService {
         availability: availability({ printerModel: parsed.printerModel, printerModelId: p.printerModelId, nozzles: p.nozzles }, offer.open),
         check: this.resources.check(offer, { ...p, printerModel: parsed.printerModel }),
       })),
-      queue: { length: queued.length, aheadSeconds: queued.reduce((a, o) => a + o.s, 0) },
+      queue: can(ctx, "queue:wait:view") ? { length: queued.length, aheadSeconds: queued.reduce((a, o) => a + o.s, 0) } : null,
     };
   }
 
@@ -432,6 +432,7 @@ export class OrdersService {
 
     const fileKey = `uploads/${fileId}.gcode.3mf`;
     const written: string[] = [];
+    let committed = false;
     try {
       await this.storage.put(fileKey, data, "application/vnd.bambulab-gcode-3mf");
       written.push(fileKey);
@@ -446,9 +447,11 @@ export class OrdersService {
         written.push(partsView.pick);
       }
       const file = { id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
-      return await this.swap(ctx, cur, base, fields, d, printer, rules, { file });
+      return await this.swap(ctx, cur, base, fields, d, printer, rules, { file }, () => {
+        committed = true;
+      });
     } catch (e) {
-      for (const k of written) await this.storage.delete(k).catch(() => undefined);
+      if (!committed) for (const k of written) await this.storage.delete(k).catch(() => undefined);
       throw e;
     }
   }
@@ -475,6 +478,7 @@ export class OrdersService {
     if (!d.allowed) throw new ApiError(HttpStatus.CONFLICT, d.code, d.message, { orderId: id });
     return this.swap(ctx, cur, cur, fields, { ...d, kind: "restore", review: false }, printer, rules, { restoredFrom: n });
   }
+
 
   /** 撤回修改: free. The revision under review is dropped and the last approved version keeps its place. */
   async withdraw(ctx: Ctx, id: number): Promise<OrderView> {
@@ -546,6 +550,7 @@ export class OrdersService {
     printer: PrinterRow | undefined,
     rules: QueueRules,
     opts: { file?: typeof files.$inferInsert; restoredFrom?: number },
+    onCommit?: () => void,
   ): Promise<OrderView> {
     let recalled: string | null = null;
     const row = await this.db.transaction(async (tx) => {
@@ -553,6 +558,7 @@ export class OrdersService {
       recalled = r.recalled;
       return r.row;
     });
+    onCommit?.();
     if (recalled) await this.sendRecall(ctx, recalled, cur.id);
     return (await this.views(ctx, [row]))[0];
   }
@@ -819,42 +825,54 @@ export class OrdersService {
    * The command goes out first and only a sent command is recorded.
    */
   async skipParts(ctx: Ctx, id: number, partIds: number[]): Promise<OrderView> {
-    const o = await orderRow(this.db, id);
-    if (!o) throw notFound("订单");
-    const mine = o.ownerId === userId(ctx);
+    const initial = await orderRow(this.db, id);
+    if (!initial) throw notFound("订单");
+    const mine = initial.ownerId === userId(ctx);
     if (!can(ctx, "order:skip-parts:any") && !(mine && can(ctx, "order:skip-parts:own"))) {
       await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, after: { parts: partIds }, result: "denied" });
       if (!mine && !can(ctx, "order:view:any")) throw notFound("订单");
       throw new ApiError(HttpStatus.FORBIDDEN, "forbidden", "没有权限跳过这张单的零件");
     }
-    if (!o.partsTopKey || o.parts.length < 2) throw new ApiError(HttpStatus.CONFLICT, "parts-unavailable", "这张单的文件不支持跳过零件");
-    const [p] = o.printerId ? await this.db.select().from(printers).where(eq(printers.id, o.printerId)) : [];
-    if (o.status !== "PRINTING" || !p || p.currentOrderId !== id || !["PRINTING", "ERROR_PAUSED"].includes(p.state)) {
-      throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有正在打印的订单能跳过零件", { orderId: id, status: o.status });
-    }
-    const known = new Set(o.parts.map((x) => x.id));
+    if (!initial.partsTopKey || initial.parts.length < 2) throw new ApiError(HttpStatus.CONFLICT, "parts-unavailable", "这张单的文件不支持跳过零件");
     const ids = [...new Set(partIds)];
-    if (!ids.length || ids.some((x) => !known.has(x) || o.skippedParts.includes(x))) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-parts", "零件不存在或已经跳过", { parts: ids.filter((x) => !known.has(x) || o.skippedParts.includes(x)) });
+    const known = new Set(initial.parts.map((x) => x.id));
+    if (!ids.length || ids.some((x) => !known.has(x) || initial.skippedParts.includes(x))) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-parts", "零件不存在或已经跳过", { parts: ids.filter((x) => !known.has(x) || initial.skippedParts.includes(x)) });
     }
-    if (o.skippedParts.length + ids.length >= o.parts.length) throw new ApiError(HttpStatus.CONFLICT, "skip-all", "不能跳过全部零件，要停掉整盘请取消订单");
+    let commandAttempted = false;
+    let printerId = "";
+    let row: OrderRow;
     try {
-      await this.commands.skipParts(p.id, ids);
+      row = await this.db.transaction(async (tx) => {
+        const [snapshot] = await tx.select({ printerId: orders.printerId }).from(orders).where(eq(orders.id, id));
+        if (!snapshot?.printerId) throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有正在打印的订单能跳过零件", { orderId: id, status: initial.status });
+        const p = await lockPrinter(tx, snapshot.printerId);
+        const o = await orderRow(tx, id, true);
+        if (!o || o.status !== "PRINTING" || o.printerId !== p.id || p.currentOrderId !== id || !["PRINTING", "ERROR_PAUSED"].includes(p.state)) {
+          throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有正在打印的订单能跳过零件", { orderId: id, status: o?.status ?? initial.status });
+        }
+        const currentIds = [...new Set(o.skippedParts)];
+        if (ids.some((x) => currentIds.includes(x))) {
+          throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-parts", "零件不存在或已经跳过", { parts: ids.filter((x) => currentIds.includes(x)) });
+        }
+        if (currentIds.length + ids.length >= o.parts.length) throw new ApiError(HttpStatus.CONFLICT, "skip-all", "不能跳过全部零件，要停掉整盘请取消订单");
+        printerId = p.id;
+        commandAttempted = true;
+        await this.commands.skipParts(p.id, ids);
+        const skipped = [...new Set([...currentIds, ...ids])];
+        await tx.update(orders).set({ skippedParts: skipped }).where(eq(orders.id, id));
+        const named = o.parts.filter((x) => ids.includes(x.id));
+        await orderEvent(tx, ctx, id, "skip-parts", { parts: named });
+        await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, before: { skipped: currentIds }, after: { printerId: p.id, skipped } }, tx);
+        return (await orderRow(tx, id))!;
+      });
     } catch (e) {
-      await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, after: { printerId: p.id, parts: ids }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
+      if (commandAttempted) {
+        await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, after: { printerId, parts: ids }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
+      }
       if (e instanceof PrinterUnreachable) throw new ApiError(HttpStatus.SERVICE_UNAVAILABLE, "printer-unreachable", "连不上这台打印机的 daemon，请在打印机屏幕上跳过");
       throw e;
     }
-    const row = await this.db.transaction(async (tx) => {
-      const [cur] = await tx.select({ skipped: orders.skippedParts }).from(orders).where(eq(orders.id, id)).for("update");
-      const skipped = [...new Set([...cur.skipped, ...ids])];
-      await tx.update(orders).set({ skippedParts: skipped }).where(eq(orders.id, id));
-      const row = (await orderRow(tx, id))!;
-      const named = o.parts.filter((x) => ids.includes(x.id));
-      await orderEvent(tx, ctx, id, "skip-parts", { parts: named });
-      await this.audit.record(ctx, { action: "order.skip-parts", targetType: "order", targetId: id, before: { skipped: cur.skipped }, after: { printerId: p.id, skipped } }, tx);
-      return row;
-    });
     return (await this.views(ctx, [row]))[0];
   }
 

@@ -303,9 +303,9 @@ describe("panel API", () => {
       assert.deepEqual(log.filter((e) => e.action === "order.skip-parts").map((e) => e.result).sort(), ["denied", "failed", "ok", "ok"]);
       await builder.post(`/api/orders/${id}/cancel`).send({ reason: "测试" }).expect(200);
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
+
     });
   });
-
   describe("visibility and settings", () => {
     it("anonymizes other submitters without order:submitter-name:view-others", async () => {
       const id = await printing();
