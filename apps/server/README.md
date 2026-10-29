@@ -70,7 +70,7 @@ pnpm --filter @platerelay/server test
 | --- | --- |
 | 登录 | `POST /auth/register`、`POST /auth/login`、`POST /auth/logout`、`GET /auth/me` |
 | 概况 / 打印机详情 | `GET /overview`（排队、待审核、等待兼容打印机的数量）、`GET /printers`、`GET /printers/:id` |
-| 提交订单 | `GET /form`、`GET /rules`、`GET /resources`（本场可用资源，`resource:view`；预计等待只给区间，另需 `queue:wait:view`）、`POST /orders/preview`（multipart `file`：解析结果、每盘有没有兼容的打印机、按可用资源的校验 `check`、队列长度，不存任何东西）、`POST /orders`（multipart：`file` + `answers` JSON，可选 `plates` JSON 数组只提交其中几盘，`colour` 颜色要求 exact/similar/any，默认 similar，`bedType` 仅在允许自选板时可传；校验不过返回 422 `plate-blocked`） |
+| 提交订单 | `GET /form`、`GET /rules`、`GET /resources`（本场可用资源，`resource:view`；预计等待只给区间，另需 `queue:wait:view`）、`POST /orders/preview`（multipart `file`：解析结果、每盘有没有兼容的打印机、按可用资源的校验 `check`、队列长度，不存任何东西；没有 `queue:wait:view` 时 `queue` 为 `null`）、`POST /orders`（multipart：`file` + `answers` JSON，可选 `plates` JSON 数组只提交其中几盘，`colour` 颜色要求 exact/similar/any，默认 similar，`bedType` 仅在允许自选板时可传；校验不过返回 422 `plate-blocked`） |
 | 我的订单 | `GET /orders/mine`、`GET /orders/:id`（含 `storePhotoUrl` 入库照片签名链接，仅本人和 `order:view:any`）、`POST /orders/:id/cancel`、`POST /orders/:id/pickup-code`、`POST /orders/:id/revise`（multipart `file`，可选 `plate`：提交后修改文件） |
 | 待办 | `GET /todo`（含跳单提醒 `skipped`）、`POST /orders/:id/store`（multipart：`photo`、`slot`、`bedCleared=true`）、`POST /printers/:id/resolve`、`POST /printers/:id/stop`、`POST /printers/:id/clear-bed` |
 | 扫码取件 | `GET /pickup/:code`、`POST /pickup/:code/redeem`、`GET /pickup/redemptions?since=` |
@@ -90,6 +90,9 @@ pnpm --filter @platerelay/server test
 - 跳单提醒：排在前面的单被后面的单越过时记下时间，超过设定分钟数出现在待办里。
 - 可用资源：只统计开放给选手的打印机。机型或喷嘴不在表里的盘不能提交；材质只在已经知道有哪些耗材（打印机上报或手动添加库存）时检查；颜色要求「一致」而本场没有这个颜色时，默认可以提交、审核队列里列出缺的颜色，也可以设成拦下。
 - 每次按规则后移都写审计 `queue.revision-penalty`，记录策略、参数和前后位置；修改文件本身记 `order.revise`。
+- 跳过零件：按打印机、订单的顺序加锁，锁内重新检查已跳过集合并发送命令，防止并发请求跳过全部零件。仅命令调用成功后记录集合、时间线与成功审计；数据库与设备命令仍不具备原子提交保证。
+- 修改文件：事务提交后的召回、响应签名或预览审计失败，不删除已被版本引用的源文件和预览对象。
+- 迁移 `0009_withdraw_cancelled_versions` 修复旧取消单遗留的 pending 版本；有已审核版本可回退时恢复 active 指针，再将 pending 版本置为 withdrawn。不改写已执行的 `0007/0008`。
 
 ### 审计日志
 

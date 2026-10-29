@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import type { OrderPreview, OverviewStats } from "@platerelay/shared";
+import { PRESET_ROLES, type OrderPreview, type OverviewStats } from "@platerelay/shared";
 import { eq } from "drizzle-orm";
-import { printers } from "../src/db/schema.js";
+import { printers, roles } from "../src/db/schema.js";
 import { PrintersService } from "../src/printers/printers.service.js";
 import { SchedulerService } from "../src/printers/scheduler.service.js";
 import { JPEG, startApp, type TestApp, x2dTwoPlates } from "./helpers.js";
@@ -60,9 +60,13 @@ describe("submit page API", () => {
     const stats = (await user.get("/api/overview").expect(200)).body as OverviewStats;
     assert.deepEqual(stats, { pendingReview: 2, queued: 1, waitingCompatible: 0, todo: 1 }, "the idle X2D has a suggestion to confirm");
     const p = await preview(user);
-    assert.equal(p.queue.length, 1);
-    assert.equal(p.queue.aheadSeconds, a.printSeconds);
-    await other.post(`/api/orders/${b.id}/cancel`).send({ reason: "测试" }).expect(200);
+    assert.equal(p.queue?.length, 1);
+    assert.equal(p.queue?.aheadSeconds, a.printSeconds);
+    await t.db.update(roles).set({ permissions: PRESET_ROLES.user.permissions.filter((permission) => permission !== "queue:wait:view") }).where(eq(roles.id, "user"));
+    const hidden = await preview(user);
+    assert.equal(hidden.queue, null);
+    await t.db.update(roles).set({ permissions: [...PRESET_ROLES.user.permissions] }).where(eq(roles.id, "user"));
+    await other.post(`/api/orders/${b.id}/cancel`).send({ reason: "test cleanup" }).expect(200);
   });
 
   it("gives the 入库 photo to the owner and to staff who see any order", async () => {

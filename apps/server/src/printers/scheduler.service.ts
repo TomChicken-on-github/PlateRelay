@@ -57,7 +57,7 @@ export class SchedulerService {
     rules ??= await this.settings.get("queue.rules");
     const [p] = await db.select().from(printers).where(eq(printers.id, printerId));
     if (!p) return [];
-    const queued = await db.select().from(orders).where(eq(orders.status, "QUEUED")).orderBy(asc(orders.queueSeq), asc(orders.id));
+    const queued = await orderRows(db, eq(orders.status, "QUEUED"), { orderBy: [asc(orders.queueSeq), asc(orders.id)] });
     return queued.filter((o) => this.policy.pick(rules, [o], p) === o);
   }
 

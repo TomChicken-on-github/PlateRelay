@@ -99,9 +99,9 @@ export class OrdersController {
   @HttpCode(200)
   @RequirePerm("order:submit")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
-  preview(@UploadedFile() file: Express.Multer.File | undefined) {
+  preview(@ReqCtx() ctx: Ctx, @UploadedFile() file: Express.Multer.File | undefined) {
     if (!file) throw new BadRequestException("缺少文件字段 file");
-    return this.orders.preview(file.originalname, file.buffer);
+    return this.orders.preview(ctx, file.originalname, file.buffer);
   }
 
   @Get("overview")

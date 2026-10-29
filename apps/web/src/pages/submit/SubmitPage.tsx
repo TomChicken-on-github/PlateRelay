@@ -232,7 +232,7 @@ export function SubmitPage() {
   const toast = useToast();
   const FIELDS = useFields() ?? [];
   const [upload, setUpload] = useState<File | null>(null);
-  const [queue, setQueue] = useState({ length: MOCK_QUEUE_AHEAD, aheadSeconds: 0 });
+  const [queue, setQueue] = useState<{ length: number; aheadSeconds: number } | null>({ length: MOCK_QUEUE_AHEAD, aheadSeconds: 0 });
   const [sending, setSending] = useState(false);
   const [phase, setPhase] = useState<"idle" | "parsing" | "parsed">("idle");
   const [file, setFile] = useState<{ name: string; mb: number } | null>(null);
@@ -358,7 +358,7 @@ export function SubmitPage() {
           ["预计总用时", sel.length ? fmt(total) : "—"],
           ["预计总用量", sel.length ? `${grams} g` : "—"],
           ["颜色要求", COLOUR_PREF_LABEL[colour]],
-          ["队列前方", `${queue.length} 项`],
+          ...(queue ? [["队列前方", `${queue.length} 项`] as [string, string]] : []),
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between gap-3 text-body-m">
             <dt className="text-on-variant">{k}</dt>

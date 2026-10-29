@@ -50,7 +50,7 @@ export async function orderRows(db: Db, where?: SQL, q: RowQuery = {}): Promise<
   if (q.limit != null) query = query.limit(q.limit);
   if (q.offset) query = query.offset(q.offset);
   const rows = await query;
-  return withRevisions(db, rows.map((r) => ({ ...r.o, ...r.v, revision: null })));
+  return withRevisions(db, rows.map((r) => ({ ...r.o, ...r.v, revision: null }) as OrderRow));
 }
 
 /**

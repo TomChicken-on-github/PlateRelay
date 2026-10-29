@@ -64,6 +64,13 @@
       "when": 1793145344053,
       "tag": "0008_drop_order_copies",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793212800000,
+      "tag": "0009_withdraw_cancelled_versions",
+      "breakpoints": true
     }
   ]
 }
