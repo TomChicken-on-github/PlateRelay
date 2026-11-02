@@ -61,7 +61,7 @@ export class Gcode3mfController {
   @HttpCode(200)
   /* defParamCharset: browsers send UTF-8 file names; busboy assumes latin1. */
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }, defParamCharset: "utf8" }))
-  parse(@UploadedFile() file: Express.Multer.File | undefined): ParsedUpload {
+  parse(@UploadedFile() file: Express.Multer.File | undefined): Promise<ParsedUpload> {
     if (!file) throw new BadRequestException("缺少文件字段 file");
     return this.gcode3mf.parse(file.originalname, file.buffer);
   }

@@ -18,7 +18,6 @@ import {
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
-import { sha256 } from "../auth/tokens.js";
 import { ApiError, notFound } from "../common/errors.js";
 import { uuidv7 } from "../common/uuid.js";
 import { DB, type Db } from "../db/db.js";
@@ -265,7 +264,7 @@ export class OrdersService {
 
   /** What the submit page shows before anything is stored: plates, whether the fleet can print them, the queue. */
   async preview(ctx: Ctx, fileName: string, data: Buffer): Promise<OrderPreview> {
-    const parsed = this.gcode3mf.parse(fileName, data);
+    const parsed = await this.gcode3mf.parse(fileName, data);
     const offer = await this.resources.offer();
     const queued = await this.db.select({ s: orderVersions.printSeconds }).from(orders).innerJoin(orderVersions, shownVersion).where(eq(orders.status, "QUEUED"));
     return {
@@ -304,7 +303,7 @@ export class OrdersService {
    * plates of the file to submit (1-based, as in the slicer); all of them when absent.
    */
   async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown, plates: number[] | undefined, choices: SubmitChoices): Promise<OrderView[]> {
-    const parsed = this.gcode3mf.read(fileName, data);
+    const parsed = await this.gcode3mf.read(fileName, data);
     const unknown = plates?.filter((n) => !parsed.plates.some((p) => p.index === n)) ?? [];
     if (unknown.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${unknown.join("、")} 盘`, { plates: unknown });
     if (plates && !plates.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "至少要选一盘");
@@ -340,7 +339,7 @@ export class OrdersService {
         }
       }
       const rows = await this.db.transaction(async (tx) => {
-        await tx.insert(files).values({ id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
+        await tx.insert(files).values({ id: fileId, sha256: parsed.sha256, key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
         const created: OrderRow[] = [];
         for (const p of info.plates) {
           const o = await createOrder(
@@ -409,7 +408,7 @@ export class OrdersService {
    */
   async revise(ctx: Ctx, id: number, fileName: string, data: Buffer, plateIndex?: number): Promise<OrderView> {
     const cur = await this.ownOrder(ctx, id, "order.revise");
-    const parsed = this.gcode3mf.read(fileName, data);
+    const parsed = await this.gcode3mf.read(fileName, data);
     const want = plateIndex ?? (parsed.plates.length === 1 ? parsed.plates[0].index : cur.plateIndex);
     const plate = parsed.plates.find((p) => p.index === want);
     if (!plate) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${want} 盘`, { plates: [want] });
@@ -458,7 +457,7 @@ export class OrdersService {
         await this.storage.put(partsView.pick, plate.partsView!.pick, "image/png");
         written.push(partsView.pick);
       }
-      const file = { id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
+      const file = { id: fileId, sha256: parsed.sha256, key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
       return await this.swap(ctx, cur, base, fields, d, printer, rules, { file }, () => {
         committed = true;
       });
