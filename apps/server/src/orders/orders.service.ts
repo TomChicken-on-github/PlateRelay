@@ -15,14 +15,13 @@ import {
   type QueueRules,
   type RevisionInfo,
 } from "@platerelay/shared";
-import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, can, userId } from "../auth/actor.js";
-import { sha256 } from "../auth/tokens.js";
 import { ApiError, notFound } from "../common/errors.js";
 import { uuidv7 } from "../common/uuid.js";
 import { DB, type Db } from "../db/db.js";
-import { files, orderEvents, orders, orderVersions, pickupCodes, printers } from "../db/schema.js";
+import { auditLog, files, orderEvents, orders, orderVersions, pickupCodes, printers } from "../db/schema.js";
 import { FormsService } from "../forms/forms.service.js";
 import { Gcode3mfService } from "../gcode3mf/gcode3mf.service.js";
 import { PRINTER_COMMANDS, type PrinterCommands, PrinterUnreachable } from "../printers/commands.js";
@@ -58,7 +57,8 @@ export interface OrderQuery {
 const PHOTO_TYPES: [string, number[], string][] = [
   ["jpg", [0xff, 0xd8, 0xff], "image/jpeg"],
   ["png", [0x89, 0x50, 0x4e, 0x47], "image/png"],
-  ["webp", [0x52, 0x49, 0x46, 0x46], "image/webp"],
+  /* RIFF....WEBP; bytes 4–7 are the size */
+  ["webp", [0x52, 0x49, 0x46, 0x46, -1, -1, -1, -1, 0x57, 0x45, 0x42, 0x50], "image/webp"],
 ];
 
 /** Revision counts a superseded or withdrawn version gives back. */
@@ -108,9 +108,20 @@ export class OrdersService {
     }
     const views = await orderViews(this.db, this.storage, ctx, rows, { queue, waitReasons, rules, ...extra });
     const previewIds = new Set(views.filter((v) => !v.isMine && v.thumbUrl).map((v) => v.id));
+    const viewer = userId(ctx);
     if (previewIds.size) {
       await this.db.transaction(async (tx) => {
-        for (const id of previewIds) await this.audit.record(ctx, { action: "order.preview.view", targetType: "order", targetId: id }, tx);
+        /*
+         * One entry per viewer and order while a link from the last one could still be open (THUMB_TTL_S):
+         * lists, the review pool and 待办 refresh often, and the log only ever grows.
+         */
+        const since = new Date(Date.now() - THUMB_TTL_S * 1000);
+        const seen = !viewer ? [] : await tx
+          .select({ targetId: auditLog.targetId })
+          .from(auditLog)
+          .where(and(eq(auditLog.targetType, "order"), inArray(auditLog.targetId, [...previewIds].map(String)), eq(auditLog.action, "order.preview.view"), eq(auditLog.actorId, viewer), eq(auditLog.result, "ok"), gte(auditLog.at, since)));
+        const recent = new Set(seen.map((r) => r.targetId));
+        for (const id of previewIds) if (!recent.has(String(id))) await this.audit.record(ctx, { action: "order.preview.view", targetType: "order", targetId: id }, tx);
       });
     }
     return views;
@@ -253,7 +264,7 @@ export class OrdersService {
 
   /** What the submit page shows before anything is stored: plates, whether the fleet can print them, the queue. */
   async preview(ctx: Ctx, fileName: string, data: Buffer): Promise<OrderPreview> {
-    const parsed = this.gcode3mf.parse(fileName, data);
+    const parsed = await this.gcode3mf.parse(fileName, data);
     const offer = await this.resources.offer();
     const queued = await this.db.select({ s: orderVersions.printSeconds }).from(orders).innerJoin(orderVersions, shownVersion).where(eq(orders.status, "QUEUED"));
     return {
@@ -292,7 +303,7 @@ export class OrdersService {
    * plates of the file to submit (1-based, as in the slicer); all of them when absent.
    */
   async submit(ctx: Ctx, fileName: string, data: Buffer, rawAnswers: unknown, plates: number[] | undefined, choices: SubmitChoices): Promise<OrderView[]> {
-    const parsed = this.gcode3mf.read(fileName, data);
+    const parsed = await this.gcode3mf.read(fileName, data);
     const unknown = plates?.filter((n) => !parsed.plates.some((p) => p.index === n)) ?? [];
     if (unknown.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${unknown.join("、")} 盘`, { plates: unknown });
     if (plates && !plates.length) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", "至少要选一盘");
@@ -328,7 +339,7 @@ export class OrdersService {
         }
       }
       const rows = await this.db.transaction(async (tx) => {
-        await tx.insert(files).values({ id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
+        await tx.insert(files).values({ id: fileId, sha256: parsed.sha256, key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! });
         const created: OrderRow[] = [];
         for (const p of info.plates) {
           const o = await createOrder(
@@ -397,7 +408,7 @@ export class OrdersService {
    */
   async revise(ctx: Ctx, id: number, fileName: string, data: Buffer, plateIndex?: number): Promise<OrderView> {
     const cur = await this.ownOrder(ctx, id, "order.revise");
-    const parsed = this.gcode3mf.read(fileName, data);
+    const parsed = await this.gcode3mf.read(fileName, data);
     const want = plateIndex ?? (parsed.plates.length === 1 ? parsed.plates[0].index : cur.plateIndex);
     const plate = parsed.plates.find((p) => p.index === want);
     if (!plate) throw new ApiError(HttpStatus.BAD_REQUEST, "invalid-plates", `文件里没有第 ${want} 盘`, { plates: [want] });
@@ -446,7 +457,7 @@ export class OrdersService {
         await this.storage.put(partsView.pick, plate.partsView!.pick, "image/png");
         written.push(partsView.pick);
       }
-      const file = { id: fileId, sha256: sha256(data), key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
+      const file = { id: fileId, sha256: parsed.sha256, key: fileKey, fileName, sizeBytes: data.byteLength, uploadedBy: userId(ctx)! };
       return await this.swap(ctx, cur, base, fields, d, printer, rules, { file }, () => {
         committed = true;
       });
@@ -613,6 +624,8 @@ export class OrdersService {
       };
       const set = {
         ...(d.review && keeps ? { pendingVersionId: ver.id } : { activeVersionId: ver.id, pendingVersionId: null }),
+        /* before the first review the new file is the one the baseline ("first approved version") will be */
+        ...(keeps ? {} : { originalPrintSeconds: fields.printSeconds }),
         revisionCount: base.revisionCount + (d.counts ? 1 : 0),
         modelSwitchCount: base.modelSwitchCount + (d.isSwitch ? 1 : 0),
         printerId: null,
@@ -642,15 +655,16 @@ export class OrdersService {
   }
 
   /** Best effort, like sendStop: the recall is recorded; the daemon link will deliver it once it exists. */
-  private async sendRecall(ctx: Ctx, printerId: string, orderId: number) {
+  async sendRecall(ctx: Ctx, printerId: string, orderId: number): Promise<boolean> {
     try {
       await this.commands.recall(printerId, orderId);
     } catch (e) {
       this.log.warn(`recall not sent to ${printerId}: ${(e as Error).message}`);
       await this.audit.record(ctx, { action: "printer.recall.command", targetType: "printer", targetId: printerId, after: { orderId }, result: "failed", reason: e instanceof PrinterUnreachable ? "printer-unreachable" : "command-failed" });
-      return;
+      return false;
     }
     await this.audit.record(ctx, { action: "printer.recall.command", targetType: "printer", targetId: printerId, after: { orderId } });
+    return true;
   }
 
   /* ---------- review ---------- */
@@ -760,8 +774,7 @@ export class OrdersService {
     let stopPrinter: string | null = null;
     let recallPrinter: string | null = null;
     const row = await this.db.transaction(async (tx) => {
-      const o = (await orderRow(tx, id))!;
-      const printer = o.status === "PRINTING" && o.printerId ? await lockPrinter(tx, o.printerId) : null;
+      const { o, printer } = await this.lockWithPrinter(tx, id);
       /* dispatched but still PREPARING has not started: the submitter may still cancel it */
       const early = printer?.state === "PREPARING" && printer.currentOrderId === id;
       if (!any && !OWNER_CANCELLABLE.includes(o.status) && !early) {
@@ -789,6 +802,24 @@ export class OrdersService {
     if (stopPrinter) await this.sendStop(ctx, stopPrinter);
     if (recallPrinter) await this.sendRecall(ctx, recallPrinter, id);
     return (await this.views(ctx, [row]))[0];
+  }
+
+  /**
+   * Locks an order and, while it is printing, its printer, in the order every writer takes them (printer,
+   * then order; see queue.ts). The printer id is read before any lock, so a dispatch that commits in
+   * between would leave the wrong printer (or none) locked: re-read after the order lock and start over
+   * when it moved. The returned order is read under its lock.
+   */
+  private async lockWithPrinter(tx: Db, id: number): Promise<{ o: OrderRow; printer: PrinterRow | null }> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const [snap] = await tx.select({ printerId: orders.printerId, status: orders.status }).from(orders).where(eq(orders.id, id));
+      if (!snap) throw notFound("订单");
+      const printer = snap.status === "PRINTING" && snap.printerId ? await lockPrinter(tx, snap.printerId) : null;
+      const o = (await orderRow(tx, id, true))!;
+      const want = o.status === "PRINTING" ? o.printerId : null;
+      if (want === (printer?.id ?? null)) return { o, printer };
+    }
+    throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "订单状态已变化，请刷新后再试", { orderId: id });
   }
 
   /** Best effort: the decision is already recorded; someone at the printer can still stop it by hand. */
@@ -885,6 +916,8 @@ export class OrdersService {
    */
   async attribute(ctx: Ctx, id: number, attribution: FailureAttribution, note: string | null): Promise<{ failed: OrderView; retry: OrderView }> {
     const { failed, retry } = await this.db.transaction(async (tx) => {
+      /* a machine-fault retry joins the queue at once, so it waits for queue moves like approve does (queue.ts) */
+      await queueLock(tx);
       const o = await orderRow(tx, id, true);
       if (!o) throw notFound("订单");
       if (o.status !== "FAILED") throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有打印失败的订单能归因", { orderId: id, status: o.status });
@@ -899,6 +932,8 @@ export class OrdersService {
         tx,
         {
           ...blank(copy),
+          /* a fresh order: its own revision budget, measured from the file it starts with */
+          originalPrintSeconds: o.printSeconds,
           status: machine ? "QUEUED" : "PENDING_REVIEW",
           queueSeq: machine ? o.queueSeq : null,
           reviewedBy: machine ? o.reviewedBy : null,
@@ -941,7 +976,7 @@ export class OrdersService {
    * the order becomes ready for pickup and its printer goes back to IDLE.
    */
   async store(ctx: Ctx, id: number, slot: string, photo: Buffer): Promise<OrderView> {
-    const type = PHOTO_TYPES.find(([, magic]) => magic.every((b, i) => photo[i] === b));
+    const type = PHOTO_TYPES.find(([, magic]) => magic.every((b, i) => b < 0 || photo[i] === b));
     if (!type) throw new ApiError(HttpStatus.UNPROCESSABLE_ENTITY, "bad-photo", "入库照片只收 JPEG、PNG、WebP");
     const key = `store-photos/${id}-${randomUUID()}.${type[0]}`;
     await this.storage.put(key, photo, type[2]);
@@ -969,13 +1004,15 @@ export class OrdersService {
 
 }
 
-/** A retry starts with a clean history: only the plate, file and answers carry over. */
+/** A retry starts with a clean history, revision counts included: only the plate, file, answers and choices carry over. */
 function blank(o: Omit<typeof orders.$inferSelect, "id" | "status" | "submittedAt" | "activeVersionId" | "pendingVersionId">) {
   return {
     ...o,
     reviewedBy: null,
     reviewedAt: null,
     rejectReason: null,
+    revisionCount: 0,
+    modelSwitchCount: 0,
     printerId: null,
     startedAt: null,
     printedAt: null,

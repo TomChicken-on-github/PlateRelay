@@ -16,6 +16,10 @@ export const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 /* Constant work when the user does not exist, so timing does not reveal accounts. */
 const DUMMY_HASH = hashPassword("platerelay-dummy");
 
+/** Failed sign-ins allowed per address and account name in a window, before further tries are refused. */
+export const LOGIN_MAX_FAILURES = 10;
+export const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -37,15 +41,32 @@ export class AuthService {
     });
   }
 
+  /*
+   * Password guessing: failures counted per client address and account name, in memory (one panel
+   * process). Keyed on both so a stranger elsewhere cannot lock someone out of their own account.
+   */
+  private readonly failures = new Map<string, { n: number; since: number }>();
+
   /** Returns the raw session token for the cookie. */
   async login(ctx: Ctx, username: string, password: string): Promise<{ token: string; actor: UserActor }> {
+    const key = `${ctx.ip ?? ""}\n${username.toLowerCase()}`;
+    const now = Date.now();
+    const f = this.failures.get(key);
+    if (f && now - f.since < LOGIN_WINDOW_MS && f.n >= LOGIN_MAX_FAILURES) {
+      await this.audit.record(ctx, { action: "auth.login", targetType: "user", targetId: null, result: "denied", reason: "throttled" });
+      throw new ApiError(HttpStatus.TOO_MANY_REQUESTS, "login-throttled", "尝试次数太多，请 15 分钟后再试", { retryAfterSeconds: Math.ceil((f.since + LOGIN_WINDOW_MS - now) / 1000) });
+    }
     const [u] = await this.db.select().from(users).where(sql`lower(${users.username}) = lower(${username})`);
     const ok = u?.passwordHash ? await verifyPassword(password, u.passwordHash) : (await DUMMY_HASH, false);
     const actor = ok && u ? await this.rbac.actorFor(u.id) : null;
     if (!actor) {
+      if (!f || now - f.since >= LOGIN_WINDOW_MS) this.failures.set(key, { n: 1, since: now });
+      else f.n++;
+      if (this.failures.size > 10_000) for (const [k, v] of this.failures) if (now - v.since >= LOGIN_WINDOW_MS) this.failures.delete(k);
       await this.audit.record(ctx, { action: "auth.login", targetType: "user", targetId: u?.id ?? null, result: "failed" });
       throw new ApiError(HttpStatus.UNAUTHORIZED, "bad-credentials", "用户名或密码错误");
     }
+    this.failures.delete(key);
     const token = newToken();
     await this.db.transaction(async (tx) => {
       await tx.insert(sessions).values({

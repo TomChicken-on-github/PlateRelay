@@ -19,6 +19,10 @@ pnpm dev:server          # 在仓库根执行，监听 :3000，前端 vite 把 /
 | `PLATERELAY_SECURE_COOKIES` | 设为 `1` 时会话 cookie 带 `Secure`（HTTPS 部署时打开） |
 | `PLATERELAY_TRUST_PROXY` | 在反向代理后面时设置，审计日志才记得到真实 IP |
 | `PORT` | 默认 3000 |
+| `PLATERELAY_PUBLIC_PARSE` | 设为 `1` 时 `POST /gcode3mf/parse` 不用登录（给不登录的原型版前端用）。默认要登录且有 `order:submit`：上传整个读进内存，公开会被人用大文件撑爆内存 |
+| `PLATERELAY_PARSE_WORKERS` | 解析 `.gcode.3mf` 的 worker 线程数，默认 CPU 核数减 1，最少 1、最多 4。解析和文件哈希都在 worker 里做，不占主线程 |
+| `PLATERELAY_PARSE_QUEUE` | 线程都忙时最多排队几个文件，默认 16，再多直接回 503 `parse-busy` |
+| `PLATERELAY_PARSE_TIMEOUT_MS` | 单个文件解析的时间上限，默认 15000，超时会结束那个 worker 并回 422 `parse-timeout`。每个 worker 堆内存上限 256 MB |
 | `PLATERELAY_STORAGE` | `local`（默认，存在 `PLATERELAY_DATA_DIR/storage`）或 `oss`（阿里云 OSS 等 S3 兼容存储） |
 | `OSS_ENDPOINT`、`OSS_BUCKET`、`OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` | `PLATERELAY_STORAGE=oss` 时必填。桶保持私有，浏览器只拿到短时效签名链接 |
 | `OSS_PUBLIC_ENDPOINT`、`OSS_REGION`、`OSS_PATH_STYLE` | 可选：签名链接用的对外地址、签名区域（默认取 endpoint 的第一段，如 `oss-cn-beijing`）、路径式寻址（MinIO 用 `1`） |

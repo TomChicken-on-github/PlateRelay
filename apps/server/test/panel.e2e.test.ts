@@ -57,6 +57,20 @@ describe("panel API", () => {
       await a.get("/api/auth/me").expect(401);
     });
 
+    it("refuses further sign-ins after repeated wrong passwords", async () => {
+      const { id } = await t.as("user", "猜密码");
+      const [u] = await t.db.execute(sql`select username from users where id = ${id}`).then((r) => (r as unknown as { rows: { username: string }[] }).rows);
+      const anon = request(t.app.getHttpServer());
+      for (let i = 0; i < 10; i++) await anon.post("/api/auth/login").send({ username: u.username, password: "wrong-password" }).expect(401);
+      const res = await anon.post("/api/auth/login").send({ username: u.username, password: "password1" }).expect(429);
+      assert.equal(res.body.code, "login-throttled");
+    });
+
+    it("parses uploads only for signed-in submitters", async () => {
+      await request(t.app.getHttpServer()).post("/api/gcode3mf/parse").attach("file", x2dTwoPlates(), "a.gcode.3mf").expect(401);
+      await user.post("/api/gcode3mf/parse").attach("file", x2dTwoPlates(), "a.gcode.3mf").expect(200);
+    });
+
     it("refuses missing permissions with 403 and audits the refusal", async () => {
       await user.get("/api/review").expect(403);
       const log = await builder.get("/api/audit").query({ limit: 20 }).expect(200);
@@ -192,6 +206,9 @@ describe("panel API", () => {
       assert.deepEqual([red.orderId, red.redeemedBy.name], [id, "陈一帆"]);
       const again = (await staff.post(`/api/pickup/${second.code}/redeem`).expect(409)).body;
       assert.deepEqual([again.code, again.owner.name, again.redeemedBy.name], ["pickup-already-redeemed", "林小满", "陈一帆"]);
+      /* the code replaced earlier stays just invalid: it tells nothing about who collected */
+      const stale = (await staff.get(`/api/pickup/${first.code}`).expect(404)).body;
+      assert.deepEqual([stale.code, stale.owner], ["pickup-code-invalid", undefined]);
       assert.equal(await status(id), "COMPLETED");
       const today = (await staff.get("/api/pickup/redemptions").expect(200)).body;
       assert.equal(today[0].orderId, id);
@@ -243,6 +260,38 @@ describe("panel API", () => {
       assert.equal(r.retry.status, "PENDING_REVIEW");
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
       await builder.post(`/api/orders/${r.retry.id}/reject`).send({ reason: "请加支撑后重新提交" }).expect(200);
+    });
+
+    it("takes back a job stopped before it started; retries get their own revision budget", async () => {
+      const revisions = async (id: number) => (await t.db.select({ n: orders.revisionCount }).from(orders).where(eq(orders.id, id)))[0].n;
+      const [o] = (await submit(user).expect(201)).body.orders;
+      /* replacing the file before the first review is free */
+      await user.post(`/api/orders/${o.id}/revise`).attach("file", x2dTwoPlates(), "猫耳外壳-v2.gcode.3mf").expect(200);
+      assert.equal(await revisions(o.id), 0);
+      await builder.post(`/api/orders/${o.id}/approve`).expect(200);
+      await user.post(`/api/orders/${o.id}/revise`).attach("file", x2dTwoPlates(), "猫耳外壳-v3.gcode.3mf").expect(200);
+      assert.equal(await revisions(o.id), 1);
+      await builder.post(`/api/orders/${o.id}/approve`).expect(200);
+
+      t.commands.online = true;
+      t.commands.sent = [];
+      assert.equal(await t.app.get(SchedulerService).dispatch(printerId, { orderId: o.id }), o.id);
+      assert.equal(await printerState(printerId), "PREPARING");
+      const stopped = (await staff.post(`/api/printers/${printerId}/stop`).send({ reason: "传错文件" }).expect(200)).body;
+      assert.deepEqual([stopped.requeued, stopped.commandSent], [true, true]);
+      assert.equal(await status(o.id), "QUEUED");
+      assert.equal(await printerState(printerId), "IDLE");
+      assert.ok(t.commands.sent.some((c) => c.cmd === "recall" && c.arg === o.id));
+
+      assert.equal(await t.app.get(SchedulerService).dispatch(printerId, { orderId: o.id }), o.id);
+      t.commands.online = false;
+      await t.app.get(PrintersService).onStarted(printerId);
+      await staff.post(`/api/printers/${printerId}/stop`).send({ reason: "模型 / 切片问题" }).expect(200);
+      assert.equal(await status(o.id), "FAILED");
+      const r = (await builder.post(`/api/orders/${o.id}/attribute`).send({ attribution: "model" }).expect(200)).body;
+      assert.equal(await revisions(r.retry.id), 0);
+      await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
+      await builder.post(`/api/orders/${r.retry.id}/cancel`).send({ reason: "测试" }).expect(200);
     });
 
     it("lets submitters cancel only before printing; Builders can cancel a print", async () => {

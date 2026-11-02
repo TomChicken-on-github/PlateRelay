@@ -70,14 +70,15 @@ export class PickupService {
 
   /**
    * Resolves a code to its order or throws the refusal the scan page shows.
-   * Order of checks: already redeemed, revoked, expired, not ready.
+   * Order of checks: this code already redeemed, revoked, expired, not ready.
    */
   private async check(db: Db, raw: string, lock: boolean) {
     const code = normalizeCode(raw);
     const [pc] = code ? await db.select().from(pickupCodes).where(eq(pickupCodes.code, code)) : [];
     if (!pc) throw new ApiError(HttpStatus.NOT_FOUND, "pickup-code-invalid", "取件码无效");
     const o = (await orderRow(db, pc.orderId, lock))!;
-    if (o.status === "COMPLETED") {
+    /* only the code that was redeemed says so; a revoked or expired one of a completed order is just invalid */
+    if (o.status === "COMPLETED" && pc.redeemedAt) {
       const people = await loadPeople(db, [o.ownerId, o.redeemedBy]);
       throw new ApiError(HttpStatus.CONFLICT, "pickup-already-redeemed", "这张单已经核销过了", {
         orderId: o.id,

@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
@@ -48,13 +48,24 @@ export async function openDb(url: string): Promise<DbHandle> {
   try {
     return await init(url);
   } catch (err) {
-    // If an embedded disk database was corrupted by an unclean shutdown or killed process (WAL panic abort), recreate it cleanly.
-    const isWasmAbort = err instanceof Error && (/aborted/i.test(err.message) || (err.cause instanceof Error && /aborted/i.test(err.cause.message)));
-    if (url === "memory" || !isWasmAbort) throw err;
-
-    logger.error(`Embedded development database at ${url} was corrupted by an unclean shutdown. Resetting...`);
-    await rm(url, { recursive: true, force: true });
+    /*
+     * An embedded database left broken by an unclean shutdown makes PGlite's WASM abort ("Aborted()").
+     * Only that is handled, and the old directory is kept aside, never deleted: an ordinary SQL error
+     * such as "current transaction is aborted" during a migration must not cost the data.
+     */
+    if (url === "memory" || !isWasmAbort(err)) throw err;
+    const aside = `${url}.broken-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    logger.error(`Embedded development database at ${url} cannot be opened (WASM abort). Moved it to ${aside} and starting an empty one.`);
+    await rename(url, aside);
     await mkdir(url, { recursive: true });
     return await init(url);
   }
+}
+
+/** PGlite's WASM runtime aborting, as opposed to an error raised by PostgreSQL itself. */
+function isWasmAbort(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
+    if ((e instanceof WebAssembly.RuntimeError || e.name === "RuntimeError") && /^Aborted\(/.test(e.message)) return true;
+  }
+  return false;
 }

@@ -28,12 +28,17 @@ describe("POST /api/gcode3mf/parse", () => {
   let app: INestApplication;
 
   before(async () => {
+    /* the module alone has no sign-in; the access rule itself is covered in panel.e2e */
+    process.env.PLATERELAY_PUBLIC_PARSE = "1";
     const mod = await Test.createTestingModule({ imports: [Gcode3mfModule] }).compile();
     app = mod.createNestApplication();
     app.setGlobalPrefix("api");
     await app.init();
   });
-  after(() => app.close());
+  after(async () => {
+    delete process.env.PLATERELAY_PUBLIC_PARSE;
+    await app.close();
+  });
 
   it("returns one entry per plate with a PNG data URL", async () => {
     const res = await request(app.getHttpServer()).post("/api/gcode3mf/parse").attach("file", x2dTwoPlates(), "猫耳外壳.gcode.3mf").expect(200);

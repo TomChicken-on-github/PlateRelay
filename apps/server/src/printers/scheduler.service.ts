@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import type { QueueRules } from "@platerelay/shared";
-import { and, asc, eq, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, SYSTEM } from "../auth/actor.js";
 import { ApiError } from "../common/errors.js";
@@ -88,14 +88,15 @@ export class SchedulerService {
       await transition(tx, ctx, o.id, "dispatch", { set: { printerId: p.id, startedAt: now, skippedSince: null }, data: { printer: p.name } });
       /* everything still queued ahead of it has just been passed over (跳单), except what another idle printer is suggested */
       const others = [...sug.entries()].filter(([pid, x]) => pid !== p.id && x.id !== o.id).map(([, x]) => x.id);
-      await tx
+      const skipped = await tx
         .update(orders)
         .set({ skippedSince: now })
-        .where(and(eq(orders.status, "QUEUED"), isNull(orders.skippedSince), sql`(${orders.queueSeq}, ${orders.id}) < (${o.queueSeq}, ${o.id})`, others.length ? notInArray(orders.id, others) : undefined));
+        .where(and(eq(orders.status, "QUEUED"), isNull(orders.skippedSince), sql`(${orders.queueSeq}, ${orders.id}) < (${o.queueSeq}, ${o.id})`, others.length ? notInArray(orders.id, others) : undefined))
+        .returning({ id: orders.id });
       await movePrinter(tx, p, "dispatch", { currentOrderId: o.id, error: null });
       await this.audit.record(ctx, { action: "order.dispatch", targetType: "order", targetId: o.id, after: { printerId: p.id } }, tx);
       const [f] = await tx.select({ key: files.key, sha256: files.sha256 }).from(files).where(eq(files.id, o.fileId));
-      return { order: o, file: f };
+      return { order: o, file: f, skipped: skipped.map((x) => x.id), at: now };
     });
     try {
       await this.commands.startJob(printerId, { orderId: picked.order.id, plateIndex: picked.order.plateIndex, fileKey: picked.file.key, sha256: picked.file.sha256, ...opts.job });
@@ -105,6 +106,8 @@ export class SchedulerService {
         const p = await lockPrinter(tx, printerId);
         await transition(tx, SYSTEM, picked.order.id, "requeue", { set: { printerId: null, startedAt: null }, data: { why: "send-failed" } });
         if (p.currentOrderId === picked.order.id) await movePrinter(tx, p, "prepareFailed", { currentOrderId: null });
+        /* nobody was passed over after all: drop the 跳单 marks this dispatch set (not later ones) */
+        if (picked.skipped.length) await tx.update(orders).set({ skippedSince: null }).where(and(inArray(orders.id, picked.skipped), eq(orders.skippedSince, picked.at)));
         await this.audit.record(SYSTEM, { action: "order.dispatch.failed", targetType: "order", targetId: picked.order.id, before: { status: "PRINTING", printerId }, after: { status: "QUEUED", printerId: null }, result: "failed", reason: "send-failed" }, tx);
       });
       return null;
