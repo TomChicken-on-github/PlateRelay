@@ -20,6 +20,13 @@ export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 const MAX_CONFIG_BYTES = 4 * 1024 * 1024;
 const MAX_PNG_BYTES = 8 * 1024 * 1024;
+/**
+ * Everything inflated from one upload together. A zip of zeros shrinks about 1000:1, so without a total
+ * a few megabytes of upload holding many large "previews" would inflate to gigabytes.
+ */
+const MAX_INFLATED_BYTES = 96 * 1024 * 1024;
+/** More plates than any slicer project holds; each plate becomes an order on submit. */
+export const MAX_PLATES = 64;
 
 export type Gcode3mfErrorCode =
   | "bad-extension" // file name does not end in .gcode.3mf
@@ -144,10 +151,13 @@ export function parseGcode3mf(data: Uint8Array, opts: ParseOptions = {}): Gcode3
   const wantThumbs = opts.thumbnails ?? true;
 
   const names = new Set<string>();
+  let budget = MAX_INFLATED_BYTES;
+  /* sizes are the ones the archive declares; fflate inflates into a buffer of that size and never past it */
+  const take = (f: UnzipFileInfo) => f.originalSize <= budget && ((budget -= f.originalSize), true);
   const wanted = (f: UnzipFileInfo) => {
     names.add(f.name);
-    if (f.name === SLICE_INFO || f.name === MODEL_SETTINGS || f.name === PROJECT_SETTINGS) return f.originalSize <= MAX_CONFIG_BYTES;
-    return wantThumbs && /^Metadata\/(plate|top|pick)_\d+\.png$/.test(f.name) && f.originalSize <= MAX_PNG_BYTES;
+    if (f.name === SLICE_INFO || f.name === MODEL_SETTINGS || f.name === PROJECT_SETTINGS) return f.originalSize <= MAX_CONFIG_BYTES && take(f);
+    return wantThumbs && /^Metadata\/(plate|top|pick)_\d{1,3}\.png$/.test(f.name) && f.originalSize <= MAX_PNG_BYTES && take(f);
   };
 
   let files: Record<string, Uint8Array>;
@@ -192,7 +202,9 @@ export function parseGcode3mf(data: Uint8Array, opts: ParseOptions = {}): Gcode3
   const header = metadata(blocks(sliceInfo, "header")[0] ?? "", "header_item");
   const version = header["X-BBL-Client-Version"];
 
-  const plates: PlateInfo[] = blocks(sliceInfo, "plate").map((b) => {
+  const plateBlocks = blocks(sliceInfo, "plate");
+  if (plateBlocks.length > MAX_PLATES) throw new Gcode3mfError("bad-metadata", `文件里有 ${plateBlocks.length} 盘，最多 ${MAX_PLATES} 盘`);
+  const plates: PlateInfo[] = plateBlocks.map((b) => {
     const m = metadata(b);
     const index = num(m.index);
     if (!Number.isInteger(index) || index < 1) throw new Gcode3mfError("bad-metadata", "切片信息里的盘号无效");

@@ -59,28 +59,31 @@ export class ParamPolicy implements QueuePolicy {
     if (!r.enabled) return { allowed: false, code: "revisions-disabled", message: "本场不允许提交后修改文件" };
     if (dispatched && r.whenDispatched === "refuse") return { allowed: false, code: "already-dispatched", message: "这张单已经派给打印机，不能再改" };
 
-    const isSwitch = next.printerModelId !== o.printerModelId;
-    const toSingle = isSwitch && dual(o.nozzles) && !dual(next.nozzles);
-    const kind: RevisionInfo["kind"] = toSingle ? "dual-to-single" : isSwitch ? "model-switch" : "revision";
+    /* a plate never approved holds no place yet: replacing its file before the first review is free and counts nothing */
+    const firstReview = o.status === "PENDING_REVIEW";
+    const modelChanged = next.printerModelId !== o.printerModelId;
+    const toSingle = modelChanged && dual(o.nozzles) && !dual(next.nozzles);
+    const kind: RevisionInfo["kind"] = toSingle ? "dual-to-single" : modelChanged ? "model-switch" : "revision";
+    const isSwitch = modelChanged && !firstReview;
     if (isSwitch && o.modelSwitchCount >= rules.modelSwitch.max) {
       return { allowed: false, code: "model-switch-limit", message: rules.modelSwitch.max ? `换机型最多 ${rules.modelSwitch.max} 次` : "本场不允许换机型" };
     }
-    const counts = kind === "revision" || (kind === "model-switch" ? rules.modelSwitch.countsAsRevision : rules.modelSwitch.dualToSingleCounts);
+    const counts = !firstReview && (kind === "revision" || (kind === "model-switch" ? rules.modelSwitch.countsAsRevision : rules.modelSwitch.dualToSingleCounts));
     if (counts && r.max > 0 && o.revisionCount >= r.max) return { allowed: false, code: "revision-limit", message: `最多修改 ${r.max} 次` };
 
     const base = r.baseline === "original" ? o.originalPrintSeconds : o.printSeconds;
     const deltaSeconds = Math.round(next.printSeconds - base);
     let placesBack = revisionPlacesBack(r, deltaSeconds);
     if (dispatched && placesBack !== "tail") placesBack += r.dispatchedExtraPlaces;
-    if (isSwitch) {
+    if (modelChanged) {
       if (rules.modelSwitch.position === "tail") placesBack = "tail";
       else if (placesBack !== "tail") placesBack += rules.modelSwitch.extraPlaces;
     }
     const sameFilaments = (a: NextVersion["filaments"], b: NextVersion["filaments"]) =>
       a.length === b.length && a.every((f, i) => f.type === b[i].type && f.color.toLowerCase() === b[i].color.toLowerCase());
-    const minor = !isSwitch && sameFilaments(o.filaments, next.filaments) && deltaSeconds <= r.thresholdMinutes * 60;
+    const minor = !modelChanged && sameFilaments(o.filaments, next.filaments) && deltaSeconds <= r.thresholdMinutes * 60;
     /* a plate that was never approved has nothing to keep: it is still waiting for its first review */
-    const review = o.status === "PENDING_REVIEW" || !(r.autoApproveMinor && minor);
+    const review = firstReview || !(r.autoApproveMinor && minor);
     return { allowed: true, kind, counts, isSwitch, deltaSeconds, placesBack, review, recall: dispatched };
   }
 

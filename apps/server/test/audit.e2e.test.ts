@@ -284,14 +284,23 @@ it("source signatures precede success audits; previews exclude owners and missin
   const preview = await logs(t, "order.preview.view");
   assert.equal(preview.length, 1);
   assert.deepEqual([preview[0].targetId, preview[0].actorId, preview[0].result], [String(f.id), f.admin.id, "ok"]);
+  /* the same viewer refreshing within a link's lifetime is not logged again; another viewer is */
+  await f.admin.agent.get("/api/review").expect(200);
+  assert.equal((await logs(t, "order.preview.view")).length, 1);
   await failAudit(t, "order.file.download", async () => { await f.admin.agent.get(`/api/orders/${f.id}/file`).expect(500); });
-  await failAudit(t, "order.preview.view", async () => { await f.admin.agent.get("/api/review").expect(500); });
+  const second = await t.as("coreteam");
+  await failAudit(t, "order.preview.view", async () => { await second.agent.get("/api/review").expect(500); });
+  await second.agent.get("/api/review").expect(200);
+  assert.deepEqual((await logs(t, "order.preview.view")).map((e) => e.actorId), [f.admin.id, second.id]);
 }));
 
 it("postcommit preview audit failure cannot delete a stored photo; pickup lookup uses its real actor", () => isolated(async (t) => {
   const f = await fixture(t);
   await f.finish();
-  await failAudit(t, "order.preview.view", async () => { await f.store().expect(500); });
+  /* someone who has not seen this order's preview yet, so the store response logs one */
+  const storer = await t.as("coreteam");
+  const store = () => storer.agent.post(`/api/orders/${f.id}/store`).field("slot", "A-1").field("bedCleared", "true").attach("photo", JPEG, "part.jpg");
+  await failAudit(t, "order.preview.view", async () => { await store().expect(500); });
   const saved = await order(t, f.id);
   assert.equal(saved.status, "STORED_READY_PICKUP");
   assert.ok(saved.storePhotoKey);

@@ -257,13 +257,25 @@ export class PrintersService {
     return this.get(ctx, id);
   }
 
-  /** Stops the print on a handler's decision; the order becomes FAILED. */
+  /**
+   * Stops the print on a handler's decision; the order becomes FAILED. A job still PREPARING has printed
+   * nothing: it is recalled instead and the order goes back to its place in the queue.
+   */
   async stop(ctx: Ctx, id: string, reason: string | null) {
     if (!reason?.trim()) throw new ApiError(HttpStatus.BAD_REQUEST, "reason-required", "停止打印要选失败原因");
+    let recalled = false;
     const orderId = await this.db.transaction(async (tx) => {
       const p = await lockPrinter(tx, id);
       if (!["PREPARING", "PRINTING", "ERROR_PAUSED"].includes(p.state) || p.currentOrderId == null) {
         throw new ApiError(HttpStatus.CONFLICT, "printer-state-conflict", "打印机当前没有在打印", { printerId: id, state: p.state });
+      }
+      if (p.state === "PREPARING") {
+        /* nothing printed yet and the bed is clean: take the job back and the order keeps its place, like a failed preparation */
+        await transition(tx, ctx, p.currentOrderId, "requeue", { set: { printerId: null, startedAt: null }, data: { why: "stopped-before-start", reason } });
+        await movePrinter(tx, p, "recalled", { currentOrderId: null });
+        await this.audit.record(ctx, { action: "printer.stop", targetType: "printer", targetId: id, after: { orderId: p.currentOrderId, status: "QUEUED" }, reason }, tx);
+        recalled = true;
+        return p.currentOrderId;
       }
       const now = new Date();
       const [o] = await tx.select({ ms: orders.errorPausedMs }).from(orders).where(eq(orders.id, p.currentOrderId));
@@ -275,8 +287,8 @@ export class PrintersService {
       await this.audit.record(ctx, { action: "printer.stop", targetType: "printer", targetId: id, after: { orderId: p.currentOrderId, status: "FAILED" }, reason }, tx);
       return p.currentOrderId;
     });
-    const commandSent = await this.orders.sendStop(ctx, id);
-    return { printer: await this.get(ctx, id), orderId, commandSent };
+    const commandSent = recalled ? await this.orders.sendRecall(ctx, id, orderId) : await this.orders.sendStop(ctx, id);
+    return { printer: await this.get(ctx, id), orderId, commandSent, requeued: recalled };
   }
 
   /** Confirms a clean bed when there is nothing to store (failed, cancelled or external job). */

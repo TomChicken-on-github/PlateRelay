@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_QUEUE_RULES, OWNER_CANCELLABLE, type OrderView, type PersonView, type QueueRules } from "@platerelay/shared";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import type { Db } from "../db/db.js";
 import { type AnswerSnapshot, files, orders, printers, roles, userRoles, users } from "../db/schema.js";
@@ -28,7 +28,7 @@ export async function loadPeople(db: Db, ids: (string | null | undefined)[]): Pr
     ? await db
         .select({ id: users.id, name: users.displayName, role: roles.name })
         .from(users)
-        .leftJoin(userRoles, eq(userRoles.userId, users.id))
+        .leftJoin(userRoles, and(eq(userRoles.userId, users.id), eq(userRoles.scope, "global")))
         .leftJoin(roles, eq(roles.id, userRoles.roleId))
         .where(inArray(users.id, want))
     : [];
@@ -73,6 +73,8 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
   );
   const operate = can(ctx, "printer:operate");
   const rules = extras.rules ?? DEFAULT_QUEUE_RULES;
+  /* someone who acted on an order: the submitter acting on their own order stays as anonymous as the owner field */
+  const by = (r: OrderRow, id: string | null) => (id && id === r.ownerId ? people.owner(ctx, id) : people.get(id));
 
   return Promise.all(
     rows.map(async (r): Promise<OrderView> => {
@@ -107,20 +109,20 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
         printedAt: iso(r.printedAt),
         errorPausedMs: r.errorPausedMs,
         error: paused && operate ? (p?.error ?? null) : null,
-        review: r.reviewedAt ? { by: people.get(r.reviewedBy), at: r.reviewedAt.toISOString(), reason: r.rejectReason } : null,
-        cancel: r.cancelledAt ? { by: people.get(r.cancelledBy), at: r.cancelledAt.toISOString(), reason: r.cancelReason ?? "" } : null,
+        review: r.reviewedAt ? { by: by(r, r.reviewedBy), at: r.reviewedAt.toISOString(), reason: r.rejectReason } : null,
+        cancel: r.cancelledAt ? { by: by(r, r.cancelledBy), at: r.cancelledAt.toISOString(), reason: r.cancelReason ?? "" } : null,
         failure: r.failedAt
           ? {
-              by: people.get(r.failedBy),
+              by: by(r, r.failedBy),
               at: r.failedAt.toISOString(),
               reason: r.failureReason ?? "",
               attribution: r.attribution,
-              attributedBy: people.get(r.attributedBy),
+              attributedBy: by(r, r.attributedBy),
               attributedAt: iso(r.attributedAt),
             }
           : null,
-        stored: r.storedAt ? { by: people.get(r.storedBy), at: r.storedAt.toISOString(), slot: r.storageSlot ?? "" } : null,
-        redeemed: r.redeemedAt ? { by: people.get(r.redeemedBy), at: r.redeemedAt.toISOString() } : null,
+        stored: r.storedAt ? { by: by(r, r.storedBy), at: r.storedAt.toISOString(), slot: r.storageSlot ?? "" } : null,
+        redeemed: r.redeemedAt ? { by: by(r, r.redeemedBy), at: r.redeemedAt.toISOString() } : null,
         retryOf: r.retryOf,
         retriedAs: retryMap.get(r.id) ?? null,
         parts:

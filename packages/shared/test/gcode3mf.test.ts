@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { strToU8, zipSync, type Zippable } from "fflate";
 import { describe, expect, it } from "vitest";
-import { checkUpload, Gcode3mfError, MAX_UPLOAD_BYTES, parseGcode3mf } from "../src/index";
+import { checkUpload, Gcode3mfError, MAX_PLATES, MAX_UPLOAD_BYTES, parseGcode3mf } from "../src/index";
 
 /*
  * Fixtures are the metadata files of two real Bambu Studio 02.08.02.61 exports
@@ -159,4 +159,45 @@ describe.runIf(samples && existsSync(samples))("real samples", () => {
       for (const p of info.plates) expect(p.thumbnail).not.toBeNull();
     });
   }
+});
+
+describe("metadata scanner on hostile input", () => {
+  /* half a megabyte of unclosed tags used to take tens of seconds (regex backtracking); the parser reads up to 4 MB */
+  it("stays linear on tags that never close", async () => {
+    const { blocks, tags } = await import("../src/gcode3mf/xml");
+    const big = 4 * 1024 * 1024;
+    const t0 = Date.now();
+    expect(blocks("<plate>".repeat(big / 7), "plate")).toEqual([]);
+    expect(tags("<metadata ".repeat(big / 10), "metadata").length).toBe(0);
+    expect(tags(`<metadata ${"a".repeat(big)}>`, "metadata")).toEqual([{ name: "metadata", attrs: {} }]);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("reads attributes and blocks as before", async () => {
+    const { blocks, metadata, tags } = await import("../src/gcode3mf/xml");
+    const xml = `<config><plates><plate>x</plate></plates><plate id="1">\n<metadata key="index" value="1"/>\n<metadata key='name' value="A &amp; B"/>\n<metadata  key = "w"   value="2" /></plate><plate/></config>`;
+    expect(blocks(xml, "plates")).toEqual(["<plate>x</plate>"]);
+    expect(blocks(xml, "plate").length).toBe(2);
+    expect(metadata(blocks(xml, "plate")[1])).toEqual({ index: "1", name: "A & B", w: "2" });
+    expect(tags(`<object id="3" name='a b'/><objects/>`, "object")).toEqual([{ name: "object", attrs: { id: "3", name: "a b" } }]);
+  });
+});
+
+describe("upload limits", () => {
+  it("refuses more plates than MAX_PLATES", () => {
+    const one = readFileSync(join(FIX, "p2s-single", "slice_info.config"), "utf8");
+    const plate = one.slice(one.indexOf("<plate>"), one.indexOf("</plate>") + "</plate>".length);
+    const many = one.replace(plate, Array.from({ length: MAX_PLATES + 1 }, (_, i) => plate.replace(/key="index" value="1"/, `key="index" value="${i + 1}"`)).join("\n"));
+    expect(code(() => parseGcode3mf(build("p2s-single", [1], { "Metadata/slice_info.config": strToU8(many) }), { fileName: "多盘.gcode.3mf" }))).toBe("bad-metadata");
+  });
+
+  it("inflates no more than its budget of previews", () => {
+    /* 16 previews of 8 MB of zeros: about 130 MB inflated from a few hundred KB of upload */
+    const zeros = new Uint8Array(8 * 1024 * 1024);
+    const extra: Zippable = {};
+    for (let n = 1; n <= 16; n++) extra[`Metadata/top_${n}.png`] = zeros;
+    const before = process.memoryUsage().arrayBuffers;
+    parseGcode3mf(build("p2s-single", [1], extra), { fileName: "炸弹.gcode.3mf" });
+    expect(process.memoryUsage().arrayBuffers - before).toBeLessThan(120 * 1024 * 1024);
+  });
 });
