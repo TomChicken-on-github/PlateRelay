@@ -24,6 +24,8 @@ export const TRANSITIONS = {
   finish: { from: ["PRINTING"], to: "PRINTED_AWAITING_STORAGE" },
   /** Only a handler stopping the print with a reason. An error pause alone never fails an order. */
   fail: { from: ["PRINTING"], to: "FAILED" },
+  /** 重打: Staff send a failed order back to the queue at its own sort value (design doc F-PRT-07). */
+  reprint: { from: ["FAILED"], to: "QUEUED" },
   store: { from: ["PRINTED_AWAITING_STORAGE"], to: "STORED_READY_PICKUP" },
   redeem: { from: ["STORED_READY_PICKUP"], to: "COMPLETED" },
   /** A new file replaces the plate; it waits for re-review frozen in its place (rules doc §3). A PRINTING one was dispatched but not started and is recalled. */

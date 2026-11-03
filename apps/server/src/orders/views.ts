@@ -3,7 +3,7 @@ import { DEFAULT_QUEUE_RULES, OWNER_CANCELLABLE, type OrderView, type PersonView
 import { and, eq, inArray } from "drizzle-orm";
 import { type Ctx, can, userId } from "../auth/actor.js";
 import type { Db } from "../db/db.js";
-import { type AnswerSnapshot, files, orders, printers, roles, userRoles, users } from "../db/schema.js";
+import { type AnswerSnapshot, files, printers, roles, userRoles, users } from "../db/schema.js";
 import type { ObjectStorage } from "../storage/storage.js";
 import type { OrderRow } from "./transition.js";
 
@@ -65,11 +65,9 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
   const printerIds = [...new Set(rows.map((r) => r.printerId).filter((x): x is string => !!x))];
   const printerRows = printerIds.length ? await db.select().from(printers).where(inArray(printers.id, printerIds)) : [];
   const printerMap = new Map(printerRows.map((p) => [p.id, p]));
-  const retries = await db.select({ id: orders.id, retryOf: orders.retryOf }).from(orders).where(inArray(orders.retryOf, rows.map((r) => r.id)));
-  const retryMap = new Map(retries.map((r) => [r.retryOf!, r.id]));
   const people = await loadPeople(
     db,
-    rows.flatMap((r) => [r.ownerId, r.reviewedBy, r.cancelledBy, r.failedBy, r.attributedBy, r.storedBy, r.redeemedBy]),
+    rows.flatMap((r) => [r.ownerId, r.reviewedBy, r.cancelledBy, r.failedBy, r.storedBy, r.redeemedBy]),
   );
   const operate = can(ctx, "printer:operate");
   const rules = extras.rules ?? DEFAULT_QUEUE_RULES;
@@ -116,15 +114,10 @@ export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows:
               by: by(r, r.failedBy),
               at: r.failedAt.toISOString(),
               reason: r.failureReason ?? "",
-              attribution: r.attribution,
-              attributedBy: by(r, r.attributedBy),
-              attributedAt: iso(r.attributedAt),
             }
           : null,
         stored: r.storedAt ? { by: by(r, r.storedBy), at: r.storedAt.toISOString(), slot: r.storageSlot ?? "" } : null,
         redeemed: r.redeemedAt ? { by: by(r, r.redeemedBy), at: r.redeemedAt.toISOString() } : null,
-        retryOf: r.retryOf,
-        retriedAs: retryMap.get(r.id) ?? null,
         parts:
           r.partsTopKey && r.parts.length > 1
             ? {

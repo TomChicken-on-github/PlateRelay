@@ -1,4 +1,4 @@
-import { COLOUR_PREF_LABEL, type FailureAttribution, type OrderDetail, type OrderList, type OrderPartsView, type OrderTimelineEntry, type OrderVersionView, type OrderView, type OverviewStats, type PersonView, type PrinterView, type TodoView } from "@platerelay/shared";
+import { COLOUR_PREF_LABEL, type OrderDetail, type OrderList, type OrderPartsView, type OrderTimelineEntry, type OrderVersionView, type OrderView, type OverviewStats, type PersonView, type PrinterView, type TodoView } from "@platerelay/shared";
 import { type AdminOrder, adminOrders } from "../mock/adminOrders";
 import { type MyOrder, myOrders, type OrderStatus, type PartsState, type Version, type VersionSt } from "../mock/myOrders";
 import { mockParts } from "../mock/skip-parts";
@@ -61,8 +61,6 @@ export function pageStatus(v: Pick<OrderView, "status" | "waitingForHandler"> & 
   }
 }
 
-const ATTR_LABEL: Record<FailureAttribution, string> = { machine: "机器故障", model: "模型或切片问题" };
-
 /* ---------- mapping ---------- */
 
 export function toMyOrder(v: OrderView): MyOrder {
@@ -89,7 +87,6 @@ export function toMyOrder(v: OrderView): MyOrder {
     when: st === "done" ? fmtAt(v.redeemed?.at) : fmtAt(v.stored?.at) || undefined,
     reason: st === "rejected" ? (v.review?.reason ?? undefined) : st === "failed" ? v.failure?.reason : st === "cancelled" ? (v.cancel?.by?.id && v.cancel.by.id === v.owner.id ? "你取消了：" : "工作人员取消：") + v.cancel?.reason : undefined,
     by: person(v.review?.by),
-    retried: v.retriedAs ?? undefined,
     thumb: thumb(v),
     storer: person(v.stored?.by),
     redeemer: person(v.redeemed?.by),
@@ -147,7 +144,7 @@ export function toAdminOrder(v: OrderView): AdminOrder {
     st === "rejected"
       ? (v.review?.reason ?? undefined)
       : st === "failed"
-        ? v.failure?.reason + (v.failure?.attribution ? ` · 归因：${ATTR_LABEL[v.failure.attribution]}` : "")
+        ? v.failure?.reason
         : st === "cancelled"
           ? `${v.cancel?.by?.id === v.owner.id ? "选手" : "管理员"}取消：${v.cancel?.reason ?? ""}`
           : st === "paused"
@@ -171,8 +168,6 @@ export function toAdminOrder(v: OrderView): AdminOrder {
     note,
     thumb: thumb(v),
     pos: v.queue?.position,
-    attributed: !!v.failure?.attribution,
-    retried: v.retriedAs ?? undefined,
     mine: v.isMine,
     colour: COLOUR_PREF_LABEL[v.colourPref],
     missing: v.missingColours?.length ? v.missingColours.map((c): [string, string] => [c, v.filaments.find((f) => f.color.slice(0, 7).toLowerCase() === c)?.type ?? ""]) : undefined,
@@ -225,10 +220,8 @@ function eventText(e: OrderTimelineEntry): string {
     case "cancelOwn":
     case "cancelAny":
       return `${by} 取消订单：${d.reason ?? ""}`;
-    case "attribute":
-      return `${by} 失败归因：${ATTR_LABEL[d.attribution as FailureAttribution] ?? ""}${d.retry ? `，重打为 #${d.retry}` : ""}`;
-    case "retry":
-      return `由 #${d.retryOf} 失败重打生成`;
+    case "reprint":
+      return `${by} 重打，订单回到排队`;
     case "skip-parts":
       return `${by} 跳过零件：${((d.parts as { name: string }[] | undefined) ?? []).map((p) => p.name).join("、")}`;
     default:
@@ -415,13 +408,10 @@ export const ordersApi = {
     return after(await api<null>(`/api/orders/${id}/cancel`, json("POST", { reason })), "manage", "todo");
   },
 
-  async attribute(id: number, attribution: FailureAttribution): Promise<Res<{ retry: number | null }>> {
-    if (!LIVE) {
-      updateAdmin(id, (o) => ({ note: (o.note ?? "") + " · 归因：" + ATTR_LABEL[attribution], attributed: true }));
-      return { ok: true, data: { retry: null } };
-    }
-    const r = await mapRes(api<{ retry: OrderView }>(`/api/orders/${id}/attribute`, json("POST", { attribution })), (x) => ({ retry: x.retry.id }));
-    return after(r, "manage");
+  /** 重打 a failed order: it goes back to the queue at its own place. */
+  async reprint(id: number): Promise<Done> {
+    if (!LIVE) return updateAdmin(id, () => ({ st: "queued", note: undefined })), ok;
+    return after(await api<null>(`/api/orders/${id}/reprint`, json("POST", {})), "manage", "todo");
   },
 
   /** Moves a queued order to a 1-based place. */

@@ -20,16 +20,15 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** States an order cannot leave. FAILED is final too; a retry is a new order. */
-export const FINAL_ORDER_STATUSES: readonly OrderStatus[] = ["REJECTED", "COMPLETED", "FAILED", "CANCELLED"];
+/** States an order cannot leave. FAILED is not one: Staff can 重打 it back to the queue (design doc F-PRT-07). */
+export const FINAL_ORDER_STATUSES: readonly OrderStatus[] = ["REJECTED", "COMPLETED", "CANCELLED"];
 
 /** What a submitter may cancel on their own. */
 export const OWNER_CANCELLABLE: readonly OrderStatus[] = ["PENDING_REVIEW", "QUEUED"];
 
 /**
- * 失败归因. machine: not the submitter's fault, the retry goes straight back
- * to the queue at the failed order's position. model: a slicing or model
- * problem, the retry goes back to review.
+ * 失败归因, no longer used: a failed order is now reprinted as the same order.
+ * Kept only for the old orders.attribution column until a later migration drops it.
  */
 export const FAILURE_ATTRIBUTIONS = ["machine", "model"] as const;
 export type FailureAttribution = (typeof FAILURE_ATTRIBUTIONS)[number];

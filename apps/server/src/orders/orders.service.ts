@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import {
   type ColourPref,
-  type FailureAttribution,
   type OrderDetail,
   type OrderPartsView,
   type OrderPreview,
@@ -907,49 +906,43 @@ export class OrdersService {
     return (await this.views(ctx, [row]))[0];
   }
 
-  /* ---------- failure attribution ---------- */
+  /* ---------- reprint ---------- */
 
   /**
-   * 失败归因 on a FAILED order, which spawns its retry as a new order:
-   * machine fault → straight back to the queue at the failed order's place;
-   * model or slicing problem → back to review.
+   * 重打 (design doc F-PRT-07): the only way out of FAILED. The same order goes back to the queue at
+   * its own sort value; version, file and revision counts stay as they were. A printer still waiting
+   * for its bed to be cleared lets go of the order and stays in CLEARING_REQUIRED (INV-01).
    */
-  async attribute(ctx: Ctx, id: number, attribution: FailureAttribution, note: string | null): Promise<{ failed: OrderView; retry: OrderView }> {
-    const { failed, retry } = await this.db.transaction(async (tx) => {
-      /* a machine-fault retry joins the queue at once, so it waits for queue moves like approve does (queue.ts) */
+  async reprint(ctx: Ctx, id: number, note: string | null): Promise<OrderView> {
+    const row = await this.db.transaction(async (tx) => {
+      /* it joins the queue at once, so it waits for queue moves like approve does (queue.ts) */
       await queueLock(tx);
-      const o = await orderRow(tx, id, true);
-      if (!o) throw notFound("订单");
-      if (o.status !== "FAILED") throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有打印失败的订单能归因", { orderId: id, status: o.status });
-      if (o.attribution) throw new ApiError(HttpStatus.CONFLICT, "already-attributed", "这张单已经归因过了", { orderId: id, attribution: o.attribution });
-      await tx.update(orders).set({ attribution, attributedBy: userId(ctx), attributedAt: new Date() }).where(eq(orders.id, id));
-      const failed = (await orderRow(tx, id))!;
-      const machine = attribution === "machine";
-      const [raw] = await tx.select().from(orders).where(eq(orders.id, id));
-      const { id: _id, status: _s, submittedAt: _at, activeVersionId: _a, pendingVersionId: _p, ...copy } = raw;
-      /* the retry's first version is the file that failed, as a new version of its own */
-      const retry = await createOrder(
-        tx,
-        {
-          ...blank(copy),
-          /* a fresh order: its own revision budget, measured from the file it starts with */
-          originalPrintSeconds: o.printSeconds,
-          status: machine ? "QUEUED" : "PENDING_REVIEW",
-          queueSeq: machine ? o.queueSeq : null,
-          reviewedBy: machine ? o.reviewedBy : null,
-          reviewedAt: machine ? o.reviewedAt : null,
-          retryOf: id,
+      const [cur] = await tx.select({ status: orders.status, printerId: orders.printerId, failureReason: orders.failureReason, queueSeq: orders.queueSeq }).from(orders).where(eq(orders.id, id)).for("update");
+      if (!cur) throw notFound("订单");
+      if (cur.status !== "FAILED") throw new ApiError(HttpStatus.CONFLICT, "order-state-conflict", "只有打印失败的订单能重打", { orderId: id, status: cur.status });
+      if (cur.printerId) {
+        const p = await lockPrinter(tx, cur.printerId);
+        if (p.currentOrderId === id) await tx.update(printers).set({ currentOrderId: null }).where(eq(printers.id, p.id));
+      }
+      const { row } = await transition(tx, ctx, id, "reprint", {
+        set: {
+          queueSeq: sql`coalesce(${orders.queueSeq}, nextval('order_queue_seq'))`,
+          printerId: null,
+          startedAt: null,
+          printedAt: null,
+          errorPausedMs: 0,
+          failedBy: null,
+          failedAt: null,
+          failureReason: null,
+          skippedParts: [],
+          skippedSince: null,
         },
-        versionFields(o),
-        { kind: "submit", state: machine ? "approved" : "pending", decidedBy: o.reviewedBy },
-      );
-      await orderEvent(tx, ctx, id, "attribute", { attribution, note, retry: retry.id });
-      await orderEvent(tx, ctx, retry.id, "retry", { retryOf: id, attribution });
-      await this.audit.record(ctx, { action: "order.attribute", targetType: "order", targetId: id, after: { attribution, retry: retry.id }, reason: note }, tx);
-      return { failed, retry };
+        data: { failureReason: cur.failureReason, note },
+      });
+      await this.audit.record(ctx, { action: "order.reprint", targetType: "order", targetId: id, before: { status: "FAILED", failureReason: cur.failureReason }, after: { status: "QUEUED" }, reason: note }, tx);
+      return row;
     });
-    const [a, b] = await this.views(ctx, [failed, retry]);
-    return { failed: a, retry: b };
+    return (await this.views(ctx, [row]))[0];
   }
 
   /* ---------- queue ---------- */
@@ -1002,39 +995,6 @@ export class OrdersService {
     return (await this.views(ctx, [row]))[0];
   }
 
-}
-
-/** A retry starts with a clean history, revision counts included: only the plate, file, answers and choices carry over. */
-function blank(o: Omit<typeof orders.$inferSelect, "id" | "status" | "submittedAt" | "activeVersionId" | "pendingVersionId">) {
-  return {
-    ...o,
-    reviewedBy: null,
-    reviewedAt: null,
-    rejectReason: null,
-    revisionCount: 0,
-    modelSwitchCount: 0,
-    printerId: null,
-    startedAt: null,
-    printedAt: null,
-    errorPausedMs: 0,
-    storedBy: null,
-    storedAt: null,
-    storageSlot: null,
-    storePhotoKey: null,
-    redeemedBy: null,
-    redeemedAt: null,
-    cancelledBy: null,
-    cancelledAt: null,
-    cancelReason: null,
-    failedBy: null,
-    failedAt: null,
-    failureReason: null,
-    attribution: null,
-    attributedBy: null,
-    attributedAt: null,
-    skippedParts: [],
-    skippedSince: null,
-  };
 }
 
 /** A plate can skip parts when the G-code labels its objects and there is more than one. */

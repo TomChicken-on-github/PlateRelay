@@ -227,7 +227,7 @@ describe("panel API", () => {
       await builder.post(`/api/orders/${id}/cancel`).send({ reason: "测试" }).expect(200);
     });
 
-    it("fails an order only when a handler stops it, then retries per 失败归因", async () => {
+    it("fails an order only when a handler stops it; Staff reprint the same order in its place", async () => {
       const id = await printing();
       await t.app.get(PrintersService).onErrorPaused(printerId, { errorId: "e2", vendorCode: "0300", raisedAt: new Date().toISOString(), actions: ["STOP"] });
       await staff.post(`/api/printers/${printerId}/stop`).send({}).expect(400);
@@ -238,31 +238,25 @@ describe("panel API", () => {
       const failed = (await user.get(`/api/orders/${id}`).expect(200)).body;
       assert.equal(failed.failure.reason, "耗材问题");
 
-      await staff.post(`/api/orders/${id}/attribute`).send({ attribution: "machine" }).expect(403);
       const seq = (await t.db.select({ q: orders.queueSeq }).from(orders).where(eq(orders.id, id)))[0].q;
-      const r = (await builder.post(`/api/orders/${id}/attribute`).send({ attribution: "machine" }).expect(200)).body;
-      assert.equal(r.retry.status, "QUEUED");
-      assert.equal(r.retry.retryOf, id);
-      assert.equal(r.failed.retriedAs, r.retry.id);
-      assert.equal((await t.db.select({ q: orders.queueSeq }).from(orders).where(eq(orders.id, r.retry.id)))[0].q, seq);
-      await builder.post(`/api/orders/${id}/attribute`).send({ attribution: "model" }).expect(409);
-      await builder.post(`/api/orders/${r.retry.id}/cancel`).send({ reason: "测试" }).expect(200);
+      await user.post(`/api/orders/${id}/reprint`).send({}).expect(403);
+      const r = (await staff.post(`/api/orders/${id}/reprint`).send({}).expect(200)).body;
+      assert.equal(r.id, id);
+      assert.equal(r.status, "QUEUED");
+      assert.equal(r.failure, null);
+      assert.equal((await t.db.select({ q: orders.queueSeq }).from(orders).where(eq(orders.id, id)))[0].q, seq);
+      await staff.post(`/api/orders/${id}/reprint`).send({}).expect(409);
+      /* the bed still has the failed print on it: the printer lets go of the order but waits to be cleared */
+      assert.equal(await printerState(printerId), "CLEARING_REQUIRED");
+      await assert.rejects(t.app.get(SchedulerService).dispatch(printerId, { orderId: id }), /打印机现在不能接单/);
+      await builder.post(`/api/orders/${id}/cancel`).send({ reason: "测试" }).expect(200);
 
       await user.post(`/api/printers/${printerId}/clear-bed`).expect(403);
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
       assert.equal(await printerState(printerId), "IDLE");
     });
 
-    it("sends a model-problem retry back to review", async () => {
-      const id = await printing();
-      await staff.post(`/api/printers/${printerId}/stop`).send({ reason: "模型 / 切片问题" }).expect(200);
-      const r = (await builder.post(`/api/orders/${id}/attribute`).send({ attribution: "model", note: "悬垂没加支撑" }).expect(200)).body;
-      assert.equal(r.retry.status, "PENDING_REVIEW");
-      await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
-      await builder.post(`/api/orders/${r.retry.id}/reject`).send({ reason: "请加支撑后重新提交" }).expect(200);
-    });
-
-    it("takes back a job stopped before it started; retries get their own revision budget", async () => {
+    it("takes back a job stopped before it started; a reprint keeps the revision count", async () => {
       const revisions = async (id: number) => (await t.db.select({ n: orders.revisionCount }).from(orders).where(eq(orders.id, id)))[0].n;
       const [o] = (await submit(user).expect(201)).body.orders;
       /* replacing the file before the first review is free */
@@ -288,10 +282,11 @@ describe("panel API", () => {
       await t.app.get(PrintersService).onStarted(printerId);
       await staff.post(`/api/printers/${printerId}/stop`).send({ reason: "模型 / 切片问题" }).expect(200);
       assert.equal(await status(o.id), "FAILED");
-      const r = (await builder.post(`/api/orders/${o.id}/attribute`).send({ attribution: "model" }).expect(200)).body;
-      assert.equal(await revisions(r.retry.id), 0);
+      await staff.post(`/api/orders/${o.id}/reprint`).send({}).expect(200);
+      assert.equal(await status(o.id), "QUEUED");
+      assert.equal(await revisions(o.id), 1);
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
-      await builder.post(`/api/orders/${r.retry.id}/cancel`).send({ reason: "测试" }).expect(200);
+      await builder.post(`/api/orders/${o.id}/cancel`).send({ reason: "测试" }).expect(200);
     });
 
     it("lets submitters cancel only before printing; Builders can cancel a print", async () => {

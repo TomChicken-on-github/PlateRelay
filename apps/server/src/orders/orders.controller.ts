@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, UploadedFile, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { FileFieldsInterceptor, FileInterceptor } from "@nestjs/platform-express";
-import { BED_TYPES, COLOUR_PREFS, DEFAULT_COLOUR_PREF, FAILURE_ATTRIBUTIONS, MAX_UPLOAD_BYTES, ORDER_STATUSES } from "@platerelay/shared";
+import { BED_TYPES, COLOUR_PREFS, DEFAULT_COLOUR_PREF, MAX_UPLOAD_BYTES, ORDER_STATUSES } from "@platerelay/shared";
 import { z } from "zod";
 import { type Ctx, ReqCtx, RequirePerm } from "../auth/actor.js";
 import { parse } from "../common/zod.js";
@@ -8,7 +8,7 @@ import { OrdersService } from "./orders.service.js";
 import { PickupService } from "./pickup.service.js";
 
 const Reason = z.object({ reason: z.string().trim().min(1, "要填写原因").max(500) });
-const Attribute = z.object({ attribution: z.enum(FAILURE_ATTRIBUTIONS), note: z.string().trim().max(500).nullish() });
+const Reprint = z.object({ note: z.string().trim().max(500).nullish() });
 const SkipParts = z.object({ parts: z.array(z.number().int().positive()).min(1, "至少选一个零件").max(256) });
 const Reorder =z.object({ orderId: z.number().int().positive(), toPosition: z.number().int().positive(), reason: z.string().trim().max(500).nullish() });
 const Store = z.object({ slot: z.string().trim().min(1).max(40), bedCleared: z.literal("true", { message: "要确认热床已清理" }) });
@@ -172,12 +172,12 @@ export class OrdersController {
     return this.orders.skipParts(ctx, id, parse(SkipParts, body).parts);
   }
 
-  @Post("orders/:id/attribute")
+  /** 重打 a failed order: back to the queue at its own place (design doc F-PRT-07). */
+  @Post("orders/:id/reprint")
   @HttpCode(200)
-  @RequirePerm("order:attribute")
-  attribute(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
-    const b = parse(Attribute, body);
-    return this.orders.attribute(ctx, id, b.attribution, b.note ?? null);
+  @RequirePerm("order:reprint")
+  reprint(@ReqCtx() ctx: Ctx, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.orders.reprint(ctx, id, parse(Reprint, body ?? {}).note ?? null);
   }
 
   @Post("queue/reorder")
