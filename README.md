@@ -35,6 +35,7 @@ pnpm dev:web
 
 ## 文档
 
+- [版本功能边界清单](docs/design/00-scope-and-principles.md)
 - [项目简报](docs/project-brief.md)
 - [打印机 Driver 接口草稿](docs/printer-driver-interface-draft.md)
 
