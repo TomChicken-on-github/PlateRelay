@@ -244,6 +244,7 @@ export const orders = pgTable(
     failedBy: uuid("failed_by").references(() => users.id),
     failedAt: ts("failed_at"),
     failureReason: text("failure_reason"),
+    /* attribution…retryOf: left from 失败归因, unused since reprint keeps the same order (F-PRT-07); drop in a later migration (expand, then contract: F-OPS-05) */
     attribution: failureAttribution("attribution"),
     attributedBy: uuid("attributed_by").references(() => users.id),
     attributedAt: ts("attributed_at"),
@@ -251,7 +252,7 @@ export const orders = pgTable(
     colourPref: colourPref("colour_pref").notNull().default("similar"),
     /** Plate the submitter picked when 自选板 is allowed; null prints on the plate the file was sliced for. */
     bedType: text("bed_type"),
-    /** Print time of the first version, the baseline for revision penalties; a retry keeps its failed order's. */
+    /** Print time of the first version, the baseline for revision penalties; a reprint keeps it. */
     originalPrintSeconds: integer("original_print_seconds").notNull(),
     revisionCount: integer("revision_count").notNull().default(0),
     modelSwitchCount: integer("model_switch_count").notNull().default(0),

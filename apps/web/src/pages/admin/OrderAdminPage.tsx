@@ -17,16 +17,14 @@ import { LIVE } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { live, ordersApi, toAdminDetail, useManageOrders, useReviewOrders } from "../../lib/ordersApi";
-import { ADMIN_STATUS, ATTRIBUTION, type AdminOrder, CANCEL_WHY, adminOrders, answers, auditFor } from "../../mock/adminOrders";
+import { ADMIN_STATUS, type AdminOrder, CANCEL_WHY, adminOrders, answers, auditFor } from "../../mock/adminOrders";
 import type { Version } from "../../mock/myOrders";
 
 type Mode = "review" | "manage";
-type SheetType = "reject" | "cancel" | "attr" | "skip";
+type SheetType = "reject" | "cancel" | "skip";
 type TabKey = "all" | "pending" | "queued" | "printing" | "pick" | "bad" | "end";
 const TABS: [TabKey, string][] = [["all", "全部"], ["pending", "待审核"], ["queued", "排队中"], ["printing", "打印中"], ["pick", "入库取件"], ["bad", "异常"], ["end", "已结束"]];
 const GROUP: Record<AdminOrder["st"], TabKey> = { pending: "pending", revising: "pending", queued: "queued", printing: "printing", awaiting: "pick", ready: "pick", paused: "bad", failed: "bad", rejected: "end", done: "end", cancelled: "end" };
-
-const ATTR_IDS = ["machine", "model"] as const;
 
 /** Plate preview: the stored plate image, or the placeholder drawing. */
 function Preview({ o }: { o: AdminOrder }) {
@@ -374,7 +372,7 @@ const Big = ({ v, unit }: { v: ReactNode; unit?: string }) => (
 );
 const Small = ({ children }: { children: ReactNode }) => <b className="mt-1.5 block text-label-l font-medium">{children}</b>;
 
-function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o: AdminOrder; onReject: () => void; onCancel: () => void; onAttr: () => void; onSkip: () => void }) {
+function Detail({ mode, o, onReject, onCancel, onReprint, onSkip }: { mode: Mode; o: AdminOrder; onReject: () => void; onCancel: () => void; onReprint: () => void; onSkip: () => void }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [label, tone] = ADMIN_STATUS[o.st];
@@ -402,7 +400,7 @@ function Detail({ mode, o, onReject, onCancel, onAttr, onSkip }: { mode: Mode; o
       )}
       {mode === "manage" && o.parts?.allowed && <Button variant="tonal" icon="skip_next" onClick={onSkip}>跳过零件</Button>}
       {mode === "manage" && live && <Button variant="outlined" icon="cancel" onClick={onCancel}>取消订单</Button>}
-      {o.st === "failed" && !o.attributed && <Button icon="info" onClick={onAttr}>失败归因</Button>}
+      {o.st === "failed" && <Button icon="replay" onClick={onReprint}>重打</Button>}
     </>
   );
   return (
@@ -537,7 +535,13 @@ export function OrderAdminPage({ mode }: { mode: Mode }) {
   return (
     <Page>
       {id && order ? (
-        <Detail mode={mode} o={order} onReject={() => open("reject", order.id)} onCancel={() => open("cancel", order.id)} onAttr={() => open("attr", order.id)} onSkip={() => open("skip", order.id)} />
+        <Detail mode={mode} o={order} onReject={() => open("reject", order.id)} onCancel={() => open("cancel", order.id)} onReprint={() => {
+            void ordersApi.reprint(order.id).then((r) => {
+              if (!r.ok) return toast(r.error.message || "重打失败，请重试");
+              toast(`#${order.id} 已回到排队`);
+              changed();
+            });
+          }} onSkip={() => open("skip", order.id)} />
       ) : id && LIVE ? (
         order === null ? <Empty icon="search_off">找不到订单 #{id}</Empty> : <Empty icon="hourglass_top">正在加载订单 #{id}…</Empty>
       ) : mode === "review" ? (
@@ -582,23 +586,6 @@ export function OrderAdminPage({ mode }: { mode: Mode }) {
               const r = await ordersApi.cancelAny(target.id, v);
               if (!r.ok) return toast(r.error.message || "取消失败，请重试");
               toast(`#${target.id} 已取消`);
-              close();
-              changed();
-            }}
-          />
-          <PickSheet
-            key={`a${key}`}
-            open={sheet?.type === "attr"}
-            onClose={close}
-            title={`失败归因 #${target.id}`}
-            sub={`${target.note ?? ""}。归因决定后续怎么处理，选手会收到通知。`}
-            label="归因"
-            options={ATTRIBUTION}
-            confirm="确认"
-            onDone={async (v) => {
-              const r = await ordersApi.attribute(target.id, ATTR_IDS[ATTRIBUTION.indexOf(v)]);
-              if (!r.ok) return toast(r.error.message || "归因失败，请重试");
-              toast(`#${target.id} 已归因：${v.split("（")[0]}${r.data.retry ? `，重打为 #${r.data.retry}` : ""}`);
               close();
               changed();
             }}

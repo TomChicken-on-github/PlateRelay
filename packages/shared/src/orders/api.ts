@@ -1,7 +1,7 @@
 import type { ParsedPlate, ParsedUpload } from "../gcode3mf/api.js";
 import type { AccessCodeState } from "../printers/access-code.js";
 import type { ColourPref, PlateCheck, QueueRules } from "../rules/rules.js";
-import type { FailureAttribution, OrderStatus, PrinterState } from "./status.js";
+import type { OrderStatus, PrinterState } from "./status.js";
 
 /*
  * JSON shapes of the panel's order, printer and settings endpoints, shared so
@@ -121,11 +121,9 @@ export interface OrderView {
   error: PrinterError | null;
   review: { by: PersonView | null; at: string; reason: string | null } | null;
   cancel: { by: PersonView | null; at: string; reason: string } | null;
-  failure: { by: PersonView | null; at: string; reason: string; attribution: FailureAttribution | null; attributedBy: PersonView | null; attributedAt: string | null } | null;
+  failure: { by: PersonView | null; at: string; reason: string } | null;
   stored: { by: PersonView | null; at: string; slot: string } | null;
   redeemed: { by: PersonView | null; at: string } | null;
-  retryOf: number | null;
-  retriedAs: number | null;
   /**
    * 跳过零件: null when the plate cannot skip parts (one part, objects not labelled, no top view).
    * `allowed` is whether this viewer can skip now: printing, and order:skip-parts:own / :any.

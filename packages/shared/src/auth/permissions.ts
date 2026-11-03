@@ -25,8 +25,8 @@ export const PERMISSIONS = [
   "order:skip-parts:any",
   "order:review",
   "order:reorder",
-  /** 失败归因: decide why a failed order failed, which spawns the retry. */
-  "order:attribute",
+  /** 重打: send a failed order back to the queue at its own place. */
+  "order:reprint",
   /** 铲件入库 and confirming a bed is clear. */
   "order:store",
   "order:redeem",
@@ -64,7 +64,7 @@ const USER: Permission[] = [
   "order:skip-parts:own",
 ];
 
-const STAFF: Permission[] = [...USER, "order:skip-parts:any", "order:store", "order:redeem", "order:dispatch", "printer:operate", "printer:stop"];
+const STAFF: Permission[] = [...USER, "order:skip-parts:any", "order:store", "order:redeem", "order:dispatch", "order:reprint", "printer:operate", "printer:stop"];
 
 export const PRESET_ROLES: Record<RoleId, { name: string; permissions: readonly Permission[] }> = {
   user: { name: "User", permissions: USER },
