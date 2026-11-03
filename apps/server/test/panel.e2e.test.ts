@@ -289,7 +289,7 @@ describe("panel API", () => {
       await staff.post(`/api/printers/${printerId}/stop`).send({ reason: "模型 / 切片问题" }).expect(200);
       assert.equal(await status(o.id), "FAILED");
       const r = (await builder.post(`/api/orders/${o.id}/attribute`).send({ attribution: "model" }).expect(200)).body;
-      assert.equal(await revisions(r.retry.id), 0);
+      assert.equal(await revisions(r.retry.id), 1);
       await staff.post(`/api/printers/${printerId}/clear-bed`).expect(200);
       await builder.post(`/api/orders/${r.retry.id}/cancel`).send({ reason: "测试" }).expect(200);
     });

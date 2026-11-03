@@ -932,8 +932,8 @@ export class OrdersService {
         tx,
         {
           ...blank(copy),
-          /* a fresh order: its own revision budget, measured from the file it starts with */
-          originalPrintSeconds: o.printSeconds,
+          /* a reprint keeps the failed order's revision budget and baseline (design doc F-PRT-07) */
+          originalPrintSeconds: o.originalPrintSeconds,
           status: machine ? "QUEUED" : "PENDING_REVIEW",
           queueSeq: machine ? o.queueSeq : null,
           reviewedBy: machine ? o.reviewedBy : null,
@@ -1004,15 +1004,13 @@ export class OrdersService {
 
 }
 
-/** A retry starts with a clean history, revision counts included: only the plate, file, answers and choices carry over. */
+/** A retry starts with a clean history; the plate, file, answers, choices and revision counts carry over. */
 function blank(o: Omit<typeof orders.$inferSelect, "id" | "status" | "submittedAt" | "activeVersionId" | "pendingVersionId">) {
   return {
     ...o,
     reviewedBy: null,
     reviewedAt: null,
     rejectReason: null,
-    revisionCount: 0,
-    modelSwitchCount: 0,
     printerId: null,
     startedAt: null,
     printedAt: null,
