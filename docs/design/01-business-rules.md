@@ -78,6 +78,7 @@
 | `order:review` | 审核通过 / 驳回（Q97） | | | | ● |
 | `order:reorder` | 拖拽调整排队顺序（Q98） | | | | ● |
 | `order:cancel:any` | 取消任意订单（Q98） | | | | ● |
+| `order:dispose` | 把长期未取的订单标为已处置（R-PCK-05，Q160） | | | | ● |
 | `printer:manage` | 添加、编辑、删除打印机（Q148） | | | | ● |
 | `resource:configure` | 开放给选手开关、映射规则、映射不符原因列表（Q104、Q149） | | | | ● |
 | `form:configure` | 申请表单 | | | | ● |
