@@ -291,6 +291,6 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | 编号 | 约定 |
 | --- | --- |
 | MSG-SCH-01 | 每种消息一个 JSON Schema（2020-12）文件，放在 `packages/shared/schema/daemon/v1/`，`$id` 带协议主版本。 |
-| MSG-SCH-02 | TypeScript 类型用 `json-schema-to-typescript` 生成，Python 用 `datamodel-code-generator` 生成 pydantic v2 模型【建议】。生成的文件提交进仓库，CI 检查它们和 Schema 一致。 |
+| MSG-SCH-02 | TypeScript 类型用 `json-schema-to-typescript` 生成，Python 用 `datamodel-code-generator` 生成 pydantic v2 模型（Q157）。生成的文件提交进仓库，CI 检查它们和 Schema 一致。 |
 | MSG-SCH-03 | 两边收到消息都先按 Schema 校验，不合格的回 `ack` 并记日志，不处理（不让一条坏消息卡住整个队列）。 |
 | MSG-SCH-04 | 协议一致性测试：仓库里放一组录好的消息样本（含拓竹真机录的），两边的生成代码都要能解析。 |

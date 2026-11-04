@@ -919,10 +919,10 @@ paths:
       operationId: disposeOrder
       tags: [orders]
       summary: 标为已处置
-      x-permission: order:cancel:any
+      x-permission: order:dispose
       x-transitions: [S-ORD-T21]
       x-rules: [R-PCK-05]
-      description: 权限节点暂用 order:cancel:any（都只给管理员）；文档 1 §2.2 没有单独的节点【建议】。
+      description: Q160。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
