@@ -57,3 +57,6 @@ Thumbs.db
 # the Python `lib/` rule above must not swallow frontend source folders
 !apps/*/src/lib/
 !packages/*/src/lib/
+
+# 打印机调试 MCP 的录制文件（可能含序列号等设备信息）
+tools/printer_mcp/captures/
