@@ -125,12 +125,12 @@ def parse_ssdp(data: bytes, addr_ip: str) -> dict[str, str] | None:
     }
 
 
-def discover(seconds: float = 10.0) -> list[dict[str, str]]:
+def discover(seconds: float = 10.0, ports: tuple[int, ...] = SSDP_PORTS) -> list[dict[str, str]]:
     import select
     import socket
 
     socks = []
-    for port in SSDP_PORTS:
+    for port in ports:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:

@@ -90,12 +90,16 @@ def test_discover_loopback():
     import threading
     import time
 
+    # 用随机空闲端口，不碰真实的 1990/2021，免得和用户正在跑的扫描互相串包
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
     def send():
         time.sleep(0.3)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.sendto(NOTIFY, ("127.0.0.1", 2021))
+            s.sendto(NOTIFY, ("127.0.0.1", port))
 
     threading.Thread(target=send).start()
-    found = srv.discover(1.0)
-    # 真机可能同时在广播，只检查测试包被收到
-    assert "20P6BJTEST0001" in [p["serial"] for p in found]
+    found = srv.discover(1.0, ports=(port,))
+    assert [p["serial"] for p in found] == ["20P6BJTEST0001"]
