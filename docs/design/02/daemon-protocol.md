@@ -7,7 +7,7 @@
 ```
  打印机 ──局域网── daemon ──wss（控制通道）──▶ 面板
                     │   └─https（文件、抓拍、延时摄影）─▶ 面板
-                    └──rtsps / wss（媒体，按需）────────▶ 媒体服务 ──WebRTC──▶ 浏览器
+                    └──SRT/UDP（退 RTSPS）或 wss（媒体，按需）─▶ 媒体服务 ──WebRTC / LL-HLS──▶ 浏览器
 ```
 
 | 编号 | 约定 |
@@ -206,7 +206,7 @@ daemon                                  面板
 | `error.resolve` | `{ errorId, action }` | 60 秒 | R-PRT-14 |
 | `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | R-PRT-15 |
 | `refresh` | `{}` | 10 秒 | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
-| `camera.open` | `{ publishUrl, publishToken, expiresAt }`（H.264 机型）或 `{ framesUrl }`（JPEG 帧机型） | 30 秒 | MSG-MEDIA、R-CAM-06 |
+| `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | MSG-MEDIA、R-CAM-06 |
 | `camera.close` | `{}` | 30 秒 | R-CAM-06 |
 | `snapshot.mode` | `{ watched: bool }`：这台打印机现在有没有人在看 | 30 秒 | R-CAM-08 |
 | `snapshot.now` | `{ reason: "FIRST_VIEWER" \| "ERROR" }` | 30 秒 | R-CAM-08、R-CAM-10 |
@@ -266,8 +266,8 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 
 | 编号 | 约定 |
 | --- | --- |
-| MSG-MEDIA-01 | 面板旁边跑一个媒体服务（mediamtx，MIT 协议，放在官方 docker compose 里），只负责收流和用 WebRTC 发给浏览器（Q162）。 |
-| MSG-MEDIA-02 | **H.264 机型**（X1、X2D、H2 等，打印机本身出 RTSP）：面板发 `camera.open`，带一次性的推流地址和令牌；daemon 从打印机拉 RTSP，**原样**（不解码、不转码）用 RTSPS 推到媒体服务（Q163）。仍然是 daemon 往外连（NG-08）。 |
+| MSG-MEDIA-01 | 媒体服务用 mediamtx（MIT），在官方 docker compose 里单独一个容器，由面板管理：配置由面板生成，健康状态显示在系统设置·运维，管理接口不对外，WHEP 和 LL-HLS 地址经面板的域名反代（Q172）。对外开放 UDP + TCP 8189（WebRTC）和 UDP 8890（SRT）。v1 不上 CDN（Q171）。 |
+| MSG-MEDIA-02 | **H.264 机型**（X1、X2D、H2 等，打印机本身出 RTSP）：面板发 `camera.open`，带一次性的推流地址和令牌；daemon 从打印机拉 RTSP，**原样**（不解码、不转码）推到媒体服务（Q163）。默认用 SRT（UDP，延迟上限 `latencyMs` = CFG-CAM-10，超时的包直接丢）；连不上 SRT 时自动退到 RTSPS（TCP），并在 `command.result.data.transport` 里报实际用的是哪种，界面上标出来（Q170）。仍然是 daemon 往外连（NG-08）。 |
 | MSG-MEDIA-03 | **JPEG 帧机型**（P1、A1，打印机只给一帧帧 JPEG）：daemon 开一条 `wss://<面板>/daemon/v1/frames/{printerId}`，每个二进制帧是一张 JPEG，原样转发；面板再用 WebSocket 发给浏览器。帧率本来就低，带宽不是问题。 |
 | MSG-MEDIA-04 | 推流令牌由面板签发，只对这台打印机、这一次推流有效，到期或 `camera.close` 后作废。媒体服务向面板校验令牌（HTTP 鉴权回调），浏览器拉流用的令牌同理。 |
 | MSG-MEDIA-05 | 按需（R-CAM-06）：第一个观众点播放时面板发 `camera.open`；面板从媒体服务查观众数，最后一个离开超过 CFG-CAM-04 后发 `camera.close`。 |

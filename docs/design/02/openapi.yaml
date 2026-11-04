@@ -1569,12 +1569,16 @@ paths:
                 oneOf:
                 - type: object
                   properties:
-                    kind: {type: string, enum: [webrtc]}
-                    whepUrl: {type: string, format: uri}
+                    kind: {type: string, enum: [video]}
+                    whepUrl: {type: [string, 'null'], format: uri}
+                    hlsUrl: {type: [string, 'null'], format: uri}
+                    prefer: {type: string, enum: [webrtc, llhls]}
                     token: {type: string}
                     expiresAt: {type: string, format: date-time}
-                  required: [kind, whepUrl, token, expiresAt]
+                    transport: {type: [string, 'null'], enum: [srt, rtsps]}
+                  required: [kind, whepUrl, hlsUrl, prefer, token, expiresAt, transport]
                   additionalProperties: false
+                  description: 按 CFG-CAM-11 给出一个或两个地址；自动 = 两个都给，prefer=webrtc
                 - type: object
                   properties:
                     kind: {type: string, enum: [jpeg-frames]}
@@ -2952,7 +2956,7 @@ components:
         camera:
           type: object
           properties:
-            stream: {type: string, enum: [webrtc, jpeg-frames, none]}
+            stream: {type: string, enum: [video, jpeg-frames, none]}
             snapshotAt: {type: [string, 'null'], format: date-time}
           required: [stream, snapshotAt]
           additionalProperties: false
