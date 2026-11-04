@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -40,8 +41,12 @@ class FakeClient:
 
 
 def make_conn():
+    import threading
+
     c = object.__new__(srv.PrinterConnection)
     c.serial, c._seq, c._last_pushall, c._client = "SN", 0, 0.0, FakeClient()
+    c.name, c.host, c._lock = "x2d", "192.0.2.1", threading.Lock()
+    c.state = {"print": {"gcode_state": "RUNNING"}}
     return c
 
 
@@ -68,7 +73,126 @@ def test_send_allows_readonly_and_throttles_pushall():
 
 def test_tools_registered():
     tools = asyncio.run(srv.build_server().list_tools())
-    assert {t.name for t in tools} == {"printers", "status", "raw_report", "record", "version", "ftp_list"}
+    assert {t.name for t in tools} == {"printers", "status", "raw_report", "record", "version", "ftp_list", "control"}
+    control = next(t for t in tools if t.name == "control")
+    # ctx 是注入的，不能出现在给 Claude 的参数里
+    assert set(control.inputSchema["properties"]) == {"command", "printer"}
+
+
+# ---------- 控制 ----------
+
+def test_send_control_whitelist_only():
+    c = make_conn()
+    for bad in ("project_file", "gcode_line", '{"print": {"command": "stop"}}', ""):
+        with pytest.raises(PermissionError):
+            c._send_control(bad)
+    assert c._client.sent == []
+    c._send_control("pause")
+    ((topic, payload),) = c._client.sent
+    assert topic == "device/SN/request"
+    assert json.loads(payload) == {"print": {"command": "pause", "sequence_id": "1"}}
+    # 白名单里的原始模板不能被改动
+    assert srv.CONTROL_COMMANDS["pause"][1]["print"]["sequence_id"] == "0"
+
+
+def test_readonly_send_still_blocks_whitelisted_control():
+    c = make_conn()
+    for _, msg in srv.CONTROL_COMMANDS.values():
+        with pytest.raises(PermissionError):
+            c._send(msg)
+    assert c._client.sent == []
+
+
+class Answer:
+    def __init__(self, action, confirm=None):
+        self.action = action
+        self.data = None if confirm is None else type("D", (), {"confirm": confirm})()
+
+
+def run_confirm(command, elicit):
+    c = make_conn()
+    prompts = []
+
+    async def wrapped(msg):
+        prompts.append(msg)
+        return await elicit(msg)
+
+    out = asyncio.run(srv.confirm_and_send(c, command, wrapped))
+    return c, out, prompts
+
+
+def answer(a):
+    async def elicit(msg):
+        return a
+    return elicit
+
+
+def test_confirm_accept_sends_exactly_one():
+    c, out, prompts = run_confirm("stop", answer(Answer("accept", True)))
+    assert len(c._client.sent) == 1 and "已发送" in out
+    assert "x2d" in prompts[0] and "192.0.2.1" in prompts[0] and "RUNNING" in prompts[0] and "stop" in prompts[0]
+
+
+@pytest.mark.parametrize("res", [
+    Answer("accept", False),
+    Answer("accept"),
+    Answer("decline"),
+    Answer("cancel"),
+    None,
+])
+def test_confirm_not_given_sends_nothing(res):
+    c, out, _ = run_confirm("pause", answer(res))
+    assert c._client.sent == [] and "未发送" in out
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("Method not found"), NotImplementedError(), ConnectionError()])
+def test_elicit_unsupported_sends_nothing(exc):
+    async def elicit(msg):
+        raise exc
+    c, out, _ = run_confirm("pause", elicit)
+    assert c._client.sent == [] and "未发送" in out
+
+
+def test_elicit_timeout_sends_nothing(monkeypatch):
+    monkeypatch.setattr(srv, "CONFIRM_TIMEOUT", 0.05)
+
+    async def elicit(msg):
+        await asyncio.sleep(10)
+    c, out, _ = run_confirm("pause", elicit)
+    assert c._client.sent == [] and "未发送" in out
+
+
+@pytest.mark.parametrize("client_answer, sent", [
+    ("no-callback", 0),  # 客户端不支持 elicitation
+    ("decline", 0),
+    ("accept-unchecked", 0),
+    ("accept", 1),
+])
+def test_control_tool_end_to_end(monkeypatch, client_answer, sent):
+    from mcp import types
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    c = make_conn()
+    monkeypatch.setattr(srv, "conn", lambda printer: c)
+
+    async def on_elicit(context, params):
+        if client_answer == "decline":
+            return types.ElicitResult(action="decline")
+        return types.ElicitResult(action="accept", content={"confirm": client_answer == "accept"})
+
+    async def go():
+        server = srv.build_server()._mcp_server
+        cb = None if client_answer == "no-callback" else on_elicit
+        async with create_connected_server_and_client_session(server, elicitation_callback=cb) as s:
+            return await s.call_tool("control", {"command": "light_on"})
+
+    res = asyncio.run(go())
+    assert len(c._client.sent) == sent, res.content[0].text
+
+
+def test_unknown_command_never_asks():
+    c, out, prompts = run_confirm("project_file", answer(Answer("accept", True)))
+    assert c._client.sent == [] and prompts == [] and "白名单" in out
 
 
 NOTIFY = (

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import json
 import logging
@@ -33,6 +34,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "daemon" / "src"))
 
+from platerelay_daemon.drivers.bambu._vendor.pybambu import commands as bambu_cmd  # noqa: E402
 from platerelay_daemon.drivers.bambu.read_only import (  # noqa: E402
     ReadOnlyFTP,
     is_read_only_request,
@@ -167,54 +169,13 @@ def _slug(text: str, fallback: str) -> str:
     return out or fallback
 
 
-def _ask_and_save(host: str, serial: str, default_name: str) -> None:
-    name = input(f"给它起个名字 [{default_name}]：").strip() or default_name
-    code = getpass.getpass("访问码（在打印机屏幕上看，输入不显示）：").strip()
-    if not code:
-        print("访问码为空，没有保存")
-        return
-    save_printer(name, host, serial, code)
-
-
 def menu() -> None:
-    while True:
-        names = list_printers()
-        print("\n== PlateRelay 打印机调试 · 设置 ==")
-        print(f"已保存：{', '.join(names) or '无'}")
-        print("  1) 扫描局域网（只听广播，约 10 秒）")
-        print("  2) 手动输入")
-        print("  3) 删除已保存的打印机")
-        print("  0) 退出")
-        choice = input("> ").strip()
-        if choice == "1":
-            print("正在监听……打印机要开着并在同一局域网")
-            found = discover()
-            if not found:
-                print("没有发现。可以多试一次，或者选 2 手动输入")
-                continue
-            for i, p in enumerate(found, 1):
-                print(f"  {i}) {p['name'] or '?'}  型号 {p['model']}  {p['host']}  序列号 {p['serial']}")
-            pick = input("选哪台（回车取消）：").strip()
-            if pick.isdigit() and 1 <= int(pick) <= len(found):
-                p = found[int(pick) - 1]
-                _ask_and_save(p["host"], p["serial"], _slug(p["name"], p["serial"][-6:].lower()))
-        elif choice == "2":
-            host = input("打印机 IP：").strip()
-            serial = input("序列号：").strip()
-            if host and serial:
-                _ask_and_save(host, serial, "printer")
-            else:
-                print("IP 和序列号都不能为空")
-        elif choice == "3":
-            if not names:
-                continue
-            for i, n in enumerate(names, 1):
-                print(f"  {i}) {n}")
-            pick = input("删除哪台（回车取消）：").strip()
-            if pick.isdigit() and 1 <= int(pick) <= len(names):
-                forget(names[int(pick) - 1])
-        elif choice in ("0", "q", ""):
-            return
+    # TUI 在同目录的 tui.py，需要 --with questionary
+    try:
+        import tui
+    except ImportError as e:
+        sys.exit(f"TUI 启动失败：{e}。请用 `uv run --project daemon --with keyring --with questionary ...` 运行")
+    tui.main()
 
 
 def forget(name: str) -> None:
@@ -267,6 +228,64 @@ def get_path(obj: Any, path: str | None) -> Any:
         else:
             cur = cur[part]
     return cur
+
+
+# ---------- 控制：白名单 + 人工二次确认 ----------
+
+# 只认这几个名字，报文取自 pybambu commands.py，用到再加。不做任意 JSON 透传。
+CONTROL_COMMANDS: dict[str, tuple[str, dict]] = {
+    "pause": ("暂停打印", bambu_cmd.PAUSE),
+    "resume": ("继续打印", bambu_cmd.RESUME),
+    "stop": ("停止打印（不能恢复）", bambu_cmd.STOP),
+    "light_on": ("腔室灯开", bambu_cmd.CHAMBER_LIGHT_ON),
+    "light_off": ("腔室灯关", bambu_cmd.CHAMBER_LIGHT_OFF),
+}
+CONFIRM_TIMEOUT = 300.0
+
+
+def control_prompt(c: "PrinterConnection", command: str) -> str:
+    gcode_state = c.snapshot().get("print", {}).get("gcode_state", "?")
+    return (
+        f"确认向打印机发送控制命令？\n"
+        f"  打印机：{c.name}（{c.host}）\n"
+        f"  当前 gcode_state：{gcode_state}\n"
+        f"  命令：{command} · {CONTROL_COMMANDS[command][0]}"
+    )
+
+
+async def confirm_and_send(c: "PrinterConnection", command: str, elicit) -> str:
+    """elicit(message) 必须由人在客户端里回答。拿不到明确的 accept + 勾选，一律不发送。"""
+    if command not in CONTROL_COMMANDS:
+        return f"不在控制白名单里：{command}。可用：{', '.join(CONTROL_COMMANDS)}"
+    try:
+        res = await asyncio.wait_for(elicit(control_prompt(c, command)), CONFIRM_TIMEOUT)
+    except Exception as e:  # noqa: BLE001  客户端不支持 elicitation、超时、断开……
+        return f"没有拿到人工确认（{type(e).__name__}），未发送"
+    data = getattr(res, "data", None)
+    if getattr(res, "action", None) != "accept" or not getattr(data, "confirm", False):
+        return f"用户没有确认（{getattr(res, 'action', '?')}），未发送"
+    c._send_control(command)
+    return f"已发送 {command}（{CONTROL_COMMANDS[command][0]}）"
+
+
+def status_summary(c: "PrinterConnection") -> dict[str, Any]:
+    p = c.snapshot().get("print", {})
+    summary = {k: p[k] for k in SUMMARY_KEYS if k in p}
+    dev = p.get("device") or {}
+    if dev:
+        # 只挑关键字段，完整内容用 raw_report("print.device")
+        summary["nozzles"] = [
+            {k: n.get(k) for k in ("id", "diameter", "type", "tm") if k in n}
+            for n in (dev.get("nozzle") or {}).get("info", [])
+        ]
+        ext = dev.get("extruder") or {}
+        if "state" in ext:
+            summary["extruder_state"] = ext["state"]
+    if "ams" in p:
+        summary["ams_exist_bits"] = p["ams"].get("ams_exist_bits")
+        summary["ams_units"] = len(p["ams"].get("ams", []))
+    summary["_age_s"] = round(time.time() - c.last_message_at, 1) if c.last_message_at else None
+    return summary
 
 
 # ---------- 连接 ----------
@@ -347,6 +366,16 @@ class PrinterConnection:
         payload = {next(iter(msg)): body}
         self._client.publish(f"device/{self.serial}/request", json.dumps(payload))
         return True
+
+    def _send_control(self, command: str) -> None:
+        # 控制命令的唯一出口，和只读的 _send 分开。调用方必须先拿到人工二次确认。
+        if command not in CONTROL_COMMANDS:
+            raise PermissionError(f"不在控制白名单里：{command}")
+        ((section, body),) = CONTROL_COMMANDS[command][1].items()
+        self._seq += 1
+        payload = {section: dict(body, sequence_id=str(self._seq))}
+        LOGGER.warning("[%s] 发送控制命令：%s", self.name, command)
+        self._client.publish(f"device/{self.serial}/request", json.dumps(payload))
 
     def wait_ready(self, timeout: float = 15.0) -> None:
         if not self.connected.wait(timeout):
@@ -432,7 +461,9 @@ def diff_messages(before: dict, msgs: list[tuple[float, dict]], path: str | None
 # ---------- MCP ----------
 
 def build_server():
-    from mcp.server.fastmcp import FastMCP
+    import anyio
+    from mcp.server.fastmcp import Context, FastMCP
+    from pydantic import BaseModel, Field
 
     mcp = FastMCP("platerelay-printer-debug")
 
@@ -448,23 +479,7 @@ def build_server():
         c = conn(printer)
         if refresh:
             c.refresh()
-        p = c.snapshot().get("print", {})
-        summary = {k: p[k] for k in SUMMARY_KEYS if k in p}
-        dev = p.get("device") or {}
-        if dev:
-            # 只挑关键字段，完整内容用 raw_report("print.device")
-            summary["nozzles"] = [
-                {k: n.get(k) for k in ("id", "diameter", "type", "tm") if k in n}
-                for n in (dev.get("nozzle") or {}).get("info", [])
-            ]
-            ext = dev.get("extruder") or {}
-            if "state" in ext:
-                summary["extruder_state"] = ext["state"]
-        if "ams" in p:
-            summary["ams_exist_bits"] = p["ams"].get("ams_exist_bits")
-            summary["ams_units"] = len(p["ams"].get("ams", []))
-        summary["_age_s"] = round(time.time() - c.last_message_at, 1) if c.last_message_at else None
-        return json.dumps({"printer": c.name, "status": summary}, ensure_ascii=False, indent=1)
+        return json.dumps({"printer": c.name, "status": status_summary(c)}, ensure_ascii=False, indent=1)
 
     @mcp.tool()
     def raw_report(path: str | None = None, printer: str | None = None, refresh: bool = False) -> str:
@@ -512,6 +527,22 @@ def build_server():
         """列 FTPS 目录（只读，写操作命令会被拦下）。"""
         c = conn(printer)
         return "\n".join(c.ftp_list(path)) or "（空）"
+
+    class Confirm(BaseModel):
+        confirm: bool = Field(default=False, description="勾选表示我本人确认发送这条控制命令")
+
+    async def control(command: str, ctx: Context, printer: str | None = None) -> str:
+        """向打印机发送控制命令。command 只能是 pause、resume、stop、light_on、light_off。
+        发送前会弹出确认框，必须由用户本人确认；用户拒绝、取消、超时或客户端不支持确认框时不发送。
+        Claude 不能代替用户确认，也不要劝用户关掉确认。"""
+        if command not in CONTROL_COMMANDS:
+            return f"不在控制白名单里：{command}。可用：{', '.join(CONTROL_COMMANDS)}"
+        c = await anyio.to_thread.run_sync(conn, printer)
+        return await confirm_and_send(c, command, lambda msg: ctx.elicit(message=msg, schema=Confirm))
+
+    # 文件开了 from __future__ import annotations，Context 只在这里导入，FastMCP 解析不到字符串注解
+    control.__annotations__.update(ctx=Context, command=str, printer=str | None, **{"return": str})
+    mcp.tool()(control)
 
     return mcp
 
