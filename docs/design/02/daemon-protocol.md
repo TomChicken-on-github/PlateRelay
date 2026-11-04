@@ -23,12 +23,12 @@
 | 步骤 | 内容 |
 | --- | --- |
 | 1 | 管理员在 daemon 页点"生成安装命令"。面板新建 E-ENR，令牌 15 分钟有效、只能用一次（F-DMN-01）。 |
-| 2 | 面板按平台给出命令（Linux / Windows / Docker，F-DMN-06），令牌放在环境变量 `PLATERELAY_ENROLL_TOKEN` 里传给安装脚本，不放进命令行参数，所以 `ps` 看不到【建议】。 |
+| 2 | 面板按平台给出**一条**命令（Linux / Windows / Docker，F-DMN-06），令牌用 `--token` 参数传给安装脚本（Q156）。脚本也接受环境变量 `PLATERELAY_ENROLL_TOKEN`，给不想让令牌出现在命令行里的人用。用掉令牌后，脚本尽量把这条命令从 shell 历史里删掉，删不掉不影响安装。 |
 | 3 | daemon 在本机生成 RSA-3072 密钥对。私钥只存在本机：Linux 是权限 0600 的文件，Windows 用 DPAPI 加密后存，Docker 放在挂载卷里（F-DMN-02、INV-07）。 |
 | 4 | daemon 调 `POST /daemon/v1/enroll`：`{ token, publicKey, name, platform, daemonVersion, protocolVersion }`，`publicKey` 是 SPKI DER 的 base64。 |
 | 5 | 面板校验令牌，作废它，新建 E-DMN，返回 `{ daemonId }`。daemon 把面板地址和 `daemonId` 写进自己的配置文件（不含任何秘密）。 |
 
-一次性令牌出现在安装命令里，是 F-DMN-01 明确允许的唯一例外：它 15 分钟过期、用一次就作废，daemon 不把它写进配置或日志。
+一次性令牌出现在安装命令里，是 F-DMN-01 明确允许的唯一例外：它 15 分钟过期、用一次就作废，daemon 不把它写进配置或日志。真正的保护靠这几点，而不是传法：只能用一次、15 分钟过期、安装成功即作废；注册时如果报"令牌已被使用"，安装脚本明确提示管理员去 daemon 列表里查有没有陌生的注册。
 
 ## 3. 连接与认证（MSG-AUTH）
 
