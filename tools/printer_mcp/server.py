@@ -450,8 +450,16 @@ def build_server():
             c.refresh()
         p = c.snapshot().get("print", {})
         summary = {k: p[k] for k in SUMMARY_KEYS if k in p}
-        if "device" in p:
-            summary["device"] = p["device"]
+        dev = p.get("device") or {}
+        if dev:
+            # 只挑关键字段，完整内容用 raw_report("print.device")
+            summary["nozzles"] = [
+                {k: n.get(k) for k in ("id", "diameter", "type", "tm") if k in n}
+                for n in (dev.get("nozzle") or {}).get("info", [])
+            ]
+            ext = dev.get("extruder") or {}
+            if "state" in ext:
+                summary["extruder_state"] = ext["state"]
         if "ams" in p:
             summary["ams_exist_bits"] = p["ams"].get("ams_exist_bits")
             summary["ams_units"] = len(p["ams"].get("ams", []))
@@ -509,6 +517,12 @@ def build_server():
 
 
 def main() -> None:
+    # Windows 控制台默认 GBK，统一成 UTF-8，免得中文日志乱码
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="PlateRelay 打印机只读调试 MCP")
     sub = ap.add_subparsers(dest="cmd")
