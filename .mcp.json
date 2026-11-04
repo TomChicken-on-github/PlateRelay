@@ -2,6 +2,22 @@
   "mcpServers": {
     "Figma Desktop": {
       "url": "https://mcp.figma.com/mcp"
+    },
+    "printer-debug": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "daemon",
+        "--with",
+        "mcp>=1.2,<2",
+        "--with",
+        "keyring",
+        "--with",
+        "questionary",
+        "python",
+        "tools/printer_mcp/server.py"
+      ]
     }
   }
 }
