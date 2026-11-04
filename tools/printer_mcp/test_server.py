@@ -69,3 +69,32 @@ def test_send_allows_readonly_and_throttles_pushall():
 def test_tools_registered():
     tools = asyncio.run(srv.build_server().list_tools())
     assert {t.name for t in tools} == {"printers", "status", "raw_report", "record", "version", "ftp_list"}
+
+
+NOTIFY = (
+    "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1990\r\nServer: UPnP/1.0\r\nLocation: 192.168.0.103\r\n"
+    "NT: urn:bambulab-com:device:3dprinter:1\r\nUSN: 20P6BJTEST0001\r\nDevModel.bambu.com: N6\r\n"
+    "DevName.bambu.com: My X2D\r\nDevConnect.bambu.com: lan\r\n\r\n"
+).encode()
+
+
+def test_parse_ssdp():
+    info = srv.parse_ssdp(NOTIFY, "10.0.0.9")
+    assert info == {"serial": "20P6BJTEST0001", "host": "192.168.0.103", "model": "N6", "name": "My X2D", "connect": "lan"}
+    assert srv.parse_ssdp(b"NOTIFY * HTTP/1.1\r\nNT: upnp:rootdevice\r\nUSN: x\r\n", "1.2.3.4") is None
+    assert srv._slug("My X2D", "x") == "my-x2d"
+
+
+def test_discover_loopback():
+    import socket
+    import threading
+    import time
+
+    def send():
+        time.sleep(0.3)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.sendto(NOTIFY, ("127.0.0.1", 2021))
+
+    threading.Thread(target=send).start()
+    found = srv.discover(1.0)
+    assert [p["serial"] for p in found] == ["20P6BJTEST0001"]

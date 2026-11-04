@@ -12,12 +12,18 @@
 
 ```powershell
 cd D:\Project\PlateRelay
-uv run --project daemon --with keyring python tools/printer_mcp/server.py setup x2d
+uv run --project daemon --with keyring python tools/printer_mcp/server.py menu
 ```
 
-按提示输入 IP、序列号、访问码（访问码输入不显示）。三项一起存在 Windows 凭据管理器里（条目名 `platerelay-printer-debug`），不进仓库、不进日志。
+菜单：
 
-其它命令：`... server.py list` 列出已保存的打印机，`... server.py forget x2d` 删除。
+1. **扫描局域网**：约 10 秒，只监听拓竹打印机的 SSDP 广播（UDP 1990 / 2021），不向打印机发任何包。列出听到的机器，选一台，起名字，输访问码。拓竹软件（Bambu Studio / Orca）开着时可能占用端口，扫不到就先关掉再试。
+2. **手动输入**：填 IP、序列号、访问码。
+3. **删除**已保存的打印机。
+
+访问码输入不显示。IP、序列号、访问码一起存在 Windows 凭据管理器里（条目名 `platerelay-printer-debug`），不进仓库、不进日志。
+
+其它命令：`server.py scan` 只扫描，`server.py list` 列出已保存，`server.py setup <名字>` 手动保存，`server.py forget <名字>` 删除。
 
 ## 在 Claude Code 里用
 

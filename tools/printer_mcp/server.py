@@ -10,8 +10,8 @@
 
 凭据：
   打印机的地址、序列号、访问码存在系统凭据库（Windows 上是凭据管理器），
-  不进仓库、不进日志、不走命令行参数。先在自己的终端里运行一次：
-    uv run --project daemon --with keyring python tools/printer_mcp/server.py setup x2d
+  不进仓库、不进日志、不走命令行参数。先在自己的终端里运行一次设置菜单（可扫描局域网或手动输入）：
+    uv run --project daemon --with keyring python tools/printer_mcp/server.py menu
 
 用法见同目录 README.md。
 """
@@ -79,19 +79,142 @@ def load_printer(name: str | None) -> tuple[str, dict[str, str]]:
     return name, json.loads(raw)
 
 
-def setup(name: str) -> None:
+def save_printer(name: str, host: str, serial: str, code: str) -> None:
     kr = _keyring()
-    host = input("打印机 IP：").strip()
-    serial = input("序列号：").strip()
-    code = getpass.getpass("访问码（输入不显示）：").strip()
-    if not (host and serial and code):
-        sys.exit("三项都不能为空")
     kr.set_password(KEYRING_SERVICE, name, json.dumps({"host": host, "serial": serial, "access_code": code}))
     names = list_printers()
     if name not in names:
         names.append(name)
         kr.set_password(KEYRING_SERVICE, INDEX_KEY, json.dumps(names))
-    print(f"已保存 {name}（{host}）。已配置：{', '.join(names)}")
+    print(f"已保存 {name}（{host}）。已配置：{', '.join(list_printers())}")
+
+
+def setup(name: str) -> None:
+    host = input("打印机 IP：").strip()
+    serial = input("序列号：").strip()
+    code = getpass.getpass("访问码（输入不显示）：").strip()
+    if not (host and serial and code):
+        sys.exit("三项都不能为空")
+    save_printer(name, host, serial, code)
+
+
+# ---------- 局域网发现：只监听拓竹的 SSDP 广播，不发任何包 ----------
+
+SSDP_PORTS = (1990, 2021)
+SSDP_GROUP = "239.255.255.250"
+
+
+def parse_ssdp(data: bytes, addr_ip: str) -> dict[str, str] | None:
+    try:
+        text = data.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return None
+    headers: dict[str, str] = {}
+    for line in text.splitlines()[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+    if "bambulab" not in headers.get("nt", "").lower() or not headers.get("usn"):
+        return None
+    return {
+        "serial": headers["usn"],
+        "host": headers.get("location") or addr_ip,
+        "model": headers.get("devmodel.bambu.com", "?"),
+        "name": headers.get("devname.bambu.com", ""),
+        "connect": headers.get("devconnect.bambu.com", ""),
+    }
+
+
+def discover(seconds: float = 10.0) -> list[dict[str, str]]:
+    import select
+    import socket
+
+    socks = []
+    for port in SSDP_PORTS:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("", port))
+        except OSError as e:
+            print(f"  （端口 {port} 监听不了：{e}，可能被拓竹软件占用，先关掉它再试）")
+            s.close()
+            continue
+        try:
+            mreq = socket.inet_aton(SSDP_GROUP) + socket.inet_aton("0.0.0.0")
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except OSError:
+            pass  # 收不到组播也还能收广播
+        socks.append(s)
+    found: dict[str, dict[str, str]] = {}
+    end = time.time() + seconds
+    try:
+        while socks and time.time() < end:
+            ready, _, _ = select.select(socks, [], [], 0.5)
+            for s in ready:
+                data, addr = s.recvfrom(4096)
+                info = parse_ssdp(data, addr[0])
+                if info and info["serial"] not in found:
+                    found[info["serial"]] = info
+                    print(f"  发现：{info['name'] or '?'}  {info['model']}  {info['host']}")
+    finally:
+        for s in socks:
+            s.close()
+    return list(found.values())
+
+
+def _slug(text: str, fallback: str) -> str:
+    out = "".join(ch.lower() if ch.isalnum() else "-" for ch in text).strip("-")
+    return out or fallback
+
+
+def _ask_and_save(host: str, serial: str, default_name: str) -> None:
+    name = input(f"给它起个名字 [{default_name}]：").strip() or default_name
+    code = getpass.getpass("访问码（在打印机屏幕上看，输入不显示）：").strip()
+    if not code:
+        print("访问码为空，没有保存")
+        return
+    save_printer(name, host, serial, code)
+
+
+def menu() -> None:
+    while True:
+        names = list_printers()
+        print("\n== PlateRelay 打印机调试 · 设置 ==")
+        print(f"已保存：{', '.join(names) or '无'}")
+        print("  1) 扫描局域网（只听广播，约 10 秒）")
+        print("  2) 手动输入")
+        print("  3) 删除已保存的打印机")
+        print("  0) 退出")
+        choice = input("> ").strip()
+        if choice == "1":
+            print("正在监听……打印机要开着并在同一局域网")
+            found = discover()
+            if not found:
+                print("没有发现。可以多试一次，或者选 2 手动输入")
+                continue
+            for i, p in enumerate(found, 1):
+                print(f"  {i}) {p['name'] or '?'}  型号 {p['model']}  {p['host']}  序列号 {p['serial']}")
+            pick = input("选哪台（回车取消）：").strip()
+            if pick.isdigit() and 1 <= int(pick) <= len(found):
+                p = found[int(pick) - 1]
+                _ask_and_save(p["host"], p["serial"], _slug(p["name"], p["serial"][-6:].lower()))
+        elif choice == "2":
+            host = input("打印机 IP：").strip()
+            serial = input("序列号：").strip()
+            if host and serial:
+                _ask_and_save(host, serial, "printer")
+            else:
+                print("IP 和序列号都不能为空")
+        elif choice == "3":
+            if not names:
+                continue
+            for i, n in enumerate(names, 1):
+                print(f"  {i}) {n}")
+            pick = input("删除哪台（回车取消）：").strip()
+            if pick.isdigit() and 1 <= int(pick) <= len(names):
+                forget(names[int(pick) - 1])
+        elif choice in ("0", "q", ""):
+            return
 
 
 def forget(name: str) -> None:
@@ -389,13 +512,20 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="PlateRelay 打印机只读调试 MCP")
     sub = ap.add_subparsers(dest="cmd")
-    s = sub.add_parser("setup", help="在系统凭据库里保存一台打印机（交互输入）")
+    sub.add_parser("menu", help="设置菜单：扫描局域网选择打印机，或手动输入")
+    sub.add_parser("scan", help="只扫描局域网，列出听到的打印机")
+    s = sub.add_parser("setup", help="手动保存一台打印机（交互输入）")
     s.add_argument("name")
     f = sub.add_parser("forget", help="从系统凭据库删除一台打印机")
     f.add_argument("name")
     sub.add_parser("list", help="列出已配置的打印机")
     args = ap.parse_args()
-    if args.cmd == "setup":
+    if args.cmd == "menu":
+        menu()
+    elif args.cmd == "scan":
+        found = discover()
+        print(f"共 {len(found)} 台" if found else "没有发现")
+    elif args.cmd == "setup":
         setup(args.name)
     elif args.cmd == "forget":
         forget(args.name)
