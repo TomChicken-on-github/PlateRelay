@@ -136,7 +136,7 @@
 
 ### E-INV `invite_codes`
 
-`id`、`code_hash`、`label`、`max_uses`（0 = 不限）、`used_count`、`expires_at?`、`created_by`、`created_at`、`revoked_at?`。邀请码只注册为 `APPLICANT`【建议】，要别的角色由管理员事后改。
+`id`、`code_hash`、`label`、`max_uses`（0 = 不限）、`used_count`、`expires_at?`、`created_by`、`created_at`、`revoked_at?`。邀请码只注册为 `APPLICANT`（Q178），要别的角色由管理员事后改。
 
 ### E-OTP `verification_codes`
 
@@ -238,7 +238,7 @@
 
 - 24 小时内没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）。
 - 订单进终态后过了保留期删文件，写 `purged_at`；预览图和元数据留着（R-FIL-01）。
-- 同一个用户上传同一个哈希时复用已有行【建议】。
+- 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
 
 ### E-CHK `file_checks`
 
@@ -377,7 +377,7 @@
 
 - 取件码只在签发时返回一次明文；要再看就重新签发，新码作废旧码（R-PCK-04）。
 - 同一订单同时最多一个没作废、没核销的码：签发时在同一个事务里作废旧码。
-- 码的格式【建议】：前缀 `PR1-` + 8 位 Crockford Base32（去掉易混字符），按 `PR1-XXXX-XXXX` 显示，二维码里是同一个字符串。
+- 码的格式（Q180）：前缀 `PR1-` + 8 位 Crockford Base32（去掉易混字符），按 `PR1-XXXX-XXXX` 显示，二维码里是同一个字符串。
 
 ### E-REC `order_records`
 
@@ -443,7 +443,7 @@
 
 ### E-NDLV `notification_deliveries`
 
-`id`、`notification_id`、`channel`（`EMAIL` / `FEISHU`）、`status`（`PENDING` / `SENT` / `FAILED`）、`attempts`、`last_error?`、`sent_at?`。失败按退避重试，最多 5 次【建议】。
+`id`、`notification_id`、`channel`（`EMAIL` / `FEISHU`）、`status`（`PENDING` / `SENT` / `FAILED`）、`attempts`、`last_error?`、`sent_at?`。失败按退避重试，最多 5 次（Q181）。
 
 ### E-NPREF `notification_prefs`
 

@@ -48,7 +48,7 @@ daemon                                  面板
 | MSG-AUTH-03 | `auth`：`{ signature }`。签名算法 RSA-PSS（SHA-256，盐长 32），签的内容是 UTF-8 字符串 `"platerelay-daemon-auth/v1\n" + daemonId + "\n" + nonce + "\n" + 面板的 origin`。带上 origin，签名就不能拿到别的面板去用。 |
 | MSG-AUTH-04 | `welcome`：`{ sessionId, protocolVersion, heartbeatSeconds, httpToken, httpTokenExpiresAt, printers: [MSG-ASSIGN 的条目], config: MSG-CFG }`。`httpToken` 用来调 MSG-HTTP 的接口，和这条连接同生共死，到期前面板在控制通道上发 `token.renew` 换新的。 |
 | MSG-AUTH-05 | 失败时面板用关闭码断开：`4401` 签名不对、`4403` daemon 已吊销、`4409` 同一个 daemon 有了更新的连接（新的顶掉旧的）、`4426` 协议版本不兼容。 |
-| MSG-AUTH-06 | daemon 断线后按指数退避重连：1 秒起，翻倍，最长 60 秒，加 ±20% 随机抖动【建议】。收到 `4403` 不再重连。 |
+| MSG-AUTH-06 | daemon 断线后按指数退避重连：1 秒起，翻倍，最长 60 秒，加 ±20% 随机抖动（Q175）。收到 `4403` 不再重连。 |
 
 ## 4. 版本协商（MSG-VER）
 
@@ -74,16 +74,16 @@ daemon                                  面板
 | --- | --- |
 | MSG-ENV-01 | 每条消息都有唯一 `id`（F-DMN-03）。 |
 | MSG-ENV-02 | 需要确认的消息：除了 `ack`、`ping`、`pong`、`printer.snapshot` 以外的全部。接收方处理完（面板是提交了数据库事务）才回 `ack { id }`。 |
-| MSG-ENV-03 | 发送方把没收到 `ack` 的消息留在发件箱里，重连后按原顺序重发。daemon 的发件箱落盘（重启不丢），最多留 24 小时或 10000 条，超了丢最老的并记日志【建议】。面板的发件箱就是 E-CMD。 |
+| MSG-ENV-03 | 发送方把没收到 `ack` 的消息留在发件箱里，重连后按原顺序重发。daemon 的发件箱落盘（重启不丢），最多留 24 小时或 10000 条，超了丢最老的并记日志（Q176）。面板的发件箱就是 E-CMD。 |
 | MSG-ENV-04 | 接收方按 `id` 去重：面板记 24 小时内处理过的 ID（E-IDEM 的 daemon 部分），daemon 记最近 1000 个命令 ID。重复的消息直接回 `ack`，不再处理。 |
 | MSG-ENV-05 | `printer.snapshot` 不确认、不重发，因为下一份会覆盖它；断线期间只发最新一份。 |
-| MSG-ENV-06 | 同一台打印机的消息带 `bootId` 和 `seq`（这台打印机在这次启动里单调递增）。面板丢掉 `seq` 比已处理的还小的快照；事件按 `seq` 顺序处理，中间有缺口时等重发，等 10 秒还没到就要一份快照对账【建议】。 |
+| MSG-ENV-06 | 同一台打印机的消息带 `bootId` 和 `seq`（这台打印机在这次启动里单调递增）。面板丢掉 `seq` 比已处理的还小的快照；事件按 `seq` 顺序处理，中间有缺口时等重发，等 10 秒还没到就要一份快照对账（Q177）。 |
 
 ## 6. 心跳（MSG-HB）
 
 | 编号 | 约定 |
 | --- | --- |
-| MSG-HB-01 | 双方每 `heartbeatSeconds`（默认 15 秒【建议】）发 `ping`，对方回 `pong`。 |
+| MSG-HB-01 | 双方每 `heartbeatSeconds`（默认 15 秒，Q174）发 `ping`，对方回 `pong`。 |
 | MSG-HB-02 | 面板 3 个周期（45 秒）没收到任何消息，就认为 daemon 断了：它名下没任务的打印机进离线，有任务的挂失联（F-DMN-04、S-FLG-LOST）。 |
 | MSG-HB-03 | daemon 连得上面板、但连不上某台打印机，用 `printer.event { kind: "connection.down" }` 报，面板按同样的规则处理那一台（S-PRN-T02、S-FLG-LOST）。 |
 

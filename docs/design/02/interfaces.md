@@ -104,7 +104,7 @@ class Discovery(Protocol):
 | 标准状态 | 面板 |
 | --- | --- |
 | `OFFLINE` | 离线；有任务时挂失联 |
-| `NOT_READY`、`BUSY` | 不改状态，不能派单【建议：显示为空闲 + 原因"打印机忙"】 |
+| `NOT_READY`、`BUSY` | 显示为空闲 + 原因"打印机忙"，不能派单，不新增状态（Q184、P-05） |
 | `IDLE` | 空闲（如果在等清板，保持待清板，INV-01） |
 | `PREPARING` | 准备中（我们的任务）/ 外部占用（别人的） |
 | `PRINTING` | 打印中 / 外部占用 |
@@ -118,7 +118,7 @@ class Discovery(Protocol):
 
 面板只按控制的**类别**和打印机**当前状态**决定按钮能不能点；适配器只说"这个机型有哪些命令"（F-PRT-04）。固件拒绝时把原话显示出来（R-PRT-15）。
 
-| 类别 | 允许的打印机状态【建议】 |
+| 类别 | 允许的打印机状态（Q185） |
 | --- | --- |
 | `light` | 离线以外的所有状态 |
 | `temperature`、`fan` | 离线以外的所有状态（R-ARB-08：有任务时也能调温度） |
@@ -176,7 +176,7 @@ interface ObjectStore {
 | --- | --- | --- |
 | `files/{fileId}` | 上传的 `.gcode.3mf` | R-SUB-10、R-FIL-01 |
 | `previews/{versionId}/` | 缩略图、零件图 | 永久（R-FIL-01） |
-| `store-photos/{orderId}/` | 入库照片 | 跟文件一起【建议】 |
+| `store-photos/{orderId}/` | 入库照片 | 永久保留（Q183） |
 | `timelapses/{dispatchId}/{part}` | 延时摄影 | CFG-FIL-02 |
 | `avatars/{userId}` | 头像 | 换头像时 |
 | `exports/{archiveId}.zip` | 归档导出 | 管理员手动删 |
