@@ -1,0 +1,277 @@
+# 2.3 · daemon 协议
+
+> 属于 [文档 2](README.md)。编号 `MSG-`。重写时，本文的消息定义会落成 `packages/shared/schema/daemon/v1/` 下的 JSON Schema（Q141），TypeScript 和 Python 两边都从 Schema 生成类型；Schema 和本文不一致时，先改本文再改 Schema。
+
+## 1. 总体
+
+```
+ 打印机 ──局域网── daemon ──wss（控制通道）──▶ 面板
+                    │   └─https（文件、抓拍、延时摄影）─▶ 面板
+                    └──wss（媒体通道，按需）──────────▶ 面板 ──▶ 浏览器
+```
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-GEN-01 | 永远是 daemon 主动连面板，面板不连进局域网（NG-08）。 |
+| MSG-GEN-02 | 控制通道：一条 WebSocket 长连接 `wss://<面板>/daemon/v1/ws`，只传 JSON 文本帧（F-DMN-03）。 |
+| MSG-GEN-03 | 大的东西不走控制通道：模型文件、抓拍、延时摄影走 HTTPS（MSG-HTTP），实况走单独的媒体通道（MSG-MEDIA），免得把控制消息堵住（F-PRT-09）。 |
+| MSG-GEN-04 | 只能用 TLS。开发时允许连 `localhost` 的明文 `ws://`，靠一个只在开发构建里存在的开关。 |
+| MSG-GEN-05 | 时间是 RFC 3339 UTC 字符串；ID 是 UUIDv7。 |
+
+## 2. 注册（MSG-ENR）
+
+| 步骤 | 内容 |
+| --- | --- |
+| 1 | 管理员在 daemon 页点"生成安装命令"。面板新建 E-ENR，令牌 15 分钟有效、只能用一次（F-DMN-01）。 |
+| 2 | 面板按平台给出命令（Linux / Windows / Docker，F-DMN-06），令牌放在环境变量 `PLATERELAY_ENROLL_TOKEN` 里传给安装脚本，不放进命令行参数，所以 `ps` 看不到【建议】。 |
+| 3 | daemon 在本机生成 RSA-3072 密钥对。私钥只存在本机：Linux 是权限 0600 的文件，Windows 用 DPAPI 加密后存，Docker 放在挂载卷里（F-DMN-02、INV-07）。 |
+| 4 | daemon 调 `POST /daemon/v1/enroll`：`{ token, publicKey, name, platform, daemonVersion, protocolVersion }`，`publicKey` 是 SPKI DER 的 base64。 |
+| 5 | 面板校验令牌，作废它，新建 E-DMN，返回 `{ daemonId }`。daemon 把面板地址和 `daemonId` 写进自己的配置文件（不含任何秘密）。 |
+
+一次性令牌出现在安装命令里，是 F-DMN-01 明确允许的唯一例外：它 15 分钟过期、用一次就作废，daemon 不把它写进配置或日志。
+
+## 3. 连接与认证（MSG-AUTH）
+
+```
+daemon                                  面板
+  │── hello ───────────────────────────▶│  daemonId、协议版本、daemon 版本、适配器
+  │◀─────────────────────── challenge ──│  32 字节随机数、服务器时间
+  │── auth ────────────────────────────▶│  RSA-PSS 签名
+  │◀───────────────────────── welcome ──│  会话、心跳间隔、打印机分配、参数
+  │── printer.snapshot × N ────────────▶│  每台打印机一份，用来对账
+```
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-AUTH-01 | `hello`：`{ daemonId, protocolVersion, daemonVersion, platform, bootId, adapters: [{ brand, version }] }`。`bootId` 是 daemon 进程每次启动生成的 UUID。 |
+| MSG-AUTH-02 | `challenge`：`{ nonce, serverTime }`，`nonce` 是 32 字节随机数的 base64，只能用一次，30 秒内有效。 |
+| MSG-AUTH-03 | `auth`：`{ signature }`。签名算法 RSA-PSS（SHA-256，盐长 32），签的内容是 UTF-8 字符串 `"platerelay-daemon-auth/v1\n" + daemonId + "\n" + nonce + "\n" + 面板的 origin`。带上 origin，签名就不能拿到别的面板去用。 |
+| MSG-AUTH-04 | `welcome`：`{ sessionId, protocolVersion, heartbeatSeconds, httpToken, httpTokenExpiresAt, printers: [MSG-ASSIGN 的条目], config: MSG-CFG }`。`httpToken` 用来调 MSG-HTTP 的接口，和这条连接同生共死，到期前面板在控制通道上发 `token.renew` 换新的。 |
+| MSG-AUTH-05 | 失败时面板用关闭码断开：`4401` 签名不对、`4403` daemon 已吊销、`4409` 同一个 daemon 有了更新的连接（新的顶掉旧的）、`4426` 协议版本不兼容。 |
+| MSG-AUTH-06 | daemon 断线后按指数退避重连：1 秒起，翻倍，最长 60 秒，加 ±20% 随机抖动【建议】。收到 `4403` 不再重连。 |
+
+## 4. 版本协商（MSG-VER）
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-VER-01 | 协议版本是 `主.次`，从 `1.0` 开始。次版本只加东西：加可选字段、加消息类型、加命令类型。双方都忽略不认识的字段和消息类型（会回 `ack`，不报错）。 |
+| MSG-VER-02 | 面板支持当前主版本和上一个主版本（F-DMN-05）。更老的 daemon 连上来，面板回 `upgrade_required { minProtocolVersion, upgradeCommand }` 后用 `4426` 断开，并给它名下的打印机挂 `DAEMON_UPGRADE` 标记（S-FLG-UPGRADE）。 |
+| MSG-VER-03 | daemon 不自动升级（NG-10），只把面板给的升级命令记进日志，由人去执行（F-DMN-07）。 |
+| MSG-VER-04 | daemon 收到一个它不认识的命令类型，回 `command.result { status: "rejected", code: "unsupported_command" }`，不执行（INV-14）。 |
+
+## 5. 消息信封与可靠投递（MSG-ENV）
+
+```json
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d9e",
+  "type": "printer.event",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": { }
+}
+```
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-ENV-01 | 每条消息都有唯一 `id`（F-DMN-03）。 |
+| MSG-ENV-02 | 需要确认的消息：除了 `ack`、`ping`、`pong`、`printer.snapshot` 以外的全部。接收方处理完（面板是提交了数据库事务）才回 `ack { id }`。 |
+| MSG-ENV-03 | 发送方把没收到 `ack` 的消息留在发件箱里，重连后按原顺序重发。daemon 的发件箱落盘（重启不丢），最多留 24 小时或 10000 条，超了丢最老的并记日志【建议】。面板的发件箱就是 E-CMD。 |
+| MSG-ENV-04 | 接收方按 `id` 去重：面板记 24 小时内处理过的 ID（E-IDEM 的 daemon 部分），daemon 记最近 1000 个命令 ID。重复的消息直接回 `ack`，不再处理。 |
+| MSG-ENV-05 | `printer.snapshot` 不确认、不重发，因为下一份会覆盖它；断线期间只发最新一份。 |
+| MSG-ENV-06 | 同一台打印机的消息带 `bootId` 和 `seq`（这台打印机在这次启动里单调递增）。面板丢掉 `seq` 比已处理的还小的快照；事件按 `seq` 顺序处理，中间有缺口时等重发，等 10 秒还没到就要一份快照对账【建议】。 |
+
+## 6. 心跳（MSG-HB）
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-HB-01 | 双方每 `heartbeatSeconds`（默认 15 秒【建议】）发 `ping`，对方回 `pong`。 |
+| MSG-HB-02 | 面板 3 个周期（45 秒）没收到任何消息，就认为 daemon 断了：它名下没任务的打印机进离线，有任务的挂失联（F-DMN-04、S-FLG-LOST）。 |
+| MSG-HB-03 | daemon 连得上面板、但连不上某台打印机，用 `printer.event { kind: "connection.down" }` 报，面板按同样的规则处理那一台（S-PRN-T02、S-FLG-LOST）。 |
+
+## 7. daemon → 面板
+
+### MSG-SNAPSHOT `printer.snapshot`
+
+整台打印机的状态，变化时发，同一台最多每秒 1 次（Q142）。是**完整状态**，不是增量：拓竹的增量包由 daemon 合并成完整状态后再发（R-PRT-13）。
+
+```json
+{
+  "printerId": "…", "bootId": "…", "seq": 1042,
+  "connected": true,
+  "state": "PRINTING",
+  "substage": null,
+  "job": {
+    "jobRef": "0192…",
+    "external": false,
+    "name": "pr-0192f3c1.gcode.3mf",
+    "percent": 37,
+    "remainingSeconds": 3120,
+    "layer": 58, "totalLayers": 210,
+    "skippedParts": [3]
+  },
+  "temps": { "nozzle1": { "current": 220, "target": 220 }, "bed": { "current": 55, "target": 55 }, "chamber": { "current": 31 } },
+  "nozzles": [{ "extruder": 1, "diameterMm": 0.4, "flow": "standard" }],
+  "trays": [{ "unit": 0, "slot": 0, "label": "AMS 1 · 1", "material": "PLA", "subType": "PLA Basic", "colour": "#FFFFFF", "remainingPercent": 80, "extruders": [1] }],
+  "bedType": "textured_pei",
+  "storage": [{ "medium": "internal", "present": true, "writable": true, "freeBytes": 1234567890 }],
+  "activeErrors": [],
+  "controls": { "light": "on", "speedLevel": 2 },
+  "camera": { "stream": true, "snapshot": true }
+}
+```
+
+- `state` 用适配器的标准状态（IF-ADP-03），不是面板的打印机状态；换算规则在面板（IF-ADP-04）。
+- `job.jobRef` 是这次任务对应的派单 ID（E-DSP）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
+- 拿不到的字段省略，不填假值。
+
+### MSG-EVT `printer.event`
+
+离散事件。面板靠事件推进状态，用快照对账（Q142）。
+
+```json
+{ "printerId": "…", "bootId": "…", "seq": 1043, "kind": "job.started", "jobRef": "0192…", "data": {} }
+```
+
+| `kind` | `data` | 面板做什么 |
+| --- | --- | --- |
+| `connection.up` | | S-PRN-T01 / 去掉失联后对账 |
+| `connection.down` | `{ reason }` | S-PRN-T02 / 挂失联 |
+| `job.staged` | | 文件已经放到打印机上 |
+| `job.started` | | S-ORD-T11、S-PRN-T04 |
+| `job.paused` | `{ reason: "USER" \| "ERROR" \| "RUNOUT" }` | S-PRN-T06，R-PRT-03 |
+| `job.resumed` | | S-PRN-T07 |
+| `job.finished` | | S-ORD-T12、S-PRN-T08 |
+| `job.failed` | `{ reason, beforeStart }` | 开打前：S-ORD-T09；开打后：S-ORD-T13 |
+| `job.cancelled` | `{ commandId? }` | 带面板的命令 ID = 停止或撤回被确认（S-FLG-STOPPING / RECALLING 去掉）；没有 = 有人在打印机屏幕上停的 |
+| `job.parts_skipped` | `{ partIds }` | 记一条"跳过零件"记录 |
+| `external.started` | `{ name }` | S-PRN-T09，R-PRT-11 |
+| `external.ended` | `{ result }` | S-PRN-T10 |
+| `error.raised` | `{ error: ActiveError }` | 记 E-PERR，挂等待处理（R-PRT-03） |
+| `error.cleared` | `{ errorId, clearedBy: "PANEL" \| "DEVICE" \| "UNKNOWN" }` | 更新 E-PERR |
+| `storage.low` / `storage.ok` | `{ freeBytes, neededBytes }` | 挂 / 去掉存储不足（F-PRT-11） |
+| `timelapse.ready` | `{ files: [{ name, sizeBytes }] }` | 等 daemon 上传（MSG-HTTP-04） |
+
+`ActiveError` 的结构见[驱动接口草稿 §6.2](../../printer-driver-interface-draft.md)，`actions` 只能是标准动作（R-PRT-14）。
+
+### MSG-CMD-RESULT `command.result`
+
+```json
+{ "commandId": "…", "status": "accepted", "code": null, "message": null, "data": {} }
+```
+
+| `status` | 含义 |
+| --- | --- |
+| `accepted` | 打印机收下了命令。**不代表做完**，结果看后面的事件（P-01） |
+| `done` | 命令本身就是结果（刷新、开关灯、上传完成） |
+| `rejected` | daemon 没执行：不在白名单（INV-14）、状态不允许、参数不对。`code` 说明原因 |
+| `expired` | 收到时已经过期（MSG-CMD-TTL），没执行 |
+| `failed` | 执行了但失败了。`message` 是固件或打印机原样返回的内容（R-PRT-15） |
+
+一条命令可能先回 `accepted` 再回 `done` 或 `failed`；最后一次为准。
+
+### MSG-DISC `discovery.report`
+
+被动监听局域网广播听到的打印机（F-PRT-12），每次是完整列表，有变化时发，最多每 10 秒一次：
+
+`{ printers: [{ brand, serial, host, modelId, name, lastSeenAt }] }`
+
+只听不发。面板放内存，不存表；"添加打印机"时列出来。听到的某台已经分配给这个 daemon、但 IP 变了，面板自动更新 `host` 并记审计。
+
+## 8. 面板 → daemon
+
+### MSG-ASSIGN `printers.assign`
+
+这个 daemon 负责哪些打印机，每次都发**完整列表**（在 `welcome` 里，以及之后有变化时）：
+
+```json
+{ "printers": [{ "printerId": "…", "brand": "bambu", "serial": "…", "host": "192.168.0.106",
+                 "accessCodeCipher": "base64…", "keyFingerprint": "…" }] }
+```
+
+- 访问码是浏览器用 daemon 公钥加密的密文，面板解不开，只是转交（INV-07）。daemon 在内存里解密，不落盘、不进日志。
+- 列表里没有的打印机，daemon 断开它、删掉它的本地状态。
+- 公钥指纹对不上（daemon 换过密钥），daemon 回 `printer.event { kind: "connection.down", data: { reason: "access_code_key_mismatch" } }`，面板提示重填访问码。
+
+### MSG-CMD `command`
+
+```json
+{ "commandId": "…", "printerId": "…", "kind": "job.start", "expiresAt": "2026-11-04T12:01:00Z", "params": {} }
+```
+
+| `kind` | `params` | 有效期 | 对应 |
+| --- | --- | --- | --- |
+| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | S-ORD-T08 |
+| `job.stop` | `{ jobRef }` | 60 秒 | R-PRT-04 |
+| `job.recall` | `{ jobRef }` | 60 秒 | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
+| `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | F-SUB-07 |
+| `error.resolve` | `{ errorId, action }` | 60 秒 | R-PRT-14 |
+| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | R-PRT-15 |
+| `refresh` | `{}` | 10 秒 | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
+| `camera.open` / `camera.close` | `{}` | 30 秒 | MSG-MEDIA |
+| `timelapse.collect` | `{ jobRef }` | 1 小时 | R-CAM-04 |
+
+**MSG-CMD-TTL**（Q143）：
+
+- 有效期指"必须在这之前开始执行"。`job.start` 下载文件的时间不算在内，开始下载就算开始执行。
+- daemon 按 `welcome.serverTime` 算出和面板的时钟差，用面板的时间判断过期。收到时已经过期的，回 `expired`，不执行。这样断线很久之后，积压的旧"开打"不会突然被执行。
+- 面板在 `expiresAt` 之后 10 秒还没收到结果，就把 E-CMD 标成 `EXPIRED`，按命令类型处理：`job.start` 过期 = 下发失败，订单回原位（R-DSP-08）；`job.stop` 过期 = 停止请求中继续挂着并提醒（R-PRT-04）。
+
+**MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
+
+### MSG-CFG `config.update`
+
+面板设置变了且和 daemon 有关时下发：`{ snapshotIntervalSeconds, cameraIdleCloseSeconds, discoveryEnabled }`。对应 CFG-CAM-02 等。
+
+### 其他
+
+`ack { id }`、`ping`、`pong`、`token.renew { httpToken, httpTokenExpiresAt }`、`upgrade_required { minProtocolVersion, upgradeCommand }`。
+
+## 9. 任务标识与对账（MSG-JOBREF、MSG-RECON）
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-JOBREF-01 | 每次派单的 ID（E-DSP）就是 `jobRef`。daemon 放到打印机上的文件名带上它：`pr-<jobRef 前 8 位>.gcode.3mf`，拓竹的任务名也用这个。 |
+| MSG-JOBREF-02 | daemon 在本机留一份清单，记它放进打印机或从打印机下载过的每个文件和对应的 `jobRef`（F-PRT-11）。打印机上正在打的任务对得上清单 = 系统任务；对不上 = 外部任务（`external: true`，F-PRT-08）。 |
+| MSG-JOBREF-03 | daemon 只删清单里的文件（INV-15）：任务结束后删它下发的 3mf；延时摄影上传并核对成功后删原文件（F-PRT-10）。 |
+| MSG-RECON-01 | 重连后，daemon 先给每台打印机发一份快照，面板拿快照和自己的记录对（R-PRT-07）。 |
+| MSG-RECON-02 | 对账表： |
+
+| 面板记录 | 打印机快照 | 处理 |
+| --- | --- | --- |
+| 已派单 | 在打这个 `jobRef` | 补一条"开始打印"，S-ORD-T11 |
+| 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录 | 按结束记录补事件（打完或失败） |
+| 已派单 / 打印中 | 空闲，找不到结束记录 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
+| 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
+| 空闲 | 在打一个对不上的任务 | 外部占用（R-PRT-11） |
+| 停止请求中 | 已经停了 | 按停止确认处理 |
+
+daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所以"断线期间打完了"大多数时候能对上；只有 daemon 自己也重启丢了状态时才需要人判。
+
+## 10. HTTP 接口（MSG-HTTP）
+
+都在 `/daemon/v1/` 下，用 `Authorization: Bearer <httpToken>`（MSG-AUTH-04）。
+
+| 编号 | 接口 | 用途 |
+| --- | --- | --- |
+| MSG-HTTP-01 | `POST /daemon/v1/enroll` | 注册（MSG-ENR），用一次性令牌，不用 `httpToken` |
+| MSG-HTTP-02 | `GET /daemon/v1/files/{fileId}?jobRef=` | 下载要打印的文件。只有派给这个 daemon 的打印机、还没结束的任务能下载。daemon 下完核对 SHA-256 |
+| MSG-HTTP-03 | `PUT /daemon/v1/snapshots/{printerId}` | 上传最新一张抓拍（`image/jpeg`），间隔 CFG-CAM-02。面板只留内存里最新一张（R-CAM-03） |
+| MSG-HTTP-04 | `PUT /daemon/v1/timelapses/{jobRef}/{part}` | 上传延时摄影。请求头带 `X-Content-SHA256`；面板写进对象存储、核对大小和哈希，成功才返回 `201`，daemon 收到 `201` 才删打印机里的原文件（F-PRT-10） |
+
+## 11. 媒体通道（MSG-MEDIA）
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-MEDIA-01 | 有人要看实况时，面板发 `camera.open`；daemon 从打印机拉一路流，开一条 `wss://<面板>/daemon/v1/media/{printerId}`（用 `httpToken` 认证），每个二进制帧是一张 JPEG【建议，起步方案】。 |
+| MSG-MEDIA-02 | 面板把收到的帧分发给所有观众（R-CAM-01）。每台打印机同时只有一路（F-PRT-09）。 |
+| MSG-MEDIA-03 | 最后一个观众离开 `cameraIdleCloseSeconds`（默认 30 秒【建议】）后，面板发 `camera.close`，daemon 断流。 |
+| MSG-MEDIA-04 | 打印机不支持实况、拉流失败、带宽不够时，daemon 回 `command.result { status: "failed", code: "stream_unavailable" }`，面板让观众改看抓拍（R-CAM-02）。 |
+| MSG-MEDIA-05 | 看实况和抓拍都只读摄像头，不发任何控制命令（F-PRT-09）。 |
+
+## 12. Schema 与代码生成
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-SCH-01 | 每种消息一个 JSON Schema（2020-12）文件，放在 `packages/shared/schema/daemon/v1/`，`$id` 带协议主版本。 |
+| MSG-SCH-02 | TypeScript 类型用 `json-schema-to-typescript` 生成，Python 用 `datamodel-code-generator` 生成 pydantic v2 模型【建议】。生成的文件提交进仓库，CI 检查它们和 Schema 一致。 |
+| MSG-SCH-03 | 两边收到消息都先按 Schema 校验，不合格的回 `ack` 并记日志，不处理（不让一条坏消息卡住整个队列）。 |
+| MSG-SCH-04 | 协议一致性测试：仓库里放一组录好的消息样本（含拓竹真机录的），两边的生成代码都要能解析。 |
