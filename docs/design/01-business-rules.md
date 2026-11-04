@@ -72,12 +72,14 @@
 | `printer:operate` | 进打印机详情、看报错详情、处理报错（F-UI-01） | | | ● | ● |
 | `printer:stop` | 停止打印 | | | ● | ● |
 | `printer:refresh` | 手动刷新机器状态（R-PRT-12） | | | ● | ● |
+| `printer:control` | 设备控制（F-PRT-04，Q147） | | | ● | ● |
+| `printer:maintenance` | 进出维护模式，必须填原因（Q148） | | | ● | ● |
+| `filament:catalog` | 编辑耗材目录（Q149） | | | ● | ● |
 | `order:review` | 审核通过 / 驳回（Q97） | | | | ● |
 | `order:reorder` | 拖拽调整排队顺序（Q98） | | | | ● |
 | `order:cancel:any` | 取消任意订单（Q98） | | | | ● |
-| `printer:control` | 设备控制（F-PRT-04） | | | | ● |
-| `printer:manage` | 添加、编辑、删除打印机，维护模式 | | | | ● |
-| `resource:configure` | 耗材目录、开放给选手开关、映射规则（Q104） | | | | ● |
+| `printer:manage` | 添加、编辑、删除打印机（Q148） | | | | ● |
+| `resource:configure` | 开放给选手开关、映射规则、映射不符原因列表（Q104、Q149） | | | | ● |
 | `form:configure` | 申请表单 | | | | ● |
 | `user:manage` | 用户与角色 | | | | ● |
 | `daemon:manage` | daemon 注册与吊销 | | | | ● |
@@ -161,7 +163,7 @@
 | S-PRN-PAUSED | 暂停中 | Paused | 打印暂停，带原因：人工暂停、报错暂停、断料（Q90）。 |
 | S-PRN-CLEARING | 待清板 | Clearing required | 打完或停下，等人确认铲件、清板（INV-01）。 |
 | S-PRN-EXTERNAL | 外部占用 | External job | 打印机在打一个不是系统下发的任务（F-PRT-08）。 |
-| S-PRN-MAINT | 维护中 | Maintenance | 管理员拿下来维护，不接单。 |
+| S-PRN-MAINT | 维护中 | Maintenance | 现场人员或管理员拿下来维护，不接单。 |
 
 ### 4.2 标记
 
@@ -191,8 +193,8 @@
 | S-PRN-T09 | 空闲 | 外部占用 | 打印机报告了一个不是系统下发的任务 |
 | S-PRN-T10 | 外部占用 | 待清板 | 外部任务结束 |
 | S-PRN-T11 | 待清板 | 空闲 | 铲件入库（INV-12）或确认清板 |
-| S-PRN-T12 | 空闲、离线 | 维护中 | 管理员开维护（Q94） |
-| S-PRN-T13 | 维护中 | 空闲 | 管理员关维护 |
+| S-PRN-T12 | 空闲、离线 | 维护中 | 现场人员或管理员开维护，填原因（Q94、Q148） |
+| S-PRN-T13 | 维护中 | 空闲 | 现场人员或管理员关维护 |
 
 失联不是状态：有任务时断线，打印机保留最后已知的状态，挂失联标记（Q92）。
 
@@ -489,11 +491,11 @@
 
 | 页面 | 权限 | 内容 |
 | --- | --- | --- |
-| 打印机 | `printer:manage` | 添加（含自动发现，F-PRT-12）、编辑、删除、开放给选手、维护模式 |
+| 打印机 | `printer:manage` | 添加（含自动发现，F-PRT-12）、编辑、删除；开放给选手开关需要 `resource:configure`。维护模式在打印机详情里，需要 `printer:maintenance` |
 | daemon | `daemon:manage` | 生成安装命令、在线状态、版本、吊销（F-DMN-*） |
 | 用户 | `user:manage` | 用户列表、角色、停用、邀请码 |
 | 申请表单 | `form:configure` | 字段的增删改、排序 |
-| 耗材目录 | `resource:configure` | 库存行、自动行的隐藏 / 排序 / 备注、映射不符原因列表（CFG-MAP-05） |
+| 耗材目录 | `filament:catalog` | 库存行、自动行的隐藏 / 排序 / 备注；映射不符原因列表（CFG-MAP-05）需要 `resource:configure` |
 | 审计日志 | `audit:view` | 只读查询 |
 
 ### 9.3 个人设置
@@ -504,6 +506,7 @@
 
 - F-PRT-06：可恢复的中断改为"打印机进暂停中；报错和断料挂等待处理"（Q90）。
 - F-QUE-02：拖拽调整顺序只给管理员（Q98、Q125）。
+- F-PRT-04：设备控制默认给现场人员和管理员（Q147）。
 - F-QUE-05：补充"映射只在派单时计算，人工指定为准"（Q107、Q110）。
 - F-SUB-06：时长改为和上一个通过的版本比较（Q134）。
 - NG-12：新增，v1 不做"轻微修改自动审核"，修改一律重审。
