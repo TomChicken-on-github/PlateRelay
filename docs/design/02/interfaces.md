@@ -82,7 +82,8 @@ class PrinterSession(Protocol):
     async def control(self, action: str, args: dict) -> CommandResult: ...   # action 必须在 ControlSpec 里
 
     async def camera_snapshot(self) -> bytes | None: ...  # JPEG
-    async def open_stream(self) -> AsyncIterator[bytes]: ...   # 每次产出一张 JPEG
+    async def stream_source(self) -> StreamSource | None: ...  # H.264：打印机的 RTSP 地址（daemon 原样转推）；
+                                                               # JPEG 帧：一个产出 JPEG 的异步迭代器；不支持：None
     async def storage_status(self) -> list[StorageStatus]: ...
 
     async def list_timelapses(self, job_ref: str) -> list[RemoteFile]: ...

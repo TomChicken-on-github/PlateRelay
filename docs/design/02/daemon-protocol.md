@@ -7,7 +7,7 @@
 ```
  打印机 ──局域网── daemon ──wss（控制通道）──▶ 面板
                     │   └─https（文件、抓拍、延时摄影）─▶ 面板
-                    └──wss（媒体通道，按需）──────────▶ 面板 ──▶ 浏览器
+                    └──rtsps / wss（媒体，按需）────────▶ 媒体服务 ──WebRTC──▶ 浏览器
 ```
 
 | 编号 | 约定 |
@@ -206,7 +206,10 @@ daemon                                  面板
 | `error.resolve` | `{ errorId, action }` | 60 秒 | R-PRT-14 |
 | `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | R-PRT-15 |
 | `refresh` | `{}` | 10 秒 | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
-| `camera.open` / `camera.close` | `{}` | 30 秒 | MSG-MEDIA |
+| `camera.open` | `{ publishUrl, publishToken, expiresAt }`（H.264 机型）或 `{ framesUrl }`（JPEG 帧机型） | 30 秒 | MSG-MEDIA、R-CAM-06 |
+| `camera.close` | `{}` | 30 秒 | R-CAM-06 |
+| `snapshot.mode` | `{ watched: bool }`：这台打印机现在有没有人在看 | 30 秒 | R-CAM-08 |
+| `snapshot.now` | `{ reason: "FIRST_VIEWER" \| "ERROR" }` | 30 秒 | R-CAM-08、R-CAM-10 |
 | `timelapse.collect` | `{ jobRef }` | 1 小时 | R-CAM-04 |
 
 **MSG-CMD-TTL**（Q143）：
@@ -219,7 +222,7 @@ daemon                                  面板
 
 ### MSG-CFG `config.update`
 
-面板设置变了且和 daemon 有关时下发：`{ snapshotIntervalSeconds, cameraIdleCloseSeconds, discoveryEnabled }`。对应 CFG-CAM-02 等。
+面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, discoveryEnabled }`。对应 CFG-CAM-02、03、07、08、09。
 
 ### 其他
 
@@ -254,18 +257,34 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | --- | --- | --- |
 | MSG-HTTP-01 | `POST /daemon/v1/enroll` | 注册（MSG-ENR），用一次性令牌，不用 `httpToken` |
 | MSG-HTTP-02 | `GET /daemon/v1/files/{fileId}?jobRef=` | 下载要打印的文件。只有派给这个 daemon 的打印机、还没结束的任务能下载。daemon 下完核对 SHA-256 |
-| MSG-HTTP-03 | `PUT /daemon/v1/snapshots/{printerId}` | 上传最新一张抓拍（`image/jpeg`），间隔 CFG-CAM-02。面板只留内存里最新一张（R-CAM-03） |
+| MSG-HTTP-03 | `PUT /daemon/v1/snapshots/{printerId}` | 上传最新一张抓拍（`image/jpeg`），请求头 `X-Captured-At`。频率和错峰见 MSG-SNAP。面板只留内存里最新一张（R-CAM-03） |
 | MSG-HTTP-04 | `PUT /daemon/v1/timelapses/{jobRef}/{part}` | 上传延时摄影。请求头带 `X-Content-SHA256`；面板写进对象存储、核对大小和哈希，成功才返回 `201`，daemon 收到 `201` 才删打印机里的原文件（F-PRT-10） |
 
 ## 11. 媒体通道（MSG-MEDIA）
 
+实时优先于分辨率（F-PRT-09）：不转码、不攒缓冲，网络差时丢帧。
+
 | 编号 | 约定 |
 | --- | --- |
-| MSG-MEDIA-01 | 有人要看实况时，面板发 `camera.open`；daemon 从打印机拉一路流，开一条 `wss://<面板>/daemon/v1/media/{printerId}`（用 `httpToken` 认证），每个二进制帧是一张 JPEG【建议，起步方案】。 |
-| MSG-MEDIA-02 | 面板把收到的帧分发给所有观众（R-CAM-01）。每台打印机同时只有一路（F-PRT-09）。 |
-| MSG-MEDIA-03 | 最后一个观众离开 `cameraIdleCloseSeconds`（默认 30 秒【建议】）后，面板发 `camera.close`，daemon 断流。 |
-| MSG-MEDIA-04 | 打印机不支持实况、拉流失败、带宽不够时，daemon 回 `command.result { status: "failed", code: "stream_unavailable" }`，面板让观众改看抓拍（R-CAM-02）。 |
-| MSG-MEDIA-05 | 看实况和抓拍都只读摄像头，不发任何控制命令（F-PRT-09）。 |
+| MSG-MEDIA-01 | 面板旁边跑一个媒体服务（mediamtx，MIT 协议，放在官方 docker compose 里），只负责收流和用 WebRTC 发给浏览器（Q162）。 |
+| MSG-MEDIA-02 | **H.264 机型**（X1、X2D、H2 等，打印机本身出 RTSP）：面板发 `camera.open`，带一次性的推流地址和令牌；daemon 从打印机拉 RTSP，**原样**（不解码、不转码）用 RTSPS 推到媒体服务（Q163）。仍然是 daemon 往外连（NG-08）。 |
+| MSG-MEDIA-03 | **JPEG 帧机型**（P1、A1，打印机只给一帧帧 JPEG）：daemon 开一条 `wss://<面板>/daemon/v1/frames/{printerId}`，每个二进制帧是一张 JPEG，原样转发；面板再用 WebSocket 发给浏览器。帧率本来就低，带宽不是问题。 |
+| MSG-MEDIA-04 | 推流令牌由面板签发，只对这台打印机、这一次推流有效，到期或 `camera.close` 后作废。媒体服务向面板校验令牌（HTTP 鉴权回调），浏览器拉流用的令牌同理。 |
+| MSG-MEDIA-05 | 按需（R-CAM-06）：第一个观众点播放时面板发 `camera.open`；面板从媒体服务查观众数，最后一个离开超过 CFG-CAM-04 后发 `camera.close`。 |
+| MSG-MEDIA-06 | 上限（R-CAM-07）：面板在发 `camera.open` 之前检查 CFG-CAM-05（这台的观众数）和 CFG-CAM-06（场地同时推流的打印机数），到了上限就不开流，让这个观众看抓拍。 |
+| MSG-MEDIA-07 | 打印机不支持实况、拉流失败时，daemon 回 `command.result { status: "failed", code: "stream_unavailable" }`，面板让观众改看抓拍（R-CAM-02）。 |
+| MSG-MEDIA-08 | 看实况和抓拍都只读摄像头，不发任何控制命令（F-PRT-09）。 |
+
+## 11a. 抓拍（MSG-SNAP）
+
+| 编号 | 约定 |
+| --- | --- |
+| MSG-SNAP-01 | 频率（R-CAM-08）：面板用 `snapshot.mode` 告诉 daemon 每台打印机现在有没有人在看（有人开着概况页或这台的详情，靠 SSE 的订阅知道）。有人看：打印中按 `watchedPrintingSeconds`，其他状态按 `watchedOtherSeconds`；没人看：按 `unwatchedSeconds`。 |
+| MSG-SNAP-02 | 第一个人打开时面板发 `snapshot.now`，daemon 立刻补拍一张；打印机报错时也发一次（R-CAM-10）。 |
+| MSG-SNAP-03 | 正在推流时，daemon 从流里截帧当抓拍，不另外去拍。 |
+| MSG-SNAP-04 | 错峰（R-CAM-09）：daemon 把它名下的打印机按 ID 排序，第 k 台的拍照时间偏移 `k × staggerSeconds`，再加 ±10% 随机抖动；`snapshot.now` 同时来了好几台时，也按这个顺序依次拍。 |
+| MSG-SNAP-05 | 上传队列：一个 daemon 只有一个抓拍上传队列，一张传完再传下一张，总速率不超过 `uploadKbps`。同一台打印机还没传出去的旧图被新图替换，不补传旧的。 |
+| MSG-SNAP-06 | 抓拍和视频都不走控制通道，不会耽误命令（MSG-GEN-03）。 |
 
 ## 12. Schema 与代码生成
 

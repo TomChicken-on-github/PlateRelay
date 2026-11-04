@@ -1541,22 +1541,47 @@ paths:
                 required: [items, nextCursor]
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/camera/stream:
-    get:
-      operationId: cameraStream
+  /printers/{printerId}/camera/session:
+    post:
+      operationId: openCameraSession
       tags: [printers]
-      summary: 实况（MJPEG）
+      summary: 申请看实况
       x-permission: [guest, 'printer:camera:stream']
-      x-rules: [R-CAM-01, R-CAM-02, API-CAM-01, API-CAM-02]
-      description: 访客要 CFG-CAM-01 打开。拿不到实况返回 409 stream_unavailable。
+      x-rules: [R-CAM-01, R-CAM-02, R-CAM-06, R-CAM-07, API-CAM-01, API-CAM-02]
+      description: 访客要 CFG-CAM-01 打开。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
       responses:
-        '200':
-          description: multipart/x-mixed-replace 的 MJPEG 流
+        '201':
+          description: 成功
           content:
-            multipart/x-mixed-replace:
-              schema: {type: string, contentMediaType: image/jpeg}
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    kind: {type: string, enum: [webrtc]}
+                    whepUrl: {type: string, format: uri}
+                    token: {type: string}
+                    expiresAt: {type: string, format: date-time}
+                  required: [kind, whepUrl, token, expiresAt]
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind: {type: string, enum: [jpeg-frames]}
+                    wsUrl: {type: string, format: uri}
+                    expiresAt: {type: string, format: date-time}
+                  required: [kind, wsUrl, expiresAt]
+                  additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/camera/snapshot:
     get:
@@ -1564,15 +1589,21 @@ paths:
       tags: [printers]
       summary: 最新一张抓拍
       x-permission: [guest, 'printer:camera:snapshot']
-      x-rules: [R-CAM-02, R-CAM-03]
+      x-rules: [R-CAM-02, R-CAM-03, API-CAM-03]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
+      - name: If-None-Match
+        in: header
+        schema: {type: string}
       responses:
+        '304': {description: 没变}
         '200':
-          description: JPEG，X-Captured-At 是拍摄时间
+          description: 内存里最新一张 JPEG（R-CAM-03）
           headers:
             X-Captured-At:
               schema: {type: string, format: date-time}
+            ETag:
+              schema: {type: string}
           content:
             image/jpeg:
               schema: {type: string, contentMediaType: image/jpeg}
@@ -2921,10 +2952,11 @@ components:
         camera:
           type: object
           properties:
-            stream: {type: boolean}
-            snapshot: {type: boolean}
-          required: [stream, snapshot]
+            stream: {type: string, enum: [webrtc, jpeg-frames, none]}
+            snapshotAt: {type: [string, 'null'], format: date-time}
+          required: [stream, snapshotAt]
           additionalProperties: false
+          description: 卡片平时显示抓拍，点播放才申请实况（R-CAM-05）
         openable: {type: boolean, description: 能不能点开详情（R-VIS-04）}
       required: [id, name, state, stateSince, flags, starred, openToApplicants, camera, openable]
       additionalProperties: false

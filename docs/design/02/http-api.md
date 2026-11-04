@@ -129,7 +129,7 @@
 | 编号 | 约定 |
 | --- | --- |
 | API-RT-01 | 浏览器用一条 Server-Sent Events 连接：`GET /api/v1/stream`【建议】。只需要服务端往下推，SSE 自带断线重连，过代理也简单。 |
-| API-RT-02 | 事件类型：`printer.updated`、`order.updated`、`queue.changed`、`todo.changed`、`notification.created`、`command.updated`、`file.checked`、`resync`。 |
+| API-RT-02 | 事件类型：`printer.updated`、`order.updated`、`queue.changed`、`todo.changed`、`notification.created`、`command.updated`、`file.checked`、`snapshot.updated`、`resync`。`snapshot.updated` 只带 `{ printerId, capturedAt }`，不带图片。 |
 | API-RT-03 | 事件内容是变化后的那个资源的完整视图（和对应 GET 接口返回的一样，按权限裁剪过），不是差量，前端直接替换。`queue.changed` 和 `todo.changed` 只是提示，前端收到后重新拉列表。 |
 | API-RT-04 | 服务端按连接者的权限过滤：申请者只收到概况、自己的订单和自己的通知；访客只收到概况里的打印机。 |
 | API-RT-05 | 同一台打印机的 `printer.updated` 最多每秒一条（Q142）。 |
@@ -142,9 +142,9 @@
 | API-FILE-01 | 上传：`POST /files`，`multipart/form-data`，单个文件上限默认 200 MB【建议，部署时用环境变量改】。返回文件 ID，解析和安全校验在后台跑（F-SUB-02），完成后推 `file.checked`，也可以轮询 `GET /files/{id}/check`。 |
 | API-FILE-02 | 下载（模型文件、预览图、入库照片、延时摄影）：接口返回 `302` 跳到对象存储的短期签名链接，有效 5 分钟【建议】；对象存储桶不公开。 |
 | API-FILE-03 | 看延时摄影每次都记审计（F-PRT-10）。 |
-| API-CAM-01 | 实况：`GET /printers/{id}/camera/stream`，`multipart/x-mixed-replace` 的 MJPEG【建议，起步方案】。面板从 daemon 收一路流，分发给所有观众（R-CAM-01）。 |
-| API-CAM-02 | 拿不到实况时（机型不支持、断流、超出承载、访客且开关关）返回 409 `stream_unavailable`，前端改拿抓拍（R-CAM-02）。 |
-| API-CAM-03 | 抓拍：`GET /printers/{id}/camera/snapshot`，返回最新一张 JPEG，响应头 `X-Captured-At` 是拍摄时间（R-CAM-02）。 |
+| API-CAM-01 | 实况：`POST /printers/{id}/camera/session` 申请观看。H.264 机型返回 WebRTC（WHEP）地址和一次性令牌，浏览器直接连媒体服务；JPEG 帧机型返回一个 WebSocket 地址（Q162、MSG-MEDIA）。浏览器关掉播放器或页面时连接断开，面板据此算观众数。 |
+| API-CAM-02 | 拿不到实况时返回 409：`stream_unavailable`（机型不支持、断流、访客且开关关）或 `camera_limit`（到了 CFG-CAM-05 / CFG-CAM-06 的上限，R-CAM-07），前端改看抓拍（R-CAM-02）。 |
+| API-CAM-03 | 抓拍：`GET /printers/{id}/camera/snapshot`，返回内存里最新一张 JPEG，响应头 `X-Captured-At` 和 `ETag`；带 `If-None-Match` 且没变时返回 304。前端收到 SSE 的 `snapshot.updated` 才去取，不轮询（Q166）。 |
 
 ## 11. 限频
 
