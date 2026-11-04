@@ -23,6 +23,7 @@
 | API-AUTH-03 | 没登录 = 访客。访客只能调声明为 `guest` 的接口，并且要看开关（概况页 CFG-UI-01、实况 CFG-CAM-01）。 |
 | API-AUTH-04 | 用户被停用或改了角色，他的会话立刻按新状态生效：停用 = 全部会话作废，改角色 = 下一个请求就用新权限。 |
 | API-AUTH-05 | v1 没有个人访问令牌（文档 0 §7）。daemon 不走这套接口，走 [daemon 协议](daemon-protocol.md)。 |
+| API-AUTH-06 | 设备令牌（Q182）：第一次成功登录后，服务器给这个浏览器发一个签名的长期 Cookie `pr_device`（`HttpOnly`、`Secure`，1 年），只用来区分设备、放宽 IP 兜底限频，不能用来登录。不收集浏览器指纹。 |
 
 ## 3. 权限声明
 
@@ -78,6 +79,7 @@
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
 | 422 | `validation_failed` | 参数校验失败，带 `errors` |
+| 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04） |
 | 422 | `rule_violation` | 违反业务规则，带 `rule`（如超过修改次数 `R-VER-09`、超过排队上限 `R-SUB-08`） |
 | 428 | `idempotency_key_required` | 写请求没带幂等键 |
 | 429 | `rate_limited` | 限频，带 `Retry-After` |
@@ -150,8 +152,8 @@
 
 | 编号 | 对象 | 限制 |
 | --- | --- | --- |
-| API-RATE-01 | 登录 | 同一 IP + 用户名每分钟 5 次，同一 IP 每分钟 30 次【建议】 |
-| API-RATE-02 | 发验证码 | CFG-ACC-02，且先过人机验证（R-ACC-02） |
+| API-RATE-01 | 登录 | 按用户名：连续错 3 次后要人机验证，再错等待时间翻倍，最长 15 分钟（R-ACC-04）。按 IP 只做兜底：每分钟 300 次；带有效设备令牌的不计入（Q182） |
+| API-RATE-02 | 发验证码 | CFG-ACC-02；短信一律先过人机验证（R-ACC-02），邮件按 CFG-ACC-03（R-ACC-03） |
 | API-RATE-03 | 刷新打印机状态 | 每台打印机 CFG-PRT-03（R-PRT-12） |
 | API-RATE-04 | 上传 | 每人每分钟 10 个 |
 | API-RATE-05 | 签发取件码 | 每单每分钟 3 次 |

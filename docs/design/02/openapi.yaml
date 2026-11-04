@@ -79,7 +79,7 @@ paths:
       tags: [auth]
       summary: 用户名密码登录
       x-permission: public
-      x-rules: [API-RATE-01]
+      x-rules: [R-ACC-04, API-RATE-01, API-AUTH-06]
       description: 成功时设置会话 Cookie（API-AUTH-01）。
       requestBody:
         required: true
@@ -90,6 +90,13 @@ paths:
               properties:
                 username: {type: string}
                 password: {type: string}
+                captcha:
+                  type: object
+                  properties:
+                    challengeId: {type: string}
+                    answer: {type: string}
+                  required: [challengeId, answer]
+                  additionalProperties: false
               required: [username, password]
               additionalProperties: false
       responses:
@@ -143,7 +150,8 @@ paths:
       tags: [auth]
       summary: 发送短信或邮件验证码
       x-permission: public
-      x-rules: [R-ACC-02, API-RATE-02]
+      x-rules: [R-ACC-02, R-ACC-03, API-RATE-02]
+      description: 短信一律要 captcha；邮件按 CFG-ACC-03，需要而没带时返回 422 captcha_required。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -163,7 +171,7 @@ paths:
                     answer: {type: string}
                   required: [challengeId, answer]
                   additionalProperties: false
-              required: [channel, target, purpose, captcha]
+              required: [channel, target, purpose]
               additionalProperties: false
       responses:
         '204': {$ref: '#/components/responses/NoContent'}
