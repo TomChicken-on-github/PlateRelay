@@ -97,4 +97,5 @@ def test_discover_loopback():
 
     threading.Thread(target=send).start()
     found = srv.discover(1.0)
-    assert [p["serial"] for p in found] == ["20P6BJTEST0001"]
+    # 真机可能同时在广播，只检查测试包被收到
+    assert "20P6BJTEST0001" in [p["serial"] for p in found]
