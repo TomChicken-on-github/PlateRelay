@@ -47,7 +47,7 @@ daemon                                  面板
 | MSG-AUTH-02 | `challenge`：`{ nonce, serverTime }`，`nonce` 是 32 字节随机数的 base64，只能用一次，30 秒内有效。 |
 | MSG-AUTH-03 | `auth`：`{ signature }`。签名算法 RSA-PSS（SHA-256，盐长 32），签的内容是 UTF-8 字符串 `"platerelay-daemon-auth/v1\n" + daemonId + "\n" + nonce + "\n" + 面板的 origin`。带上 origin，签名就不能拿到别的面板去用。 |
 | MSG-AUTH-04 | `welcome`：`{ sessionId, protocolVersion, heartbeatSeconds, httpToken, httpTokenExpiresAt, printers: [MSG-ASSIGN 的条目], config: MSG-CFG }`。`httpToken` 用来调 MSG-HTTP 的接口，和这条连接同生共死，到期前面板在控制通道上发 `token.renew` 换新的。 |
-| MSG-AUTH-05 | 失败时面板用关闭码断开：`4401` 签名不对、`4403` daemon 已吊销、`4409` 同一个 daemon 有了更新的连接（新的顶掉旧的）、`4426` 协议版本不兼容。 |
+| MSG-AUTH-05 | 失败时面板用关闭码断开：`4401` 签名不对、`4403` daemon 已吊销、`4409` 同一个 daemon 有了更新的连接（新的顶掉旧的；10 分钟内被不同 IP 顶掉 3 次及以上就告警管理员"疑似私钥泄露"，不自动吊销，R-OPS-02、Q238）、`4426` 协议版本不兼容。 |
 | MSG-AUTH-06 | daemon 断线后按指数退避重连：1 秒起，翻倍，最长 60 秒，加 ±20% 随机抖动（Q175）。收到 `4403` 不再重连。 |
 
 ## 4. 版本协商（MSG-VER）

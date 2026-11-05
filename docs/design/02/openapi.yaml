@@ -3238,6 +3238,7 @@ components:
           properties:
             waiting: {type: integer}
             pendingReview: {type: integer, description: 'x-requires: order:review'}
+            restoredTo: {type: [string, 'null'], format: date-time, description: 'x-requires: settings:manage。数据恢复到的时间，有值时管理员看到横幅"数据已恢复到 <时间>，之后提交的订单需要选手重新提交"（R-OPS-01，Q237）'}
           required: [waiting]
           additionalProperties: false
       required: [printers, queue]
@@ -3389,6 +3390,7 @@ components:
         platform: {type: [string, 'null']}
         lastSeenAt: {type: [string, 'null'], format: date-time}
         revokedAt: {type: [string, 'null'], format: date-time}
+        keyAlertAt: {type: [string, 'null'], format: date-time, description: 疑似私钥泄露告警（R-OPS-02），不自动吊销}
         keyFingerprint: {type: string}
         printerCount: {type: integer}
         needsUpgrade: {type: boolean}
