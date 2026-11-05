@@ -8,7 +8,7 @@
 | IF-STO | 对象存储 | 面板 | 只有 S3 兼容一种（F-OPS-01） |
 | IF-PARSE | 文件解析与安全校验 | 面板 worker | `.gcode.3mf` 一种（NG-01） |
 | IF-CAP | 人机验证 | 面板 | 默认内置图形验证码（F-ACC-02） |
-| IF-SMS | 短信 | 面板 | 只用于注册验证（F-NTF-01） |
+| IF-SMS | 短信 | 面板 | 只发验证码：注册、找回密码（F-NTF-01） |
 | IF-NTF | 通知渠道 | 面板 | 邮件、飞书；站内通知不走插件，必有 |
 | IF-OIDC | 外部登录 | 面板 | 通用 OIDC |
 | IF-POL | 排队与派单策略 | 面板 | 每个策略一个默认实现（NG-06） |
@@ -75,8 +75,7 @@ class PrinterSession(Protocol):
     async def refresh(self) -> None: ...                  # 只读，拓竹 = pushall（R-PRT-12）
 
     async def start(self, job: StartJob) -> CommandResult: ...      # 上传文件 + 开打
-    async def stop(self, job_ref: str) -> CommandResult: ...
-    async def recall(self, job_ref: str) -> CommandResult: ...      # 还没开打的任务：取消并删掉文件
+    async def stop(self, job_ref: str) -> CommandResult: ...        # 准备中和打印中都用它；没有单独的撤回（Q203、Q207）
     async def skip_parts(self, job_ref: str, part_ids: list[int]) -> CommandResult: ...
     async def resolve_error(self, error_id: str, action: StandardErrorAction) -> CommandResult: ...
     async def control(self, action: str, args: dict) -> CommandResult: ...   # action 必须在 ControlSpec 里
@@ -103,7 +102,7 @@ class Discovery(Protocol):
 
 | 标准状态 | 面板 |
 | --- | --- |
-| `OFFLINE` | 离线；有任务时挂失联 |
+| `OFFLINE` | 断线前是空闲 → 离线；其他状态保持原状态并挂失联（Q208） |
 | `NOT_READY`、`BUSY` | 显示为空闲 + 原因"打印机忙"，不能派单，不新增状态（Q184、P-05） |
 | `IDLE` | 空闲（如果在等清板，保持待清板，INV-01） |
 | `PREPARING` | 准备中（我们的任务）/ 外部占用（别人的） |
@@ -128,7 +127,7 @@ class Discovery(Protocol):
 | `filament`、`dry` | 空闲、待清板、维护中 |
 | `motion`（移轴、回零） | 空闲、待清板、维护中（R-ARB-07） |
 
-挂着"停止请求中""撤回请求中""失联"时，所有控制都不能点。
+失联时所有命令都发不出去，全部置灰。上一条控制命令还没解锁时，只挡控制类命令（R-CMD-03）；设定值类（`light`、`temperature`、`fan`、`speed`）照常可用，停止任何时候都能点（Q204）。
 
 ### IF-ADP-06 对照 Moonraker（F-PRT-02）
 
@@ -137,7 +136,7 @@ class Discovery(Protocol):
 | `connect` / `events` / `snapshot` | WebSocket `printer.objects.subscribe` | 必需 |
 | `refresh` | `printer.objects.query` | 必需 |
 | `start` | `server.files.upload` + `printer.print.start` | 必需 |
-| `stop` / `recall` | `printer.print.cancel` | 必需 |
+| `stop` | `printer.print.cancel` | 必需 |
 | `skip_parts` | `EXCLUDE_OBJECT` 宏（需要 `[exclude_object]`） | 可选能力 |
 | `resolve_error` | 只有通用选项（驱动草稿 §6.4） | `errorActions: "generic"` |
 | `control` | `printer.gcode.script`（限白名单内的 G-code） | 可选，命令清单按机器配置声明 |
@@ -224,7 +223,7 @@ interface SmsProvider {
 }
 ```
 
-只发验证码，不发通知（F-NTF-01）。服务商的密钥从环境变量读（INV-07）。
+只发验证码（注册、找回密码），不发通知（F-NTF-01）。服务商的密钥从环境变量读（INV-07）。
 
 ## 6. 通知渠道（IF-NTF）
 
@@ -252,7 +251,7 @@ interface NotificationChannel {
 interface RevisionPolicy {
   /** R-VER-07、R-VER-10：新版本相对上一个通过的版本要后退几位；-1 = 排到队尾，0 = 不动。 */
   placesBack(input: { prevApprovedSeconds: number; newSeconds: number; modelSwitch: boolean;
-                      recalledFromDispatch: boolean; cfg: RevisionSettings }): number;
+                      cfg: RevisionSettings }): number;
 }
 
 interface QueueMover {

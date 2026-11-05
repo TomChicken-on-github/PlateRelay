@@ -689,9 +689,9 @@ paths:
       tags: [orders]
       summary: 修改文件（上传新版本）
       x-permission: order:submit
-      x-transitions: [S-ORD-T06, S-ORD-T10]
+      x-transitions: [S-ORD-T06]
       x-rules: [R-VER-01, R-VER-02, R-VER-04, R-VER-07, R-VER-08, R-VER-09, R-VER-10, CFG-REV-01]
-      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单时先撤回（R-VER-04），响应里订单带 RECALLING 标记。
+      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单及之后不能修改，返回 422 rule_violation（R-VER-04、R-VER-08，Q207）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -780,9 +780,9 @@ paths:
       tags: [orders]
       summary: 取消订单
       x-permission: ['order:cancel:own', 'order:cancel:any']
-      x-transitions: [S-ORD-T18, S-ORD-T19, S-ORD-T20]
+      x-transitions: [S-ORD-T18]
       x-rules: [R-CAN-01, R-CAN-02, R-CAN-03, R-CAN-04, R-CAN-05]
-      description: 已派单时只发撤回、挂撤回请求中，打印机确认后才进已取消（R-CAN-03）。
+      description: 只有待审核、排队中能取消。已派单返回 422 rule_violation（R-CAN-03，请现场人员先停止）；打印中、失败、打完的单也是 422（R-CAN-04）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -812,7 +812,8 @@ paths:
       summary: 重打
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
-      x-rules: [R-PRT-09, R-PRT-10, R-VER-11]
+      x-rules: [R-PRT-09, R-PRT-10, R-VER-11, R-ARC-02]
+      description: 文件过期返回 410 file_expired；归档过的失败订单返回 422 rule_violation（R-PRT-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1363,8 +1364,8 @@ paths:
       summary: 停止打印
       x-permission: printer:stop
       x-transitions: [S-ORD-T09, S-ORD-T13]
-      x-rules: [R-PRT-04, R-PRT-05, P-01]
-      description: 打印中 / 暂停中：挂停止请求中，打印机确认后订单进失败。准备中：撤回，订单回原位，不算失败。
+      x-rules: [R-PRT-04, R-PRT-05, R-CMD-03, P-01]
+      description: 前端先让人选原因并二次确认。准备中、打印中、暂停中都发 job.stop、挂停止请求中，不受控制命令锁限制，停止请求中也能再发（Q203）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1383,20 +1384,17 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
         default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/commands/{commandId}/settle:
+  /printers/{printerId}/start-not-arrived:
     post:
-      operationId: settleCommandOnSite
+      operationId: markStartNotArrived
       tags: [printers]
-      summary: 现场确认了结命令
-      x-permission: printer:control
-      x-rules: [R-CMD-09, R-CMD-04]
-      description: 只在控制命令自动刷新后仍判断不了时可用（pendingCommand.refreshedAt 不为空），否则 409 state_conflict。不发任何命令，记审计。
+      summary: 判为开打没到
+      x-permission: order:dispatch
+      x-transitions: [S-ORD-T09, S-PRN-T05]
+      x-rules: [R-CMD-04, R-DSP-08]
+      description: 只在开打到期还没进准备中、待办已提醒时可用，否则 409 state_conflict。现场人员看过摄像头后判断。不发任何命令，订单回原位，派单 outcome=NOT_ARRIVED，记审计。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
-      - name: commandId
-        in: path
-        required: true
-        schema: {type: string, format: uuid}
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
         required: true
@@ -1405,9 +1403,10 @@ paths:
             schema:
               type: object
               properties:
-                observed: {type: string, enum: [NOT_RUNNING_JOB, RUNNING_JOB], description: 现场看到机器没在打 / 在打这个任务}
+                expectedState: {type: string, enum: [PREPARING]}
+                dispatchId: {type: string, format: uuid}
                 note: {type: string, maxLength: 500}
-              required: [observed]
+              required: [expectedState, dispatchId]
               additionalProperties: false
       responses:
         '200':
@@ -2484,7 +2483,7 @@ components:
       description: entities.md §2.2
     PrinterFlag:
       type: string
-      enum: [ATTENTION, STOPPING, RECALLING, LOST, STORAGE_LOW, DAEMON_UPGRADE]
+      enum: [ATTENTION, STOPPING, LOST, STORAGE_LOW, DAEMON_UPGRADE]
     PauseReason: {type: string, enum: [USER, ERROR, RUNOUT]}
     ColourPref: {type: string, enum: [EXACT, SIMILAR, ANY]}
     ProcessNode: {type: string, enum: [SUBMIT, REVIEW, QUEUE, PRINT, STORE, PICKUP]}
@@ -2944,14 +2943,21 @@ components:
         openToApplicants: {type: boolean}
         pendingCommand:
           type: [object, 'null']
-          description: API-ASYNC-04：没了结的控制命令（R-CMD-01、R-CMD-05）。不为空时，除停止和设定值命令外的控制按钮置灰。
+          description: API-ASYNC-04：锁着的那条控制命令（R-CMD-01–03）。不为空时，点过的按钮转加载圆环，除停止和设定值命令外的控制按钮置灰。
           properties:
             commandId: {type: string, format: uuid}
             kind: {type: string}
             sentAt: {type: string, format: date-time}
-            confirmBy: {type: string, format: date-time}
-            refreshedAt: {type: [string, 'null'], format: date-time, description: R-CMD-03 自动刷新的时间；刷新后仍判断不了时不为空}
-          required: [commandId, kind, sentAt, confirmBy, refreshedAt]
+            unlockAt: {type: string, format: date-time, description: MSG-CMD-LOCK；到了没收到状态变化就按时间解锁并提示看摄像头}
+          required: [commandId, kind, sentAt, unlockAt]
+          additionalProperties: false
+        pendingStop:
+          type: [object, 'null']
+          description: 最近一次还没确认的停止（Q211）。停止不受锁限制，可能和 pendingCommand 同时存在。
+          properties:
+            commandId: {type: string, format: uuid}
+            sentAt: {type: string, format: date-time}
+          required: [commandId, sentAt]
           additionalProperties: false
         job:
           type: [object, 'null']
