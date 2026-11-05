@@ -221,7 +221,8 @@ daemon                                  面板
 **MSG-CMD-LOCK**（R-CMD-01–03、Q205、Q215）：
 
 - 面板只追踪命令送达（`status`），不判断命令"执行了没有"。订单和打印机状态只跟着打印机上报的事件走（P-01）。
-- 控制命令发出后锁住这台打印机的其他控制命令（停止和设定值除外）。`unlock_at` = 到达打印机的时间 + CFG-CMD-01（默认 10 秒）。"到达"= daemon 回 `accepted`，也就是命令已经发给了打印机；`job.start` 从 `job.staged` 算（开打指令已发出）。还没收到任何回复时，`unlock_at` = `expiresAt` + CFG-CMD-01：到了 `expiresAt`，daemon 要么已经开始执行，要么保证永远不执行，所以这个时间之前不会解锁。
+- 控制命令发出后锁住这台打印机的其他控制命令（停止和设定值除外）。`unlock_at` = 到达打印机的时间 + CFG-CMD-01（默认 10 秒）。"到达"= daemon 回 `accepted`，也就是命令已经发给了打印机。还没收到任何回复时，`unlock_at` = `expiresAt` + CFG-CMD-01：到了 `expiresAt`，daemon 要么已经开始执行，要么保证永远不执行，所以这个时间之前不会解锁。
+- `job.start` 分两段：传文件期间按传输进度锁住，不计时，到 `job.staged` 或 `command.result failed` 为止（上限由 MSG-CMD-START 的重试次数、CFG-CMD-02 和送达期限决定）；`job.staged`（开打指令已发出）之后，`unlock_at` = `job.staged` + CFG-CMD-03（默认 30 秒，估计值，开发驱动时实测）。
 - 提前解锁：收到上表"状态变化"那一栏的上报，或 daemon 回 `rejected`、`expired`、`failed`。
 - 按时间解锁时界面提示"上一条命令已发出 N 秒，请先看摄像头确认"，要不要再发由人决定，再发是新命令、新 `commandId`（R-CMD-02）。`job.start` 到期还没进准备中，走 R-CMD-04。
 - 设定值命令（R-CMD-06）不进锁：`params` 一律是目标值，不用切换或加减；连发以最后一条为准。
@@ -232,6 +233,7 @@ daemon                                  面板
 - daemon 收到 `job.start` 开始下载就回 `accepted`；文件放到打印机上、开打指令已发出后发 `job.staged`。
 - 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发）。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
+- 发开打指令之前，daemon 先确认打印机上报的是空闲；在准备中、打印中或别的非空闲状态时回 `rejected`（`code: printer_busy`），什么都不发，按下发失败处理。这样判为没到（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
 - 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。

@@ -368,7 +368,7 @@
 | `requested_by?` | 用户；系统发起的为空 |
 | `created_at`、`expires_at` | 有效期见 MSG-CMD-TTL |
 | `status` | `QUEUED` → `SENT` → `ACCEPTED` / `REJECTED` / `EXPIRED` / `FAILED` → `DONE`：投递进度，daemon 回什么记什么 |
-| `unlock_at?` | 控制命令的解锁时间（R-CMD-02，MSG-CMD-LOCK）：到达打印机 + CFG-CMD-01；还没收到回复时 = `expires_at` + CFG-CMD-01 |
+| `unlock_at?` | 控制命令的解锁时间（R-CMD-02，MSG-CMD-LOCK）：到达打印机 + CFG-CMD-01；还没收到回复时 = `expires_at` + CFG-CMD-01。`job.start` 传文件期间为空（按进度锁住），`job.staged` 后 = 那一刻 + CFG-CMD-03 |
 | `unlocked_at?`、`unlocked_by?` | 实际解锁的时间和原因：`printer_report`（打印机上报了状态变化）、`timeout`、`daemon_result`（回了 `rejected` / `expired` / `failed`） |
 | `result` | jsonb，daemon 回报的原样结果（含固件拒绝原因，R-PRT-15） |
 | `finished_at?` | |
