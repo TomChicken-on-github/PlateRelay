@@ -132,7 +132,7 @@ sequenceDiagram
   D->>P: GET /daemon/v1/files/{fileId}（MSG-HTTP-02）
   P->>O: 签名读取
   D->>D: 核对 SHA-256
-  D->>R: FTPS 上传 pr-{jobRef8}.gcode.3mf（传输期间按进度锁住，不计时）
+  D->>R: FTPS 上传 pr-{jobRef 后 12 位}.gcode.3mf（传输期间按进度锁住，不计时）
   D->>D: 确认打印机空闲（不空闲回 rejected printer_busy，不发）
   D->>R: 发开打指令（带映射）
   D-->>P: printer.event job.staged（CFG-CMD-03 计时从这里开始，MSG-CMD-LOCK）
