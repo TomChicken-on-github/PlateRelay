@@ -2,7 +2,7 @@
 
 > 设计层文档第 3 份，共 4 份。与文档 [0](00-scope-and-principles.md)、[1](01-business-rules.md)、[2](02/README.md) 冲突时以上层为准，并修正本文。
 >
-> 状态：初稿（2026-11-05）。骨架来自追问 Q197–Q200。
+> 状态：初稿（2026-11-05）。骨架来自追问 Q197–Q200，审阅修正见 Q203–Q216。
 
 ## 0. 怎么读
 
@@ -24,10 +24,10 @@
 | 编号 | 流程 |
 | --- | --- |
 | SEQ-01 | 提交到审核通过 |
-| SEQ-02 | 修改文件（含已派单时先撤回） |
+| SEQ-02 | 修改文件 |
 | SEQ-03 | 派单到开始打印 |
 | SEQ-04 | 停止打印（含开打前停止） |
-| SEQ-05 | 取消已派单的订单 |
+| SEQ-05 | 取消订单 |
 | SEQ-06 | 报错和处理报错 |
 | SEQ-07 | 断线、重连和对账 |
 | SEQ-08 | 打完、铲件入库、核销 |
@@ -76,28 +76,18 @@ sequenceDiagram
 | 14 | 另一个管理员已经审过 | 409 `state_conflict` | API-CONC-02 |
 | 14 | 驳回 | rejectOrder，必须填原因 → 已驳回（S-ORD-T03） | R-REV-02 |
 
-## SEQ-02 修改文件（含已派单时先撤回）
+## SEQ-02 修改文件
 
 ```mermaid
 sequenceDiagram
   autonumber
   actor A as 申请者
   participant P as 面板
-  participant D as daemon
-  participant R as 打印机
   actor M as 管理员
   A->>P: uploadFile 新文件（同 SEQ-01 步骤 1–6）
   A->>P: reviseOrder（expectedStatus，fileId，plate）
   P->>P: 检查次数上限、换机型（R-VER-09、R-VER-10），算后退位数（R-VER-07）
-  alt 排队中
-    P->>P: 新版本 PENDING，订单 待审核 + 冻结（S-ORD-T06、R-VER-02）
-  else 已派单（CFG-REV-08=撤回）
-    P->>P: 挂"撤回请求中"（S-FLG-RECALLING）
-    P->>D: command job.recall（60 秒有效，MSG-CMD-TTL）
-    D->>R: 取消任务，删掉下发的文件（MSG-JOBREF-03）
-    D-->>P: printer.event job.cancelled（带 commandId）
-    P->>P: 订单 待审核 + 冻结，额外后退（S-ORD-T10、R-VER-04），打印机 空闲（S-PRN-T05）
-  end
+  P->>P: 新版本 PENDING，订单 待审核 + 冻结（S-ORD-T06、R-VER-02）
   P-->>M: 通知"新的待审核"
   alt 通过
     M->>P: approveOrder（versionId = 新版本）
@@ -113,15 +103,10 @@ sequenceDiagram
 
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
-| 3 | 次数用完 / 已经开始打印 | 422 `rule_violation`（R-VER-09 / R-VER-08） | R-VER-08、R-VER-09 |
-| 3 | 已派单且 CFG-REV-08=拒绝 | 422 | R-VER-04 |
-| 6 | daemon 不在线 | 409 `printer_unreachable`，什么都不改 | API-ASYNC-03 |
-| 6 | 这台打印机有没了结的控制命令（如开打还没确认） | 409 `command_pending`，什么都不改 | R-CMD-05 |
-| 8 | daemon 回 expired | 撤回未生效：去掉撤回请求中，修改作废，订单保持已派单；申请者可以重新提交修改，是一条新命令 | MSG-CMD-TTL、R-CMD-06 |
-| 8 | 到 CFG-CMD-01 还没确认 | 面板自动刷新一次，按事实了结；仍判断不了就保持撤回请求中、待办提醒（现场人员可以到机器前确认后了结，R-CMD-09），订单保持已派单。不重发撤回，也不发开打 | R-CMD-03、R-CMD-04、INV-16 |
-| 8 | 撤回期间打印机已经开打 | 收到 job.started → 撤回未生效，按 SEQ-03 进打印中；修改被拒，记录原因 | R-VER-08、R-CMD-02、P-01 |
+| 3 | 次数用完 | 422 `rule_violation`（R-VER-09） | R-VER-09 |
+| 3 | 已派单、打印中或之后 | 422 `rule_violation`；已派单要请现场人员先停止，回到排队中后再改 | R-VER-04、R-VER-08、Q207 |
 
-恢复旧版本（restoreVersion）走同一套：生成新版本、算一次修改、自动通过、按时长规则后退（S-ORD-T07、R-VER-06），不经过管理员。
+恢复旧版本（restoreVersion）走同一套：生成新版本、算一次修改、自动通过、按时长规则后退（S-ORD-T07、R-VER-06），不经过管理员；只能恢复曾经通过的版本。
 
 ## SEQ-03 派单到开始打印
 
@@ -139,18 +124,18 @@ sequenceDiagram
   P-->>S: DispatchOptions
   S->>P: dispatchOrder（mapping，原因，bedType）
   P->>P: 重新校验映射（R-DSP-06、R-DSP-07），排队锁内建 E-DSP
-  P->>P: 订单 已派单（S-ORD-T08），打印机 准备中（S-PRN-T03），记越过的单（R-DSP-02）
+  P->>P: 订单 已派单（S-ORD-T08），打印机 准备中（S-PRN-T03），记越过的单（R-DSP-02），锁住控制按钮（R-CMD-01）
   P->>D: command job.start（jobRef = 派单 ID，60 秒有效）
   P-->>S: 202 CommandAccepted
+  D-->>P: command.result accepted（开始下载）
   D->>P: GET /daemon/v1/files/{fileId}（MSG-HTTP-02）
   P->>O: 签名读取
   D->>D: 核对 SHA-256
-  D->>R: FTPS 上传 pr-{jobRef}.gcode.3mf，开打（带映射）
-  D-->>P: command.result accepted
-  D-->>P: printer.event job.staged
+  D->>R: FTPS 上传 pr-{jobRef8}.gcode.3mf，发开打指令（带映射）
+  D-->>P: printer.event job.staged（解锁计时从这里算，MSG-CMD-LOCK）
   R-->>D: 状态：准备中 → 打印中
   D-->>P: printer.event job.started
-  P->>P: 订单 打印中（S-ORD-T11、R-PRT-01），打印机 打印中（S-PRN-T04）
+  P->>P: 订单 打印中（S-ORD-T11、R-PRT-01），打印机 打印中（S-PRN-T04），解锁
   P-->>S: SSE printer.updated / order.updated
 ```
 
@@ -160,12 +145,12 @@ sequenceDiagram
 | 6 | 映射有 BLOCK，或有 WARN 没填原因 | 422，不派 | R-DSP-06、R-DSP-07 |
 | 6 | 板型和要求不一致没二次确认 | 422 | R-DSP-09 |
 | 8 | daemon 不在线 | 409 `printer_unreachable`，不建派单 | API-ASYNC-03 |
-| 12 | 哈希不对 / 下载失败 / 上传失败 | command.result failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），派单 outcome=SEND_FAILED | R-DSP-08 |
-| 14 | 命令过期 | daemon 回 expired → 开打未生效，按下发失败处理 | MSG-CMD-TTL、R-CMD-02 |
-| 15–16 | 开打还没了结时有人点撤回、取消、修改 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-05 |
-| 13–16 | 文件传完（job.staged）后 CFG-CMD-01 内没进准备中 | 面板自动刷新一次：进了准备中且是这个文件 → 已执行，之后有没有开打按 R-PRT-01、Q87 走，不归命令管；机器空闲且没有这个任务 → 未生效，订单回排队中原位；仍判断不了 → 保持准备中、待办提醒（现场人员可以到机器前确认后了结，R-CMD-09）。**永远不重发开打**，未生效后由现场人员重新派单 | R-CMD-02、R-CMD-03、R-CMD-04、R-CMD-06、INV-16 |
+| 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），outcome=SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
+| 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
+| 15–17 | 锁着时有人点其他控制 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-03 |
+| 15–17 | 文件传完后过了 CFG-CMD-01 还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 订单回原位，outcome=NOT_ARRIVED）或继续等。**永远不自动重发开打** | R-CMD-02、R-CMD-04、INV-16 |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
-| 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId → 订单回原位 | S-ORD-T09 |
+| 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
 
 ## SEQ-04 停止打印（含开打前停止）
 
@@ -176,59 +161,39 @@ sequenceDiagram
   participant P as 面板
   participant D as daemon
   participant R as 打印机
-  S->>P: stopPrint（expectedState，必选原因）
-  alt 打印中 / 暂停中
-    P->>P: 挂"停止请求中"（S-FLG-STOPPING），订单仍是打印中（P-01）
-    P->>D: command job.stop（60 秒有效）
-    P-->>S: 202
-    D->>R: 停止
-    R-->>D: 状态：已停止
-    D-->>P: printer.event job.cancelled（带 commandId）
-    P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08），去掉停止请求中
-  else 准备中（还没开打）
-    P->>P: 挂"撤回请求中"
-    P->>D: command job.recall
-    D-->>P: printer.event job.cancelled
-    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机 空闲（S-PRN-T05）
+  S->>P: stopPrint（expectedState，必选原因，前端已二次确认）
+  P->>P: 挂"停止请求中"（S-FLG-STOPPING），订单状态不动（P-01）
+  P->>D: command job.stop（60 秒有效，不受控制命令锁限制）
+  P-->>S: 202
+  D->>R: 停止
+  R-->>D: 状态：已停止
+  D-->>P: printer.event job.cancelled（带 commandId，beforeStart）
+  alt 已经开打
+    P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08）
+  else 还没开打
+    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机 空闲（S-PRN-T05），outcome=STOPPED_BEFORE_START
   end
+  P->>P: 去掉停止请求中
 ```
 
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
 | 1 | 状态已经变了 | 409 `state_conflict` | API-CONC-02 |
 | 3 | daemon 不在线 | 409 `printer_unreachable`，不挂标记 | API-ASYNC-03 |
-| 1 | 准备中但开打还没了结 | 停止照常可发（R-CMD-05 例外），发的是 job.stop 不是 job.recall；订单去向按打印机上报的事实定：开打前停下 → 回原位（R-PRT-05），已经开打 → 失败（R-PRT-04） | R-CMD-05、P-01 |
-| 6 | 到 CFG-CMD-01 还没确认 | 面板自动刷新一次按事实了结；仍判断不了就保持停止请求中、待办提醒（现场人员可以到机器前确认后了结，R-CMD-09），可以再点停止；不自动判失败 | R-CMD-03、R-CMD-04、P-03 |
-| 6 前 | 现场人员改主意 | 停止请求不能撤销，没有对应接口，只能等事实了结 | R-PRT-04、INV-16 |
-| 6 | 打印机在停下之前自己打完了 | 收到 job.finished → 按 SEQ-08 处理，停止请求作废 | P-01 |
+| 1 | 开打或别的控制命令还锁着 | 停止照常可发，发的同样是 job.stop；订单去向按打印机上报定 | R-CMD-03、Q203 |
+| 7 | daemon 回 expired / rejected / failed，或到 CFG-CMD-01 打印机还在打这个任务 | 停止未生效：去掉停止请求中，待办提醒，可以再按停止（新命令）；daemon 断线就保持停止请求中，等重连对账 | R-CMD-05、Q213 |
+| 6 前 | 现场人员改主意 | 停止请求不能撤销，没有对应接口 | R-PRT-04、INV-16 |
+| 7 | 打印机在停下之前自己打完了 | 收到 job.finished → 按 SEQ-08 处理，去掉停止请求中 | P-01 |
 
-## SEQ-05 取消已派单的订单
+## SEQ-05 取消订单
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor A as 申请者或管理员
-  participant P as 面板
-  participant D as daemon
-  participant R as 打印机
-  A->>P: cancelOrder（expectedStatus=DISPATCHED，必填原因）
-  P->>P: 挂"撤回请求中"，订单仍是已派单（R-CAN-03、P-01）
-  P->>D: command job.recall（60 秒有效）
-  P-->>A: 200（订单带 RECALLING）
-  D->>R: 取消任务，删掉下发的文件（INV-15）
-  D-->>P: printer.event job.cancelled（带 commandId）
-  P->>P: 订单 已取消（S-ORD-T19），取件码作废、未审版本撤下（R-CAN-05），打印机 空闲（S-PRN-T05）
-```
+只有待审核、排队中的订单能取消（S-ORD-T18、R-CAN-01、R-CAN-02），不涉及打印机：cancelOrder（expectedStatus，必填原因）→ 已取消，未审的版本撤下（R-CAN-05）。
 
-| 步骤 | 失败 | 处理 | 依据 |
-| --- | --- | --- | --- |
-| 1 | 已经开打 | 409 `state_conflict`；打印中不能取消，只能先停止 | R-CAN-04 |
-| 1 | 开打还没了结 | 409 `command_pending`；等开打了结再取消，或由现场人员先停止 | R-CMD-05 |
-| 6 | 撤回期间打印机开打了 | 收到 job.started → 撤回未生效，订单进打印中，取消作废，告诉申请者 | P-01、R-CAN-04、R-CMD-02 |
-| 6 | daemon 回 expired | 撤回未生效：去掉撤回请求中，取消作废，订单保持已派单；可以重新取消，是一条新命令 | MSG-CMD-TTL、R-CMD-06 |
-| 6 | 到 CFG-CMD-01 还没确认 | 面板自动刷新一次按事实了结；仍判断不了就保持撤回请求中、待办提醒（现场人员可以到机器前确认后了结，R-CMD-09），不重发 | R-CMD-03、R-CMD-04、INV-16 |
-
-待审核、排队中的取消不涉及打印机，直接进已取消（S-ORD-T18）。
+| 失败 | 处理 | 依据 |
+| --- | --- | --- |
+| 已派单 | 422 `rule_violation`，请现场人员先停止（SEQ-04），回到排队中后再取消 | R-CAN-03、Q207 |
+| 打印中、失败、待入库、待取件 | 422 `rule_violation`；失败只能重打，打完的单长期没取走按 R-PCK-05 | R-CAN-04、Q210 |
+| 状态已经变了 | 409 `state_conflict` | API-CONC-02 |
 
 ## SEQ-06 报错和处理报错
 
@@ -259,11 +224,11 @@ sequenceDiagram
 | 8 | 选的动作不在这条报错的选项里 | 422 | R-PRT-14 |
 | 8 | 需要现场处理的选项没确认在现场 | 422 | E-PERR、驱动草稿 §6.5 |
 | 8 | 别人已经处理了 | 409 | 驱动草稿 §6.5 |
-| 8 | 这台打印机有没了结的控制命令（包括上一次处理报错） | 409 `command_pending`；停止除外 | R-CMD-05 |
-| 10–12 | 到 CFG-CMD-01 还没看到报错清除 | 面板自动刷新一次按事实了结；不重发，未生效后才能重新选动作 | R-CMD-03、R-CMD-06 |
+| 8 | 这台打印机上一条控制命令还锁着（包括上一次处理报错） | 409 `command_pending`；选"停止"的动作除外 | R-CMD-03 |
+| 10–12 | 到 CFG-CMD-01 还没看到报错清除 | 按钮解锁并提示看摄像头，由人判断要不要重新选动作（新命令），不自动重发 | R-CMD-02、INV-16 |
 | 10 | 固件拒绝 | command.result failed，原样显示固件的话 | R-PRT-15 |
 | 11 | 有人在打印机屏幕上处理了 | error.cleared clearedBy=DEVICE，记"在设备端处理" | MSG-EVT |
-| 12 | 选的是"停止" | 走 SEQ-04 的确认路径：job.cancelled → 失败 | R-PRT-04 |
+| 12 | 选的是"停止" | 按 job.stop 发，不受锁限制，走 SEQ-04 | R-PRT-04、Q203 |
 | 13 | 暂停太久没人管 | 超过 CFG-PRT-01 提醒；不自动继续、不自动停止 | R-PRT-06 |
 
 人工暂停（reason=USER）不挂等待处理，继续走设备控制 `job.resume`（IF-ADP-05）。
@@ -278,7 +243,7 @@ sequenceDiagram
   participant P as 面板
   actor S as 现场
   Note over D,P: 45 秒没收到任何消息（MSG-HB-02）
-  P->>P: 没任务的打印机 离线（S-PRN-T02），有任务的挂失联（S-FLG-LOST），订单状态不动（R-ARB-12）
+  P->>P: 空闲的打印机 离线（S-PRN-T02），其他状态（含待清板、维护中）保持并挂失联（S-FLG-LOST、Q208），订单状态不动（R-ARB-12）
   P-->>S: 通知"失联"
   Note over R,D: 断线期间 daemon 照常监听，事件进本机发件箱（MSG-ENV-03）
   D->>P: 重连：hello → challenge → auth → welcome（SEQ-10 后半）
@@ -287,7 +252,9 @@ sequenceDiagram
   P->>P: 按 seq 去重、按 MSG-RECON-02 对账表推进
   alt 对得上
     P->>P: 补齐状态转换，去掉失联（R-PRT-07）
-  else 对不上
+  else 已派单、开打没见过准备中、打印机上没有这次任务的痕迹
+    P->>P: 开打未生效，订单回原位（R-PRT-16、R-DSP-08）
+  else 其他对不上
     P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
     S->>P: reconcileOrder（outcome=FAILED 或 PRINTED）
     P->>P: S-ORD-T13 或 S-ORD-T14
@@ -300,6 +267,7 @@ sequenceDiagram
 | 4 | daemon 已被吊销 | 4403，不再重连 | MSG-AUTH-05 |
 | 7 | 事件缺号 | 等 10 秒，还没来就要快照对账 | MSG-ENV-06 |
 | 8 | 只有 daemon 连得上面板、连不上打印机 | connection.down 事件，按同样规则处理那一台 | MSG-HB-03 |
+| 7 | 断线时还锁着的控制命令 | 发件箱按同一 commandId 补投；daemon 按落盘的命令 ID 去重，过期的回 expired，同一条命令最多执行一次 | MSG-ENV-04、R-CMD-08 |
 
 ## SEQ-08 打完、铲件入库、核销
 
@@ -365,6 +333,7 @@ sequenceDiagram
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
 | 1 | 文件已过保留期 | 按钮置灰，410 `file_expired`；请申请者重新提交 | R-PRT-10、R-ARB-03 |
+| 1 | 订单归档过 | 按钮置灰，422 `rule_violation` | R-PRT-09、R-ARC-02 |
 | 1 | 不是失败状态 | 409 `state_conflict` | API-CONC-02 |
 
 版本、文件、修改次数都不变（R-VER-11）。申请者没有重打按钮（F-PRT-07）。
@@ -453,7 +422,7 @@ sequenceDiagram
   participant O as 存储
   M->>P: archivePeriod（confirm，export）
   P->>P: 有已派单或打印中的订单？（R-ARC-01、R-ARB-02）
-  P->>P: 一个事务：待审核、排队中、失败 → 已取消，待入库、待取件 → 已处置（S-ORD-T21、S-ORD-T22、R-ARC-02）
+  P->>P: 一个事务：待审核、排队中 → 已取消，待入库、待取件 → 已处置，失败保持失败并记 archived_at（S-ORD-T21、S-ORD-T22、R-ARC-02）
   P->>P: 每单记一条记录，作废取件码，建 E-ARC，记审计
   opt 选了导出
     P->>O: put exports/{archiveId}.zip
