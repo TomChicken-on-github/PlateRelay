@@ -1553,6 +1553,59 @@ paths:
                 required: [items, nextCursor]
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/jobs:
+    get:
+      operationId: listPrinterJobs
+      tags: [printers]
+      summary: 打印机的打印记录
+      x-permission: printer:operate
+      x-rules: [R-VIS-04, R-CAM-11]
+      description: 打印机详情里的"打印记录"：这台打印机的打印任务，最新派的在前（按 dispatchedAt 倒序），游标翻页。任务不单独成页，也没有跨打印机的任务列表（文档 1 §4A，Q221）。每条点开进订单详情。申请者按通常的可见性规则返回（R-VIS）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        jobId: {type: string, format: uuid}
+                        attempt: {type: integer, minimum: 1, description: 这个订单的第 N 次}
+                        orderId: {type: string, format: uuid}
+                        orderNumber: {type: integer}
+                        owner:
+                          oneOf:
+                          - {$ref: '#/components/schemas/Person'}
+                          - {type: 'null'}
+                        phase: {type: string, enum: [TRANSFERRING, PREPARING, PRINTING, PAUSED, ENDED]}
+                        outcome:
+                          type: ['string', 'null']
+                          enum: [SEND_FAILED, START_FAILED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
+                        dispatchedAt: {type: string, format: date-time}
+                        startedAt: {type: [string, 'null'], format: date-time}
+                        endedAt: {type: [string, 'null'], format: date-time}
+                        endPhoto:
+                          type: [object, 'null']
+                          properties:
+                            capturedAt: {type: string, format: date-time}
+                            url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                          required: [capturedAt, url]
+                          additionalProperties: false
+                      required: [jobId, attempt, orderId, orderNumber, owner, phase, outcome, dispatchedAt, startedAt, endedAt, endPhoto]
+                      additionalProperties: false
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/camera/session:
     post:
       operationId: openCameraSession

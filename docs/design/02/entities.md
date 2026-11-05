@@ -341,6 +341,8 @@
 
 约束：`phase = 'ENDED'` ⇔ `outcome` 不为空。
 
+索引：`(printer_id, dispatched_at desc, id desc)`，给打印机详情的"打印记录"翻页用（Q221）。
+
 `mapping` 的结构：
 
 ```json
