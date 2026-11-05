@@ -276,6 +276,7 @@ sequenceDiagram
 | 7 | 事件缺号 | 等 10 秒，还没来就要快照对账 | MSG-ENV-06 |
 | 8 | 只有 daemon 连得上面板、连不上打印机 | connection.down 事件，按同样规则处理那一台 | MSG-HB-03 |
 | 7 | 断线时还锁着的控制命令 | 发件箱按同一 commandId 补投；daemon 按落盘的命令 ID 去重，过期的回 expired，同一条命令最多执行一次 | MSG-ENV-04、R-CMD-08 |
+| — | 打印机移到另一个 daemon（updatePrinter 改 daemonId），或 daemon 重装丢了本地清单 | 新 daemon 从 MSG-ASSIGN 拿到 currentJobRef / cleanupJobRefs；打印机上在打的任务或 `pr-<后 12 位>` 文件对得上就认作系统任务，收进自己的清单（之后按 INV-15 照常清理），不当外部任务 | MSG-JOBREF-02、Q228 |
 
 ## SEQ-08 打完、铲件入库、核销
 
