@@ -1421,7 +1421,7 @@ paths:
       x-permission: order:dispatch
       x-transitions: [S-ORD-T09, S-PRN-T05]
       x-rules: [R-CMD-04, R-DSP-08]
-      description: 只在开打到期还没进准备中、待办已提醒时可用，否则 409 state_conflict。现场人员看过摄像头后判断。不发任何命令，订单回原位，派单 outcome=NOT_ARRIVED，记审计。
+      description: 只在开打到期还没进准备中、待办已提醒时可用，否则 409 state_conflict。现场人员看过摄像头后判断。不发任何命令，打印任务结束为 NOT_ARRIVED，按映射表订单回原位（文档 1 §4A），记审计。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1433,9 +1433,9 @@ paths:
               type: object
               properties:
                 expectedState: {type: string, enum: [PREPARING]}
-                dispatchId: {type: string, format: uuid}
+                jobId: {type: string, format: uuid}
                 note: {type: string, maxLength: 500}
-              required: [expectedState, dispatchId]
+              required: [expectedState, jobId]
               additionalProperties: false
       responses:
         '200':
@@ -2766,16 +2766,28 @@ components:
             type: array
             items: {type: string}
             description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
-          endPhotos:
+          printJobs:
             type: array
-            description: 每次派单的结束照片，最新的在前（R-CAM-11、Q217）
+            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示
             items:
               type: object
               properties:
-                dispatchId: {type: string, format: uuid}
-                capturedAt: {type: string, format: date-time}
-                url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
-              required: [dispatchId, capturedAt, url]
+                jobId: {type: string, format: uuid}
+                attempt: {type: integer, minimum: 1, description: 第 N 次}
+                printerName: {type: string}
+                startedAt: {type: [string, 'null'], format: date-time}
+                endedAt: {type: [string, 'null'], format: date-time}
+                outcome:
+                  type: ['string', 'null']
+                  enum: [SEND_FAILED, START_FAILED, NOT_ARRIVED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
+                endPhoto:
+                  type: [object, 'null']
+                  properties:
+                    capturedAt: {type: string, format: date-time}
+                    url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                  required: [capturedAt, url]
+                  additionalProperties: false
+              required: [jobId, attempt, printerName, startedAt, endedAt, outcome, endPhoto]
               additionalProperties: false
           reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）}
         required: [activeVersion, versions, revisions, nodes, actions]

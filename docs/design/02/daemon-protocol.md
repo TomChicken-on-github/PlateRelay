@@ -120,7 +120,7 @@ daemon                                  面板
 ```
 
 - `state` 用适配器的标准状态（IF-ADP-03），不是面板的打印机状态；换算规则在面板（IF-ADP-04）。
-- `job.jobRef` 是这次任务对应的派单 ID（E-DSP）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
+- `job.jobRef` 是这次的打印任务 ID（E-JOB）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
 - 拿不到的字段省略，不填假值。
 
 ### MSG-EVT `printer.event`
@@ -250,7 +250,7 @@ daemon                                  面板
 
 | 编号 | 约定 |
 | --- | --- |
-| MSG-JOBREF-01 | 每次派单的 ID（E-DSP）就是 `jobRef`。daemon 放到打印机上的文件名带上它：`pr-<jobRef 前 8 位>.gcode.3mf`，拓竹的任务名也用这个。 |
+| MSG-JOBREF-01 | 打印任务的 ID（E-JOB）就是 `jobRef`，一次派单一个。daemon 放到打印机上的文件名带上它：`pr-<jobRef 前 8 位>.gcode.3mf`，拓竹的任务名也用这个。 |
 | MSG-JOBREF-02 | daemon 在本机留一份清单，记它放进打印机或从打印机下载过的每个文件和对应的 `jobRef`（F-PRT-11）。打印机上正在打的任务对得上清单 = 系统任务；对不上 = 外部任务（`external: true`，F-PRT-08）。 |
 | MSG-JOBREF-03 | daemon 只删清单里的文件（INV-15）：任务结束后删它下发的 3mf；延时摄影上传并核对成功后删原文件（F-PRT-10）。 |
 | MSG-RECON-01 | 重连后，daemon 先给每台打印机发一份快照，面板拿快照和自己的记录对（R-PRT-07）。 |

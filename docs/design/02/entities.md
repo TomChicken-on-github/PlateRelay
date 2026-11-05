@@ -59,7 +59,8 @@
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
 | `process_node` | `SUBMIT` `REVIEW` `QUEUE` `PRINT` `STORE` `PICKUP` | E-REC（Q146） |
-| `dispatch_outcome` | `SEND_FAILED` `START_FAILED` `NOT_ARRIVED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-DSP |
+| `job_phase` | `TRANSFERRING` `PREPARING` `PRINTING` `PAUSED` `ENDED` | E-JOB（文档 1 §4A，S-JOB-*） |
+| `job_outcome` | `SEND_FAILED` `START_FAILED` `NOT_ARRIVED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-JOB |
 | `command_status` | `QUEUED` `SENT` `ACCEPTED` `REJECTED` `EXPIRED` `FAILED` `DONE` | E-CMD（投递进度） |
 | `command_class` | `CONTROL` `SETPOINT` `READ` | E-CMD（R-CMD 控制命令 / 设定值命令 / 只读命令） |
 | `actor_type` | `USER` `SYSTEM` `DAEMON` `PRINTER` | E-REC、E-AUD |
@@ -83,7 +84,7 @@
 | E-CHK | `file_checks` | 文件解析和安全校验结果 |
 | E-ORD | `orders` | 订单（一盘） |
 | E-VER | `order_versions` | 订单的不可变文件版本 |
-| E-DSP | `dispatches` | 一次派单（含映射） |
+| E-JOB | `print_jobs` | 打印任务：一次派单产生的一次打印尝试（含映射） |
 | E-CMD | `daemon_commands` | 发给 daemon 的命令 |
 | E-PCK | `pickup_codes` | 取件码 |
 | E-REC | `order_records` | 订单时间线记录 |
@@ -182,11 +183,11 @@
 | `model_name` | text? | 打印机上报 |
 | `capabilities` | jsonb | 适配器的能力声明和静态命令清单（IF-ADP-02），连上时更新 |
 | `open_to_applicants` | bool | 开放给选手，新加的默认关 |
-| `state` | printer_state | |
+| `state` | printer_state | 准备中、打印中、暂停中、待清板，以及任务结束回到空闲，只能经打印任务映射表改（文档 1 §4A） |
 | `state_since` | timestamptz | |
 | `pause_reason` | pause_reason? | 只在 `PAUSED` 时有值 |
 | `maintenance_reason` | text? | 只在 `MAINTENANCE` 时有值（Q148） |
-| `current_dispatch_id` | uuid? | 正在占用它的派单；`CLEARING_REQUIRED` 时指向刚结束的那次 |
+| `current_job_id` | uuid? | 正在占用它的打印任务；`CLEARING_REQUIRED` 时指向刚结束的那个 |
 | `bed_type` | text? | 打印机报的板型；报不了时为空（R-DSP-09） |
 | `access_code_cipher` | text? | 浏览器用 daemon 公钥加密的访问码（RSA-OAEP），面板解不开 |
 | `access_code_key_fingerprint` | text? | 用哪把公钥加密的；和 daemon 公钥对不上时要重填 |
@@ -222,7 +223,7 @@
 | 列 | 说明 |
 | --- | --- |
 | `id` | |
-| `printer_id`、`dispatch_id?` | 报错时在打哪一单 |
+| `printer_id`、`job_id?` | 报错时在打哪个任务 |
 | `error_id` | 驱动生成的本次报错 ID；`(printer_id, error_id)` 唯一 |
 | `channel`、`vendor_code`、`severity`、`module?`、`message?`、`help_url?` | 驱动草稿 §6.2 |
 | `actions` | jsonb，可选的标准动作（R-PRT-14） |
@@ -260,7 +261,7 @@
 | `id` | uuid | Q140 |
 | `number` | bigint | 给人看的编号，全局递增，`#1234`；归档也不重置，不复用 |
 | `owner_id` | uuid | |
-| `status` | order_status | |
+| `status` | order_status | 存在订单上，不在读取时推算；已派单、打印中、失败、待入库只能经打印任务映射表改（文档 1 §4A） |
 | `sort_key` | bigint? | 排序值（INV-10）。第一次审核通过时分配（R-REV-01）；离开队列也保留，重打、开打前停下、开打未生效都用它回原位 |
 | `active_version_id` | uuid | 会被打印的版本 |
 | `pending_version_id` | uuid? | 等重审的版本；只在 `PENDING_REVIEW` 且 `sort_key` 不为空时有值 |
@@ -271,7 +272,7 @@
 | `revision_count` | int | 已用修改次数（R-VER-09） |
 | `model_switch_count` | int | 已用换机型次数（R-VER-10） |
 | `printer_id` | uuid? | 当前所在的打印机（已派单到待入库期间） |
-| `current_dispatch_id` | uuid? | 当前这次派单 |
+| `current_job_id` | uuid? | 当前的打印任务 |
 | `bypassed_since` | timestamptz? | 第一次被后面的单越过的时间（R-QUE-03）；派单时清空 |
 | `storage_slot` | text? | 入库暂存位（R-PCK-01） |
 | `store_photo_key` | text? | 入库照片 |
@@ -312,13 +313,16 @@
 - 不可变（INV-04）：触发器只允许把 `state` 从 `PENDING` 改成别的值一次，并同时写 `decided_*`、`reason`；不允许删除。
 - 版本里的文件被删（E-FILE `purged_at`）不影响版本行。
 
-### E-DSP `dispatches`
+### E-JOB `print_jobs`
 
-一次派单 = 把某个版本发到某台打印机的一次尝试。重打、开打前停下或开打未生效后再派，都是新的一行。
+派单是动作，打印任务是它产生的东西（Q218）：一次派单新建一个任务 = 把某个版本发到某台打印机的一次尝试。重打、开打前停下或开打未生效后再派，都是新的一行，旧的留着。打印机事件先落到当前任务上，任务的阶段变化按文档 1 §4A.2 的映射表在同一个事务里推动订单和打印机；订单和打印机的那几个状态不能绕过映射表直接写。
 
 | 列 | 说明 |
 | --- | --- |
 | `id` | 也是发给 daemon 的任务标识 `jobRef`（MSG-CMD-START） |
+| `attempt` | 这个订单的第几次打印，从 1 开始；订单详情的"打印记录"显示"第 N 次" |
+| `phase` | `job_phase`（文档 1 §4A.1） |
+| `phase_since` | |
 | `order_id`、`version_id`、`printer_id` | |
 | `dispatched_by`、`dispatched_at` | |
 | `suggested` | 是不是系统建议的那一单（R-DSP-02） |
@@ -329,10 +333,13 @@
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
-| `outcome?` | 结束方式；没结束为空。这次派单上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）；现场判没到（R-CMD-04）→ `NOT_ARRIVED` |
+| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）；现场判没到（R-CMD-04）→ `NOT_ARRIVED` |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
+| `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
+
+约束：`phase = 'ENDED'` ⇔ `outcome` 不为空。
 
 `mapping` 的结构：
 
@@ -354,15 +361,15 @@
 
 约束：
 
-- 一台打印机同一时间最多一个没结束的派单：`unique (printer_id) where outcome is null`（INV-02）。
-- 一个订单同一时间最多一个没结束的派单：`unique (order_id) where outcome is null`。
+- 一台打印机同一时间最多一个没结束的打印任务：`unique (printer_id) where phase <> 'ENDED'`（INV-02）。
+- 一个订单同一时间最多一个没结束的打印任务：`unique (order_id) where phase <> 'ENDED'`。
 
 ### E-CMD `daemon_commands`
 
 | 列 | 说明 |
 | --- | --- |
 | `id` | 命令 ID，也是协议里的 `commandId`（Q143） |
-| `daemon_id`、`printer_id?` | |
+| `daemon_id`、`printer_id?`、`job_id?` | 和任务有关的命令（开打、停止、跳过零件、处理报错）挂在任务上；锁也按任务记（Q218） |
 | `kind` | MSG-CMD 的类型，如 `job.start` |
 | `class` | `CONTROL` / `SETPOINT` / `READ`，由 `kind` 决定；`control` 按动作的 `category` 决定（MSG-CMD 表） |
 | `payload` | jsonb，不含任何凭据 |
@@ -399,14 +406,14 @@
 | `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
 | `actor_type`、`actor_id?` | |
 | `from_status?`、`to_status?` | 状态变化时有 |
-| `version_n?`、`dispatch_id?` | |
+| `version_n?`、`job_id?` | |
 | `note?` | 备注 |
 | `note_visible` | 选手可见（R-NTE-03，默认值按动作） |
 | `data` | jsonb，显示文案要用的参数（后退几位、跳过哪些零件……） |
 
 ### E-TL `timelapses`
 
-`id`、`dispatch_id`、`object_key`、`size_bytes`、`sha256`、`content_type`、`part`（一次打印可能分成几个文件）、`created_at`。随订单文件一起过期，保留天数 CFG-FIL-02（R-CAM-04）。
+`id`、`job_id`、`object_key`、`size_bytes`、`sha256`、`content_type`、`part`（一次打印可能分成几个文件）、`created_at`。随订单文件一起过期，保留天数 CFG-FIL-02（R-CAM-04）。
 
 ## 7. 配置
 
