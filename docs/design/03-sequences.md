@@ -131,8 +131,10 @@ sequenceDiagram
   D->>P: GET /daemon/v1/files/{fileId}（MSG-HTTP-02）
   P->>O: 签名读取
   D->>D: 核对 SHA-256
-  D->>R: FTPS 上传 pr-{jobRef8}.gcode.3mf，发开打指令（带映射）
-  D-->>P: printer.event job.staged（解锁计时从这里算，MSG-CMD-LOCK）
+  D->>R: FTPS 上传 pr-{jobRef8}.gcode.3mf（传输期间按进度锁住，不计时）
+  D->>D: 确认打印机空闲（不空闲回 rejected printer_busy，不发）
+  D->>R: 发开打指令（带映射）
+  D-->>P: printer.event job.staged（CFG-CMD-03 计时从这里开始，MSG-CMD-LOCK）
   R-->>D: 状态：准备中 → 打印中
   D-->>P: printer.event job.started
   P->>P: 订单 打印中（S-ORD-T11、R-PRT-01），打印机 打印中（S-PRN-T04），解锁
@@ -148,7 +150,8 @@ sequenceDiagram
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），outcome=SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
 | 15–17 | 锁着时有人点其他控制 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-03 |
-| 15–17 | 文件传完后过了 CFG-CMD-01 还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 订单回原位，outcome=NOT_ARRIVED）或继续等。**永远不自动重发开打** | R-CMD-02、R-CMD-04、INV-16 |
+| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 订单回原位，outcome=NOT_ARRIVED）或继续等。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、INV-16、MSG-CMD-START |
+| 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
 
