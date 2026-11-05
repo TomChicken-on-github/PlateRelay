@@ -145,6 +145,7 @@ sequenceDiagram
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
 | 5 | 别人已经派走 / 打印机不空闲 | 409 `state_conflict` | API-CONC-02 |
+| 5 | 打印机挂了任何标记（等待处理、停止请求中、失联、存储不足、daemon 需要升级）、在维护中或已停用 | 409 `printer_flagged`（params.flags）；建议和手动派单都一样，派单选项里也不可选 | R-DSP-15、Q233 |
 | 6 | 映射有 BLOCK，或有 WARN 没填原因 | 422，不派 | R-DSP-06、R-DSP-07 |
 | 6 | 板型和要求不一致没二次确认 | 422 | R-DSP-09 |
 | 8 | daemon 不在线 | 409 `printer_unreachable`，不建派单 | API-ASYNC-03 |
