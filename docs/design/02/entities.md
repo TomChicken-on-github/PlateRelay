@@ -54,13 +54,13 @@
 | --- | --- | --- |
 | `role` | `APPLICANT` `STAFF` `ADMIN` | E-USER（Q95；访客不是角色，是没登录） |
 | `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRINTER（R-PRT-03） |
-| `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` | E-PFLAG（S-FLG-ATTENTION） |
+| `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` `LATE_START` | E-PFLAG（S-FLG-ATTENTION） |
 | `version_kind` | `SUBMIT` `REPLACE` `REVISION` `RESTORE` | E-VER（R-VER-01、02、06） |
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
 | `process_node` | `SUBMIT` `REVIEW` `QUEUE` `PRINT` `STORE` `PICKUP` | E-REC（Q146） |
 | `job_phase` | `TRANSFERRING` `PREPARING` `PRINTING` `PAUSED` `ENDED` | E-JOB（文档 1 §4A，S-JOB-*） |
-| `job_outcome` | `SEND_FAILED` `START_FAILED` `NOT_ARRIVED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-JOB |
+| `job_outcome` | `SEND_FAILED` `START_FAILED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-JOB |
 | `command_status` | `QUEUED` `SENT` `ACCEPTED` `REJECTED` `EXPIRED` `FAILED` `DONE` | E-CMD（投递进度） |
 | `command_class` | `CONTROL` `SETPOINT` `READ` | E-CMD（R-CMD 控制命令 / 设定值命令 / 只读命令） |
 | `actor_type` | `USER` `SYSTEM` `DAEMON` `PRINTER` | E-REC、E-AUD |
@@ -333,7 +333,7 @@
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
-| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）；现场判没到（R-CMD-04）→ `NOT_ARRIVED` |
+| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止也走这条（R-CMD-04）。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
