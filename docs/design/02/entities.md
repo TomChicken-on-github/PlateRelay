@@ -159,6 +159,7 @@
 | `platform` | text | `linux` / `windows` / `docker`（F-DMN-06） |
 | `last_seen_at` | timestamptz? | |
 | `revoked_at` | timestamptz? | 吊销后拒绝连接；它名下的打印机挂失联 |
+| `key_alert_at` | timestamptz? | 疑似私钥泄露告警的时间（R-OPS-02，Q238）：10 分钟内被不同 IP 顶掉 3 次及以上时记下；管理员确认或吊销后清空。被顶掉的记录（时间、新旧 IP）写审计 |
 | `created_by` | uuid | |
 | `created_at` | timestamptz | |
 | `version` | int | |
@@ -505,3 +506,4 @@
 | E-MIG-05 | 改名 = expand 新列 + 双写 + 回填 + 下一版 contract 旧列；不直接 `RENAME`。 |
 | E-MIG-06 | 迁移前自动备份数据库，备份成功才迁移（F-OPS-03）。回滚 = 装回上一版程序；因为只有 expand，上一版能直接在新 schema 上跑，不需要反向迁移。 |
 | E-MIG-07 | 触发器、检查约束、部分唯一索引（INV-02、INV-04、INV-06）写在迁移里，CI 用真 PostgreSQL 跑迁移和这些约束的测试。 |
+| E-MIG-08 | 恢复备份用命令行（F-OPS-03）。恢复完、面板启动前，同一个命令里：所有打印机挂失联；所有没做完的 E-CMD（`QUEUED` `SENT` `ACCEPTED`）改为 `EXPIRED`，永不重发；记下"恢复到的时间"，管理员看到横幅；对象存储里没有 E-FILE 记录的文件交给没提交上传的清理（CFG-SUB-07）（R-OPS-01，Q237）。 |
