@@ -1165,7 +1165,8 @@ paths:
       tags: [queue]
       summary: 某单派到某台的可行性和映射建议
       x-permission: order:dispatch
-      x-rules: [R-DSP-03, R-DSP-04, R-DSP-05, R-DSP-06, R-DSP-07, R-DSP-09, R-DSP-10, R-DSP-12]
+      x-rules: [R-DSP-03, R-DSP-04, R-DSP-05, R-DSP-06, R-DSP-07, R-DSP-09, R-DSP-10, R-DSP-12, R-DSP-15]
+      description: 打印机挂了阻止派单的标记（文档 1 §4.2，所有标记都阻止）、在维护中或已停用时返回 409 printer_flagged，params.flags 列出原因（R-DSP-15，Q233）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - name: orderId
@@ -1185,8 +1186,8 @@ paths:
       summary: 派单
       x-permission: order:dispatch
       x-transitions: [S-ORD-T08, S-PRN-T03]
-      x-rules: [R-DSP-02, R-DSP-03, R-DSP-04, R-DSP-06, R-DSP-07, R-DSP-08, R-DSP-09, R-DSP-11, R-DSP-13, R-ARB-10]
-      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。
+      x-rules: [R-DSP-02, R-DSP-03, R-DSP-04, R-DSP-06, R-DSP-07, R-DSP-08, R-DSP-09, R-DSP-11, R-DSP-13, R-DSP-15, R-ARB-10]
+      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机挂了任何标记、在维护中或已停用返回 409 printer_flagged（params.flags），手动派单也一样（R-DSP-15，Q233）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
