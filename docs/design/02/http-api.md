@@ -75,7 +75,7 @@
 | 409 | `idempotency_key_reused` | 同一个幂等键带了不同的请求体（API-IDEM-04） |
 | 409 | `idempotency_in_progress` | 同一个幂等键的上一个请求还没处理完 |
 | 409 | `printer_unreachable` | 打印机的 daemon 不在线，命令发不出去 |
-| 409 | `command_pending` | 这台打印机有一条控制命令还没了结（R-CMD-05），`params.commandId` 是那条命令；停止不会收到这个错误 |
+| 409 | `command_pending` | 这台打印机有一条控制命令还没了结（R-CMD-05），`params.commandId` 是那条命令；停止和设定值命令（R-CMD-08）不会收到这个错误 |
 | 410 | `file_expired` | 文件已过保留期被删（R-PRT-10、R-FIL-01） |
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
