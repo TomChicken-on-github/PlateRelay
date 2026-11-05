@@ -148,10 +148,11 @@ sequenceDiagram
 | 6 | 映射有 BLOCK，或有 WARN 没填原因 | 422，不派 | R-DSP-06、R-DSP-07 |
 | 6 | 板型和要求不一致没二次确认 | 422 | R-DSP-09 |
 | 8 | daemon 不在线 | 409 `printer_unreachable`，不建派单 | API-ASYNC-03 |
+| 11–14 | 传文件期间有人点停止 | daemon 中止传输、删掉传了一半的文件、记下这个 jobRef 不再发开打，回 job.cancelled beforeStart=true → 任务结局 STOPPED_BEFORE_START，订单回原位（SEQ-04） | MSG-CMD-START、Q223 |
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
 | 15–17 | 锁着时有人点其他控制 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-03 |
-| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或停止解锁时刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）或继续等。之后打印机才报准备中或开打 → 不挂回订单，打印机进外部占用并挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、R-PRT-17、INV-16、MSG-CMD-START |
+| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒），任务 prepared_at 仍为空（打印机自己没报过准备中） | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或停止解锁时刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）或继续等。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、R-PRT-17、INV-16、MSG-CMD-START |
 | 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
@@ -189,6 +190,7 @@ sequenceDiagram
 | 7 | daemon 回 expired / rejected / failed，或到 CFG-CMD-01 打印机还在打这个任务 | 停止未生效：去掉停止请求中，待办提醒，可以再按停止（新命令）；daemon 断线就保持停止请求中，等重连对账 | R-CMD-05、Q213 |
 | 6 前 | 现场人员改主意 | 停止请求不能撤销，没有对应接口 | R-PRT-04、INV-16 |
 | 7 | 有人在打印机屏幕上停的（job.cancelled 不带 commandId） | 同样按 beforeStart 走；时间线记"在设备端停止"，现场人员可以用 addDeviceStopNote 补一条备注；照样拍结束照片 | R-CAM-11、Q217 |
+| 5 | 任务还在传文件（开打指令没发） | daemon 不碰打印机：中止传输、删掉自己传了一半的文件（INV-15）、先把"这个 jobRef 不再发开打"写进硬盘，再回 job.cancelled（带 commandId，beforeStart=true）→ 走"还没开打"分支。开打指令只有 daemon 发，以它为准 | MSG-CMD-START、Q223 |
 | 7 | 打印机在停下之前自己打完了 | 收到 job.finished → 按 SEQ-08 处理，去掉停止请求中 | P-01 |
 
 ## SEQ-05 取消订单
@@ -258,8 +260,8 @@ sequenceDiagram
   P->>P: 按 seq 去重、按 MSG-RECON-02 对账表推进
   alt 对得上
     P->>P: 补齐状态转换，去掉失联（R-PRT-07）
-  else 已派单、开打没见过准备中、打印机上没有这次任务的痕迹
-    P->>P: 开打未生效，订单回原位（R-PRT-16、R-DSP-08）
+  else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹
+    P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位（R-PRT-16、R-DSP-08）
   else 其他对不上
     P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
     S->>P: reconcileOrder（outcome=FAILED 或 PRINTED）
