@@ -176,8 +176,8 @@ interface ObjectStore {
 | `files/{fileId}` | 上传的 `.gcode.3mf` | R-SUB-10、R-FIL-01 |
 | `previews/{versionId}/` | 缩略图、零件图 | 永久（R-FIL-01） |
 | `store-photos/{orderId}/` | 入库照片 | 永久保留（Q183） |
-| `end-photos/{dispatchId}.jpg` | 结束照片（R-CAM-11） | 永久保留（Q217） |
-| `timelapses/{dispatchId}/{part}` | 延时摄影 | CFG-FIL-02 |
+| `end-photos/{jobId}.jpg` | 结束照片（R-CAM-11） | 永久保留（Q217） |
+| `timelapses/{jobId}/{part}` | 延时摄影 | CFG-FIL-02 |
 | `avatars/{userId}` | 头像 | 换头像时 |
 | `exports/{archiveId}.zip` | 归档导出 | 管理员手动删 |
 
