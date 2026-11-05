@@ -1394,7 +1394,7 @@ paths:
       x-permission: printer:stop
       x-transitions: [S-ORD-T09, S-ORD-T13]
       x-rules: [R-PRT-04, R-PRT-05, R-CMD-03, R-CMD-04, P-01]
-      description: 前端先让人选原因并二次确认。准备中、打印中、暂停中都发 job.stop、挂停止请求中，不受控制命令锁限制，停止请求中也能再发（Q203）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或解锁时刷新为空闲且无这次任务痕迹后才回原位（R-CMD-04），没有单独的"判为没到"接口（Q220）。
+      description: 前端先让人选原因并二次确认。准备中（含任务还在传文件，daemon 中止传输并确认没开打，Q223）、打印中、暂停中都发 job.stop、挂停止请求中，不受控制命令锁限制，停止请求中也能再发（Q203）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或解锁时刷新为空闲且无这次任务痕迹后才回原位（R-CMD-04），没有单独的"判为没到"接口（Q220）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}

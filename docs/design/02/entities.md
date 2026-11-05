@@ -262,7 +262,7 @@
 | `number` | bigint | 给人看的编号，全局递增，`#1234`；归档也不重置，不复用 |
 | `owner_id` | uuid | |
 | `status` | order_status | 存在订单上，不在读取时推算；已派单、打印中、失败、待入库只能经打印任务映射表改（文档 1 §4A） |
-| `sort_key` | bigint? | 排序值（INV-10）。第一次审核通过时分配（R-REV-01）；离开队列也保留，重打、开打前停下、开打未生效都用它回原位 |
+| `sort_key` | bigint? | 排序值（INV-10）。第一次审核通过时分配（R-REV-01）；离开队列也保留，重打、开打前停止、下发失败都用它回原位 |
 | `active_version_id` | uuid | 会被打印的版本 |
 | `pending_version_id` | uuid? | 等重审的版本；只在 `PENDING_REVIEW` 且 `sort_key` 不为空时有值 |
 | `colour_pref` | colour_pref | |
@@ -315,7 +315,7 @@
 
 ### E-JOB `print_jobs`
 
-派单是动作，打印任务是它产生的东西（Q218）：一次派单新建一个任务 = 把某个版本发到某台打印机的一次尝试。重打、开打前停下或开打未生效后再派，都是新的一行，旧的留着。打印机事件先落到当前任务上，任务的阶段变化按文档 1 §4A.2 的映射表在同一个事务里推动订单和打印机；订单和打印机的那几个状态不能绕过映射表直接写。
+派单是动作，打印任务是它产生的东西（Q218）：一次派单新建一个任务 = 把某个版本发到某台打印机的一次尝试。重打、开打前停止或下发失败后再派，都是新的一行，旧的留着。打印机事件先落到当前任务上，任务的阶段变化按文档 1 §4A.2 的映射表在同一个事务里推动订单和打印机；订单和打印机的那几个状态不能绕过映射表直接写。
 
 | 列 | 说明 |
 | --- | --- |
@@ -332,8 +332,9 @@
 | `mapping_settings_version` | 当时"映射"分区的设置版本（R-DSP-13） |
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
+| `prepared_at?` | 打印机自己第一次报这个 jobRef 准备中的时间（`job.staged` 不算）。不是阶段，只给 R-CMD-04 和对账（R-PRT-16、MSG-RECON）判断"开打到没到"用（Q223） |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
-| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止也走这条（R-CMD-04）。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
+| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。R-PRT-16 自动判的 → `SEND_FAILED`。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |

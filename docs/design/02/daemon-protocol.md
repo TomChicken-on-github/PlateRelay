@@ -200,7 +200,7 @@ daemon                                  面板
 | `kind` | `params` | 有效期（送达） | 类 | 什么上报算"状态变化"，提前解锁（MSG-CMD-LOCK） | 对应 |
 | --- | --- | --- | --- | --- | --- |
 | `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中、开始打印或报开打前失败；传文件见 MSG-CMD-START | S-ORD-T08 |
-| `job.stop` | `{ jobRef }` | 60 秒 | 控制（不受锁限制） | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。准备中和打印中都用它；没有单独的撤回命令（Q203、Q207） | R-PRT-04、R-PRT-05 |
+| `job.stop` | `{ jobRef }` | 60 秒 | 控制（不受锁限制） | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。传文件、准备中和打印中都用它；没有单独的撤回命令（Q203、Q207）。传文件期间收到：见 MSG-CMD-START，daemon 直接回 `job.cancelled { beforeStart: true }`（Q223） | R-PRT-04、R-PRT-05 |
 | `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表变了 | F-SUB-07 |
 | `error.resolve` | `{ errorId, action }` | 60 秒 | 控制；动作是"停止"时按 `job.stop` 处理，不受锁限制 | 这条报错从上报里消失，或打印机状态变了 | R-PRT-14 |
 | `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态变了；设定值不锁，界面显示上报的值（R-CMD-06） | R-PRT-15 |
@@ -234,6 +234,7 @@ daemon                                  面板
 - 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发）。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
 - 发开打指令之前，daemon 先确认打印机上报的是空闲；在准备中、打印中或别的非空闲状态时回 `rejected`（`code: printer_busy`），什么都不发，按下发失败处理。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
+- 传文件期间（开打指令还没发）收到这个 `jobRef` 的 `job.stop`：daemon 中止下载或上传，删掉自己传了一半的文件（INV-15），把"这个 `jobRef` 不再发开打"和命令 ID 一样先写进硬盘（R-CMD-08），然后回 `job.cancelled { commandId, beforeStart: true }`。面板把任务结束为 `STOPPED_BEFORE_START`，订单回原位。开打指令只有 daemon 发，所以这里以 daemon 为准，不用等打印机（Q223）。
 - 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
@@ -260,12 +261,12 @@ daemon                                  面板
 | --- | --- | --- |
 | 已派单 | 在打这个 `jobRef` | 补一条"开始打印"，S-ORD-T11 |
 | 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录 | 按结束记录补事件（打完或失败） |
-| 已派单，开打从没见过准备中 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 开打未生效，订单回原位（R-PRT-16、R-DSP-08） |
-| 已派单 / 打印中 | 空闲，找不到结束记录，但有痕迹或开打见过准备中 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
+| 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
+| 已派单 / 打印中 | 空闲，找不到结束记录，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
 | 空闲 | 在打一个对不上的任务 | 外部占用（R-PRT-11） |
 | 停止请求中 | 已经停了 | 按停止确认处理 |
-| 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单；打印机进外部占用，挂等待处理，原因 `LATE_START`（R-PRT-17） |
+| 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单。打印机没有当前任务 → 外部占用；已有别的当前任务 → 打印机状态不变。都挂等待处理，原因 `LATE_START`（R-PRT-17） |
 
 不只是重连：在线时 `printer.event` 报了一个已结束任务的准备中或开打，面板也按上表最后一行处理（R-PRT-17）。
 
