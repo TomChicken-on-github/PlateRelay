@@ -75,7 +75,7 @@
 | 409 | `idempotency_key_reused` | 同一个幂等键带了不同的请求体（API-IDEM-04） |
 | 409 | `idempotency_in_progress` | 同一个幂等键的上一个请求还没处理完 |
 | 409 | `printer_unreachable` | 打印机的 daemon 不在线，命令发不出去 |
-| 409 | `command_pending` | 这台打印机有一条控制命令还没了结（R-CMD-05），`params.commandId` 是那条命令；停止和设定值命令（R-CMD-08）不会收到这个错误 |
+| 409 | `command_pending` | 这台打印机上一条控制命令还没解锁（R-CMD-03），`params.commandId`、`params.unlockAt`；停止和设定值命令（R-CMD-06）不会收到这个错误 |
 | 410 | `file_expired` | 文件已过保留期被删（R-PRT-10、R-FIL-01） |
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
@@ -123,9 +123,9 @@
 
 | 编号 | 约定 |
 | --- | --- |
-| API-ASYNC-01 | 会发命令给打印机的接口（派单、停止、撤回、处理报错、设备控制、跳过零件、刷新）只负责"记下请求并发出命令"，返回 `202 Accepted` 和命令 ID（E-CMD）。 |
-| API-ASYNC-02 | 返回 202 时，业务状态最多进入中间态（停止请求中、撤回请求中），中间态不能撤销（R-CMD-05），不进入打印机确认后才能进的状态（P-01）。真正的结果通过实时推送（API-RT）和打印机上报到达。 |
-| API-ASYNC-04 | 打印机卡片和详情带 `pendingCommand`（没了结的控制命令：类型、发出时间、确认期限），界面据此显示"已发送，等待打印机确认"并置灰其他控制按钮（R-CMD-01、R-CMD-05）。了结时推 `command.updated` 和 `printer.updated`。 |
+| API-ASYNC-01 | 会发命令给打印机的接口（派单、停止、处理报错、设备控制、跳过零件、刷新）只负责"记下请求并发出命令"，返回 `202 Accepted` 和命令 ID（E-CMD）。 |
+| API-ASYNC-02 | 返回 202 时，业务状态最多进入中间态（停止请求中），中间态不能撤销（R-PRT-04），不进入打印机确认后才能进的状态（P-01）。真正的结果通过实时推送（API-RT）和打印机上报到达。 |
+| API-ASYNC-04 | 打印机卡片和详情带 `pendingCommand`（锁着的那条控制命令：类型、发出时间、解锁时间）和 `pendingStop`（最近一次还没确认的停止）。界面据此让点过的按钮变灰并转加载圆环、置灰其他控制按钮（R-CMD-01、R-CMD-03）；解锁时推 `command.updated` 和 `printer.updated`（Q211、Q215）。 |
 | API-ASYNC-03 | 打印机的 daemon 不在线时直接返回 409 `printer_unreachable`，不排队等它上线；命令有效期见 MSG-CMD-TTL。 |
 
 ## 9. 实时推送

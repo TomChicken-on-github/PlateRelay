@@ -75,7 +75,7 @@ daemon                                  面板
 | MSG-ENV-01 | 每条消息都有唯一 `id`（F-DMN-03）。 |
 | MSG-ENV-02 | 需要确认的消息：除了 `ack`、`ping`、`pong`、`printer.snapshot` 以外的全部。接收方处理完（面板是提交了数据库事务）才回 `ack { id }`。 |
 | MSG-ENV-03 | 发送方把没收到 `ack` 的消息留在发件箱里，重连后按原顺序重发。daemon 的发件箱落盘（重启不丢），最多留 24 小时或 10000 条，超了丢最老的并记日志（Q176）。面板的发件箱就是 E-CMD。 |
-| MSG-ENV-04 | 接收方按 `id` 去重：面板记 24 小时内处理过的 ID（E-IDEM 的 daemon 部分），daemon 记最近 1000 个命令 ID。重复的消息直接回 `ack`，不再处理。 |
+| MSG-ENV-04 | 接收方按 `id` 去重：面板记 24 小时内处理过的 ID（E-IDEM 的 daemon 部分）。daemon 收到命令后、**开始执行之前**，先把命令 ID 写进硬盘，留到这条命令的 `expiresAt` 过去为止（之后再来只会回 `expired`），保证同一条命令最多执行一次，daemon 重启也一样（Q206、R-CMD-08）。重复的消息直接回 `ack`，不再处理。 |
 | MSG-ENV-05 | `printer.snapshot` 不确认、不重发，因为下一份会覆盖它；断线期间只发最新一份。 |
 | MSG-ENV-06 | 同一台打印机的消息带 `bootId` 和 `seq`（这台打印机在这次启动里单调递增）。面板丢掉 `seq` 比已处理的还小的快照；事件按 `seq` 顺序处理，中间有缺口时等重发，等 10 秒还没到就要一份快照对账（Q177）。 |
 
@@ -84,7 +84,7 @@ daemon                                  面板
 | 编号 | 约定 |
 | --- | --- |
 | MSG-HB-01 | 双方每 `heartbeatSeconds`（默认 15 秒，Q174）发 `ping`，对方回 `pong`。 |
-| MSG-HB-02 | 面板 3 个周期（45 秒）没收到任何消息，就认为 daemon 断了：它名下没任务的打印机进离线，有任务的挂失联（F-DMN-04、S-FLG-LOST）。 |
+| MSG-HB-02 | 面板 3 个周期（45 秒）没收到任何消息，就认为 daemon 断了：它名下空闲的打印机进离线，其他状态（包括待清板、维护中）保持原状态并挂失联（F-DMN-04、S-FLG-LOST、Q208）。 |
 | MSG-HB-03 | daemon 连得上面板、但连不上某台打印机，用 `printer.event { kind: "connection.down" }` 报，面板按同样的规则处理那一台（S-PRN-T02、S-FLG-LOST）。 |
 
 ## 7. daemon → 面板
@@ -141,7 +141,7 @@ daemon                                  面板
 | `job.resumed` | | S-PRN-T07 |
 | `job.finished` | | S-ORD-T12、S-PRN-T08 |
 | `job.failed` | `{ reason, beforeStart }` | 开打前：S-ORD-T09；开打后：S-ORD-T13 |
-| `job.cancelled` | `{ commandId? }` | 带面板的命令 ID = 停止或撤回被确认（S-FLG-STOPPING / RECALLING 去掉）；没有 = 有人在打印机屏幕上停的 |
+| `job.cancelled` | `{ commandId?, beforeStart }` | 带面板停止命令的 ID = 停止被确认（S-FLG-STOPPING 去掉）；没有 = 有人在打印机屏幕上停的。订单去向只看 `beforeStart`：开打前停下 → S-ORD-T09，开打后 → S-ORD-T13 |
 | `job.parts_skipped` | `{ partIds }` | 记一条"跳过零件"记录 |
 | `external.started` | `{ name }` | S-PRN-T09，R-PRT-11 |
 | `external.ended` | `{ result }` | S-PRN-T10 |
@@ -197,14 +197,13 @@ daemon                                  面板
 { "commandId": "…", "printerId": "…", "kind": "job.start", "expiresAt": "2026-11-04T12:01:00Z", "params": {} }
 ```
 
-| `kind` | `params` | 有效期（送达） | 类 | 确认看什么（MSG-CMD-CONF） | 对应 |
+| `kind` | `params` | 有效期（送达） | 类 | 什么上报算"状态变化"，提前解锁（MSG-CMD-LOCK） | 对应 |
 | --- | --- | --- | --- | --- | --- |
-| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中，任务文件是 `pr-<jobRef8>`。之后有没有开打不归命令管（R-CMD-02） | S-ORD-T08 |
-| `job.stop` | `{ jobRef }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束、机器不在打 | R-PRT-04 |
-| `job.recall` | `{ jobRef }` | 60 秒 | 控制 | 打印机不在打这个 `jobRef`。删文件是之后的清理（INV-15），不作为条件 | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
-| `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表包含这些零件 | F-SUB-07 |
-| `error.resolve` | `{ errorId, action }` | 60 秒 | 控制 | 这条报错从打印机上报里消失，或状态变成动作对应的结果 | R-PRT-14 |
-| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态和动作一致；设定值不确认，界面显示上报的值（R-CMD-08） | R-PRT-15 |
+| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中、开始打印或报开打前失败；传文件见 MSG-CMD-START | S-ORD-T08 |
+| `job.stop` | `{ jobRef }` | 60 秒 | 控制（不受锁限制） | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。准备中和打印中都用它；没有单独的撤回命令（Q203、Q207） | R-PRT-04、R-PRT-05 |
+| `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表变了 | F-SUB-07 |
+| `error.resolve` | `{ errorId, action }` | 60 秒 | 控制；动作是"停止"时按 `job.stop` 处理，不受锁限制 | 这条报错从上报里消失，或打印机状态变了 | R-PRT-14 |
+| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态变了；设定值不锁，界面显示上报的值（R-CMD-06） | R-PRT-15 |
 | `refresh` | `{}` | 10 秒 | 只读 | — | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
 | `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | 只读 | — | MSG-MEDIA、R-CAM-06 |
 | `camera.close` | `{}` | 30 秒 | 只读 | — | R-CAM-06 |
@@ -216,23 +215,30 @@ daemon                                  面板
 
 - 有效期指"必须在这之前开始执行"。`job.start` 下载文件的时间不算在内，开始下载就算开始执行。
 - daemon 按 `welcome.serverTime` 算出和面板的时钟差，用面板的时间判断过期。收到时已经过期的，回 `expired`，不执行。这样断线很久之后，积压的旧"开打"不会突然被执行。
-- daemon 回 `expired` 是事实（它保证过期的命令永远不再执行），控制命令据此记 `NOT_EFFECTIVE`：`job.start` = 下发失败，订单回原位（R-DSP-08）；`job.stop`、`job.recall` = 去掉停止请求中、撤回请求中，订单维持原状态。
-- 面板自己算出过了 `expiresAt` 但没收到回复，**不算事实**：daemon 可能在过期前已经执行、只是回复还在它的发件箱里（MSG-ENV-03）。这时只把 `status` 记成 `EXPIRED` 方便排查，`outcome` 仍是 `PENDING`，按 MSG-CMD-CONF 等事实。
+- daemon 回 `expired` 是事实（它保证过期的命令永远不再执行）：`job.start` = 下发失败，订单回原位（R-DSP-08）；`job.stop` = 停止未生效，去掉停止请求中（R-CMD-05）。
+- 面板自己算出过了 `expiresAt` 但没收到回复，**不算事实**：daemon 可能在过期前已经执行、只是回复还在它的发件箱里（MSG-ENV-03）。这时只把 `status` 记成 `EXPIRED` 方便排查，订单和打印机状态等打印机上报。
 
-**MSG-CMD-CONF**（R-CMD、Q201）：
+**MSG-CMD-LOCK**（R-CMD-01–03、Q205、Q215）：
 
-- 控制命令记 `confirm_by` = 到达打印机的时间 + CFG-CMD-01（默认 2 分钟）。`job.start` 从 `job.staged`（文件传完）起算，传文件的时间不算；传文件本身出错走 `command.result failed`。
-- 期限内收到符合上表"确认看什么"的打印机上报，记 `EXECUTED`；收到证明没生效的上报（如开打后打印机空闲、没有这个 `jobRef`），或 daemon 回 `expired` / `rejected`，记 `NOT_EFFECTIVE`。`failed` 也算没生效，固件原话照样显示（R-PRT-15）。
-- 到 `confirm_by` 还是 `PENDING`，面板自动发一条 `refresh`（不占手动刷新限频），用刷新得到的完整状态再判一次（R-CMD-03）。
-- 刷新也判断不了（daemon 断线、刷新没回），保持 `PENDING`，挂待办提醒一次（R-CMD-04）；重连后对账（MSG-RECON）时一并了结，对不上按 R-PRT-08 由人判。现场人员也可以在机器前确认后了结（R-CMD-09，`settled_by = on_site`），不发任何命令。
-- 设定值命令（R-CMD-08）不建 `confirm_by`、不进锁：`params` 一律是目标值，不用切换或加减；连发以最后一条为准。
-- 面板永远不为了"解锁"而发反向命令或重发（INV-16）。`job.start` 未生效后，现场人员重新派单是一条新命令、新的 `commandId`，`jobRef` 照旧。
+- 面板只追踪命令送达（`status`），不判断命令"执行了没有"。订单和打印机状态只跟着打印机上报的事件走（P-01）。
+- 控制命令发出后锁住这台打印机的其他控制命令（停止和设定值除外）。`unlock_at` = 到达打印机的时间 + CFG-CMD-01（默认 10 秒）。"到达"= daemon 回 `accepted`，也就是命令已经发给了打印机；`job.start` 从 `job.staged` 算（开打指令已发出）。还没收到任何回复时，`unlock_at` = `expiresAt` + CFG-CMD-01：到了 `expiresAt`，daemon 要么已经开始执行，要么保证永远不执行，所以这个时间之前不会解锁。
+- 提前解锁：收到上表"状态变化"那一栏的上报，或 daemon 回 `rejected`、`expired`、`failed`。
+- 按时间解锁时界面提示"上一条命令已发出 N 秒，请先看摄像头确认"，要不要再发由人决定，再发是新命令、新 `commandId`（R-CMD-02）。`job.start` 到期还没进准备中，走 R-CMD-04。
+- 设定值命令（R-CMD-06）不进锁：`params` 一律是目标值，不用切换或加减；连发以最后一条为准。
+- 面板永远不为了"解锁"而发反向命令或再发（INV-16）。同一 `commandId` 从发件箱补投不算再发（MSG-ENV-04）。
+
+**MSG-CMD-START**（传文件，Q205）：
+
+- daemon 收到 `job.start` 开始下载就回 `accepted`；文件放到打印机上、开打指令已发出后发 `job.staged`。
+- 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发）。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
+- 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
+- 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
 
 ### MSG-CFG `config.update`
 
-面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, discoveryEnabled }`。对应 CFG-CAM-02、03、07、08、09。
+面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, discoveryEnabled }`。对应 CFG-CAM-02、03、07、08、09 和 CFG-CMD-02。
 
 ### 其他
 
@@ -252,7 +258,8 @@ daemon                                  面板
 | --- | --- | --- |
 | 已派单 | 在打这个 `jobRef` | 补一条"开始打印"，S-ORD-T11 |
 | 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录 | 按结束记录补事件（打完或失败） |
-| 已派单 / 打印中 | 空闲，找不到结束记录 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
+| 已派单，开打从没见过准备中 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef8>` 文件、打完 / 失败 / 已取消状态） | 开打未生效，订单回原位（R-PRT-16、R-DSP-08） |
+| 已派单 / 打印中 | 空闲，找不到结束记录，但有痕迹或开打见过准备中 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
 | 空闲 | 在打一个对不上的任务 | 外部占用（R-PRT-11） |
 | 停止请求中 | 已经停了 | 按停止确认处理 |

@@ -41,10 +41,10 @@
 | --- | --- | --- | --- | --- |
 | `OFFLINE` | S-PRN-OFFLINE | | `ATTENTION` | S-FLG-ATTENTION |
 | `IDLE` | S-PRN-IDLE | | `STOPPING` | S-FLG-STOPPING |
-| `PREPARING` | S-PRN-PREPARING | | `RECALLING` | S-FLG-RECALLING |
-| `PRINTING` | S-PRN-PRINTING | | `LOST` | S-FLG-LOST |
-| `PAUSED` | S-PRN-PAUSED | | `STORAGE_LOW` | S-FLG-STORAGE |
-| `CLEARING_REQUIRED` | S-PRN-CLEARING | | `DAEMON_UPGRADE` | S-FLG-UPGRADE |
+| `PREPARING` | S-PRN-PREPARING | | `LOST` | S-FLG-LOST |
+| `PRINTING` | S-PRN-PRINTING | | `STORAGE_LOW` | S-FLG-STORAGE |
+| `PAUSED` | S-PRN-PAUSED | | `DAEMON_UPGRADE` | S-FLG-UPGRADE |
+| `CLEARING_REQUIRED` | S-PRN-CLEARING | | | |
 | `EXTERNAL` | S-PRN-EXTERNAL | | | |
 | `MAINTENANCE` | S-PRN-MAINT | | | |
 
@@ -59,9 +59,8 @@
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
 | `process_node` | `SUBMIT` `REVIEW` `QUEUE` `PRINT` `STORE` `PICKUP` | E-REC（Q146） |
-| `dispatch_outcome` | `RECALLED` `SEND_FAILED` `START_FAILED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` `CANCELLED` | E-DSP |
+| `dispatch_outcome` | `SEND_FAILED` `START_FAILED` `NOT_ARRIVED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-DSP |
 | `command_status` | `QUEUED` `SENT` `ACCEPTED` `REJECTED` `EXPIRED` `FAILED` `DONE` | E-CMD（投递进度） |
-| `command_outcome` | `PENDING` `EXECUTED` `NOT_EFFECTIVE` | E-CMD（R-CMD-01：已发送等待确认 / 已执行 / 未生效） |
 | `command_class` | `CONTROL` `SETPOINT` `READ` | E-CMD（R-CMD 控制命令 / 设定值命令 / 只读命令） |
 | `actor_type` | `USER` `SYSTEM` `DAEMON` `PRINTER` | E-REC、E-AUD |
 
@@ -210,7 +209,6 @@
 | 标记 | `data` |
 | --- | --- |
 | `STOPPING` | `{ commandId, requestedBy, reasonText }` |
-| `RECALLING` | `{ commandId, purpose: "CANCEL" \| "REVISE" \| "STOP_BEFORE_START" }` |
 | `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }` |
 | `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
@@ -263,7 +261,7 @@
 | `number` | bigint | 给人看的编号，全局递增，`#1234`；归档也不重置，不复用 |
 | `owner_id` | uuid | |
 | `status` | order_status | |
-| `sort_key` | bigint? | 排序值（INV-10）。第一次审核通过时分配（R-REV-01）；离开队列也保留，重打和撤回用它回原位 |
+| `sort_key` | bigint? | 排序值（INV-10）。第一次审核通过时分配（R-REV-01）；离开队列也保留，重打、开打前停下、开打未生效都用它回原位 |
 | `active_version_id` | uuid | 会被打印的版本 |
 | `pending_version_id` | uuid? | 等重审的版本；只在 `PENDING_REVIEW` 且 `sort_key` 不为空时有值 |
 | `colour_pref` | colour_pref | |
@@ -278,7 +276,8 @@
 | `storage_slot` | text? | 入库暂存位（R-PCK-01） |
 | `store_photo_key` | text? | 入库照片 |
 | `submitted_at` | timestamptz | |
-| `closed_at` | timestamptz? | 进终态的时间；文件保留期从这里算（R-FIL-01）。失败从进失败时开始算（R-FIL-02） |
+| `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
+| `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
 | `files_purged_at` | timestamptz? | 文件已删除；之后不能重打（R-PRT-10） |
 
 约束：
@@ -299,7 +298,7 @@
 | `id` | |
 | `order_id`、`n` | `n` 从 1 开始；`(order_id, n)` 唯一。界面显示"第 N 版" |
 | `kind` | `SUBMIT` / `REPLACE`（第一次审核前替换，R-VER-01）/ `REVISION` / `RESTORE`（R-VER-06） |
-| `restored_from_id?` | `RESTORE` 时指向被恢复的版本 |
+| `restored_from_id?` | `RESTORE` 时指向被恢复的版本；只能是曾经 `APPROVED` 的版本（R-VER-06） |
 | `state` | `PENDING` / `APPROVED` / `REJECTED` / `WITHDRAWN` / `REPLACED` |
 | `file_id`、`plate_index`、`plate_count`、`plate_name` | 一单一盘（INV-03） |
 | `model_id`、`model_name`、`nozzles`、`filaments`、`print_seconds`、`weight_grams` | 从 E-CHK 复制过来，之后不再变 |
@@ -315,7 +314,7 @@
 
 ### E-DSP `dispatches`
 
-一次派单 = 把某个版本发到某台打印机的一次尝试。重打、撤回后再派，都是新的一行。
+一次派单 = 把某个版本发到某台打印机的一次尝试。重打、开打前停下或开打未生效后再派，都是新的一行。
 
 | 列 | 说明 |
 | --- | --- |
@@ -330,7 +329,7 @@
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
-| `outcome?` | 结束方式；没结束为空 |
+| `outcome?` | 结束方式；没结束为空。这次派单上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）；现场判没到（R-CMD-04）→ `NOT_ARRIVED` |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID |
 
@@ -369,16 +368,15 @@
 | `requested_by?` | 用户；系统发起的为空 |
 | `created_at`、`expires_at` | 有效期见 MSG-CMD-TTL |
 | `status` | `QUEUED` → `SENT` → `ACCEPTED` / `REJECTED` / `EXPIRED` / `FAILED` → `DONE`：投递进度，daemon 回什么记什么 |
-| `outcome` | 控制命令的业务结果，`PENDING` → `EXECUTED` / `NOT_EFFECTIVE`，只按事实改（R-CMD-02、MSG-CMD-CONF）；只读命令建好就是空 |
-| `confirm_by?` | 控制命令的确认期限（CFG-CMD-01），开打从文件传完（`job.staged`）起算，到期触发自动刷新（R-CMD-03） |
-| `settled_by?` | 了结它的事实：`printer_report`、`refresh`、`daemon_expired`、`daemon_rejected`、`reconcile`、`on_site`（R-CMD-09，另记确认人和看到了什么），以及对应的事件 ID |
+| `unlock_at?` | 控制命令的解锁时间（R-CMD-02，MSG-CMD-LOCK）：到达打印机 + CFG-CMD-01；还没收到回复时 = `expires_at` + CFG-CMD-01 |
+| `unlocked_at?`、`unlocked_by?` | 实际解锁的时间和原因：`printer_report`（打印机上报了状态变化）、`timeout`、`daemon_result`（回了 `rejected` / `expired` / `failed`） |
 | `result` | jsonb，daemon 回报的原样结果（含固件拒绝原因，R-PRT-15） |
 | `finished_at?` | |
 
 `ACCEPTED` 只表示打印机收下了命令；业务状态只跟着打印机上报的事件走（P-01）。
 
-- 一台打印机同一时间最多一条没了结的控制命令，停止除外（R-CMD-05、INV-16）：`unique (printer_id) where class = 'CONTROL' and outcome = 'PENDING' and kind <> 'job.stop'`。发停止不受这条约束，也不解除别的命令的锁；它了结后，其他没了结的命令照样按事实了结。
-- `outcome` 一旦离开 `PENDING` 就不再改。
+- 一台打印机同一时间最多一条锁着的控制命令，停止除外（R-CMD-03、INV-16）：`unique (printer_id) where class = 'CONTROL' and kind <> 'job.stop' and unlocked_at is null`。到了 `unlock_at` 由面板的定时任务写 `unlocked_at`。发停止不受这条约束，也不解除别的命令的锁。
+- 不记命令"执行了没有"（Q215）：订单和打印机状态只跟着打印机上报的事件走（P-01）。
 
 ### E-PCK `pickup_codes`
 
@@ -397,7 +395,7 @@
 | `id` | |
 | `order_id`、`at` | |
 | `node` | process_node，按文档 1 §5.8 的归属表 |
-| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.recalled`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
+| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
 | `actor_type`、`actor_id?` | |
 | `from_status?`、`to_status?` | 状态变化时有 |
 | `version_n?`、`dispatch_id?` | |
