@@ -2769,9 +2769,10 @@ components:
             description: 'x-requires: order:review（R-VIS-08）'
           storage:
             type: [object, 'null']
+            description: 入库信息。入库照片订单本人也能看，前端放在入库节点下（R-VIS-09）
             properties:
               slot: {type: string}
-              photoUrl: {type: [string, 'null'], format: uri}
+              photoUrl: {type: [string, 'null'], format: uri, description: 短期签名链接（API-FILE-02），本人、现场人员、管理员可见（R-VIS-09）}
             required: [slot, photoUrl]
             additionalProperties: false
           parts:
@@ -2790,7 +2791,7 @@ components:
             description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
           printJobs:
             type: array
-            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示
+            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下（R-VIS-09）
             items:
               type: object
               properties:
