@@ -171,6 +171,7 @@ sequenceDiagram
   D->>R: 停止
   R-->>D: 状态：已停止
   D-->>P: printer.event job.cancelled（带 commandId，beforeStart）
+  D->>P: 结束照片（R-CAM-11、MSG-HTTP-05）
   alt 已经开打
     P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08）
   else 还没开打
@@ -186,6 +187,7 @@ sequenceDiagram
 | 1 | 开打或别的控制命令还锁着 | 停止照常可发，发的同样是 job.stop；订单去向按打印机上报定 | R-CMD-03、Q203 |
 | 7 | daemon 回 expired / rejected / failed，或到 CFG-CMD-01 打印机还在打这个任务 | 停止未生效：去掉停止请求中，待办提醒，可以再按停止（新命令）；daemon 断线就保持停止请求中，等重连对账 | R-CMD-05、Q213 |
 | 6 前 | 现场人员改主意 | 停止请求不能撤销，没有对应接口 | R-PRT-04、INV-16 |
+| 7 | 有人在打印机屏幕上停的（job.cancelled 不带 commandId） | 同样按 beforeStart 走；时间线记"在设备端停止"，现场人员可以用 addDeviceStopNote 补一条备注；照样拍结束照片 | R-CAM-11、Q217 |
 | 7 | 打印机在停下之前自己打完了 | 收到 job.finished → 按 SEQ-08 处理，去掉停止请求中 | P-01 |
 
 ## SEQ-05 取消订单
@@ -285,6 +287,9 @@ sequenceDiagram
   actor A as 申请者
   R-->>D: 打印完成
   D-->>P: printer.event job.finished
+  D->>D: 立刻拍结束照片（R-CAM-11）
+  D->>P: PUT /daemon/v1/end-photos/{jobRef}（MSG-HTTP-05）
+  P->>O: put end-photos/{dispatchId}.jpg，永久保留
   P->>P: 订单 待入库（S-ORD-T12），打印机 待清板（S-PRN-T08、INV-01）
   P-->>S: 通知"打完待入库"
   D->>R: 删掉下发的 3mf（MSG-JOBREF-03）
