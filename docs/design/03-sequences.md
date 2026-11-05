@@ -261,6 +261,8 @@ sequenceDiagram
   P->>P: 按 seq 去重、按 MSG-RECON-02 对账表推进
   alt 对得上
     P->>P: 补齐状态转换，去掉失联（R-PRT-07）
+  else 打印机最后一个任务是这个 jobRef，停在打完或失败
+    P->>P: 按打印机事实结束任务 FINISHED / FAILED，不要人判（MSG-RECON-02、Q234）
   else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹
     P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位（R-PRT-16、R-DSP-08）
   else 其他对不上
