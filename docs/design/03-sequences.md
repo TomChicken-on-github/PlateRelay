@@ -9,6 +9,7 @@
 - **本文不新增规则**（Q199、P-06）。每一步都标出来源编号：状态转换 `S-`、规则 `R-`、协议 `MSG-`、接口约定 `API-`、操作 ID（openapi.yaml 的 `operationId`）。画图时发现上层有缺口，先改上层。
 - 每个流程一张 Mermaid 时序图，只画正常路径；出错的情况写在图下面的"失败分支"表里。
 - 图里省略了每个写请求都带的 `Idempotency-Key`（API-IDEM）和预期状态（API-CONC-02），除非它决定了结果。
+- 打印机事件先落到当前打印任务（E-JOB），再按文档 1 §4A.2 的映射表在同一个事务里改订单和打印机。图里写"订单 X、打印机 Y"的地方都是这一步。
 - 参与者：
 
 | 简称 | 是谁 |
@@ -123,9 +124,9 @@ sequenceDiagram
   P->>P: 可行性、映射建议、板型、按当前限值复核（R-DSP-03..12）
   P-->>S: DispatchOptions
   S->>P: dispatchOrder（mapping，原因，bedType）
-  P->>P: 重新校验映射（R-DSP-06、R-DSP-07），排队锁内建 E-DSP
-  P->>P: 订单 已派单（S-ORD-T08），打印机 准备中（S-PRN-T03），记越过的单（R-DSP-02），锁住控制按钮（R-CMD-01）
-  P->>D: command job.start（jobRef = 派单 ID，60 秒有效）
+  P->>P: 重新校验映射（R-DSP-06、R-DSP-07），排队锁内新建打印任务 E-JOB（phase=TRANSFERRING）
+  P->>P: 按映射表（§4A）：订单 已派单（S-ORD-T08），打印机 准备中（S-PRN-T03），记越过的单（R-DSP-02），锁住控制按钮（R-CMD-01）
+  P->>D: command job.start（jobRef = 打印任务 ID，60 秒有效）
   P-->>S: 202 CommandAccepted
   D-->>P: command.result accepted（开始下载）
   D->>P: GET /daemon/v1/files/{fileId}（MSG-HTTP-02）
@@ -147,10 +148,10 @@ sequenceDiagram
 | 6 | 映射有 BLOCK，或有 WARN 没填原因 | 422，不派 | R-DSP-06、R-DSP-07 |
 | 6 | 板型和要求不一致没二次确认 | 422 | R-DSP-09 |
 | 8 | daemon 不在线 | 409 `printer_unreachable`，不建派单 | API-ASYNC-03 |
-| 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），outcome=SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
+| 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
 | 15–17 | 锁着时有人点其他控制 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-03 |
-| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 订单回原位，outcome=NOT_ARRIVED）或继续等。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、INV-16、MSG-CMD-START |
+| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 任务结局 NOT_ARRIVED，订单回原位）或继续等。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、INV-16、MSG-CMD-START |
 | 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
@@ -175,7 +176,7 @@ sequenceDiagram
   alt 已经开打
     P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08）
   else 还没开打
-    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机 空闲（S-PRN-T05），outcome=STOPPED_BEFORE_START
+    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机 空闲（S-PRN-T05），任务结局 STOPPED_BEFORE_START
   end
   P->>P: 去掉停止请求中
 ```
@@ -289,7 +290,7 @@ sequenceDiagram
   D-->>P: printer.event job.finished
   D->>D: 立刻拍结束照片（R-CAM-11）
   D->>P: PUT /daemon/v1/end-photos/{jobRef}（MSG-HTTP-05）
-  P->>O: put end-photos/{dispatchId}.jpg，永久保留
+  P->>O: put end-photos/{jobId}.jpg，永久保留
   P->>P: 订单 待入库（S-ORD-T12），打印机 待清板（S-PRN-T08、INV-01）
   P-->>S: 通知"打完待入库"
   D->>R: 删掉下发的 3mf（MSG-JOBREF-03）
