@@ -21,7 +21,7 @@
 | API-AUTH-01 | 浏览器用会话 Cookie：`pr_session`，`HttpOnly`、`Secure`、`SameSite=Lax`、`Path=/`。库里只存哈希（E-SESS）。 |
 | API-AUTH-02 | 防 CSRF（Q153）：所有写请求检查 `Origin`（缺了就看 `Sec-Fetch-Site`），不是本站来源一律 403；再加上 `SameSite=Lax`。不另发 CSRF 令牌。 |
 | API-AUTH-03 | 没登录 = 访客。访客只能调声明为 `guest` 的接口，并且要看开关（概况页 CFG-UI-01、实况 CFG-CAM-01）。 |
-| API-AUTH-04 | 用户被停用或改了角色，他的会话立刻按新状态生效：停用 = 全部会话作废，改角色 = 下一个请求就用新权限。 |
+| API-AUTH-04 | 用户被停用或改了角色，他的会话立刻按新状态生效：停用 = 全部会话作废，改角色 = 下一个请求就用新权限。两种情况服务端都立刻断开这个用户所有的 SSE 连接（API-RT-04）和实况会话（API-CAM-01，WHEP / LL-HLS / WebSocket 令牌作废），让他按新状态重连（Q235）。 |
 | API-AUTH-05 | v1 没有个人访问令牌（文档 0 §7）。daemon 不走这套接口，走 [daemon 协议](daemon-protocol.md)。 |
 | API-AUTH-06 | 设备令牌（Q182）：第一次成功登录后，服务器给这个浏览器发一个签名的长期 Cookie `pr_device`（`HttpOnly`、`Secure`，1 年），只用来区分设备、放宽 IP 兜底限频，不能用来登录。不收集浏览器指纹。 |
 
@@ -136,9 +136,9 @@
 | API-RT-01 | 浏览器用一条 Server-Sent Events 连接：`GET /api/v1/stream`（Q151、Q161）。只需要服务端往下推，SSE 自带断线重连，过代理也简单。 |
 | API-RT-02 | 事件类型：`printer.updated`、`order.updated`、`queue.changed`、`todo.changed`、`notification.created`、`command.updated`、`file.checked`、`snapshot.updated`、`resync`。`snapshot.updated` 只带 `{ printerId, capturedAt }`，不带图片。 |
 | API-RT-03 | 事件内容是变化后的那个资源的完整视图（和对应 GET 接口返回的一样，按权限裁剪过），不是差量，前端直接替换。`queue.changed` 和 `todo.changed` 只是提示，前端收到后重新拉列表。 |
-| API-RT-04 | 服务端按连接者的权限过滤：申请者只收到概况、自己的订单和自己的通知；访客只收到概况里的打印机。 |
+| API-RT-04 | 服务端按连接者的权限过滤：申请者只收到概况、自己的订单和自己的通知；访客只收到概况里的打印机。权限按连接时算；用户被停用或改角色时服务端立刻断开他的连接（API-AUTH-04，Q235）。 |
 | API-RT-05 | 同一台打印机的 `printer.updated` 最多每秒一条（Q142）。 |
-| API-RT-06 | 每个事件带递增的 `id`。断线重连时浏览器带 `Last-Event-ID`，服务端补发最近 5 分钟内的；超过了发一个 `resync`，前端重新拉全部数据。 |
+| API-RT-06 | 每个事件带递增的 `id`。断线重连时浏览器带 `Last-Event-ID`，服务端补发最近 5 分钟内的，按重连时的权限过滤（不是断线前的，Q235）；超过了发一个 `resync`，前端重新拉全部数据。 |
 
 ## 10. 文件和摄像头
 
@@ -147,7 +147,7 @@
 | API-FILE-01 | 上传：`POST /files`，`multipart/form-data`，单个文件上限默认 200 MB，部署时可以用环境变量改（Q155）。返回文件 ID，解析和安全校验在后台跑（F-SUB-02），完成后推 `file.checked`，也可以轮询 `GET /files/{id}/check`。 |
 | API-FILE-02 | 下载（模型文件、预览图、入库照片、延时摄影）：接口返回 `302` 跳到对象存储的短期签名链接，有效 5 分钟（Q154）；对象存储桶不公开。 |
 | API-FILE-03 | 看延时摄影每次都记审计（F-PRT-10）。 |
-| API-CAM-01 | 实况：`POST /printers/{id}/camera/session` 申请观看。H.264 机型按播放方式（CFG-CAM-11）返回 WebRTC（WHEP）地址、LL-HLS 地址或两者（"自动"时前端先试 WebRTC，不通换 LL-HLS），带一次性令牌；JPEG 帧机型返回一个 WebSocket 地址（Q162、Q173、MSG-MEDIA）。播放器：WHEP 用 mediamtx 自带的读取脚本，LL-HLS 用 hls.js。浏览器关掉播放器或页面时连接断开，面板据此算观众数。 |
+| API-CAM-01 | 实况：`POST /printers/{id}/camera/session` 申请观看。H.264 机型按播放方式（CFG-CAM-11）返回 WebRTC（WHEP）地址、LL-HLS 地址或两者（"自动"时前端先试 WebRTC，不通换 LL-HLS），带一次性令牌；JPEG 帧机型返回一个 WebSocket 地址（Q162、Q173、MSG-MEDIA）。播放器：WHEP 用 mediamtx 自带的读取脚本，LL-HLS 用 hls.js。浏览器关掉播放器或页面时连接断开，面板据此算观众数。。用户被停用或改角色时，他手上的观看令牌立刻作废、连接断开（API-AUTH-04，Q235）。 |
 | API-CAM-02 | 拿不到实况时返回 409：`stream_unavailable`（机型不支持、断流、访客且开关关）或 `camera_limit`（到了 CFG-CAM-05 / CFG-CAM-06 的上限，R-CAM-07），前端改看抓拍（R-CAM-02）。 |
 | API-CAM-03 | 抓拍：`GET /printers/{id}/camera/snapshot`，返回内存里最新一张 JPEG，响应头 `X-Captured-At` 和 `ETag`；带 `If-None-Match` 且没变时返回 304。前端收到 SSE 的 `snapshot.updated` 才去取，不轮询（Q166）。 |
 
