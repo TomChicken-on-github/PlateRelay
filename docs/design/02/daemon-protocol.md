@@ -142,7 +142,7 @@ daemon                                  面板
 | `job.finished` | | S-ORD-T12、S-PRN-T08 |
 | `job.failed` | `{ reason, beforeStart }` | 开打前：S-ORD-T09；开打后：S-ORD-T13 |
 | `job.cancelled` | `{ commandId?, beforeStart }` | 带面板停止命令的 ID = 停止被确认（S-FLG-STOPPING 去掉）；没有 = 有人在打印机屏幕上停的。订单去向只看 `beforeStart`：开打前停下 → S-ORD-T09，开打后 → S-ORD-T13 |
-| `job.parts_skipped` | `{ partIds }` | 记一条"跳过零件"记录 |
+| `job.parts_skipped` | `{ partIds }` | 打印机上报的已跳过列表，写进 E-JOB `skipped_parts`，记一条"跳过零件"记录（R-SKP-04、R-SKP-06） |
 | `external.started` | `{ name }` | S-PRN-T09，R-PRT-11（空闲、待清板进外部占用，待清板另挂 `UNCLEARED_START`；维护中保持维护中，只显示进度，Q225） |
 | `external.ended` | `{ result }` | S-PRN-T10（回待清板）；维护中时不变 |
 | `error.raised` | `{ error: ActiveError }` | 记 E-PERR，挂等待处理（R-PRT-03） |
