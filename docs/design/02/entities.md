@@ -193,6 +193,7 @@
 | `access_code_key_fingerprint` | text? | 用哪把公钥加密的；和 daemon 公钥对不上时要重填 |
 | `access_code_set_at` | timestamptz? | |
 | `starred` | bool | 概况页置顶 |
+| `disabled_at` | timestamptz? | 停用时间（R-PRT-20，Q229）。有值时概况页、派单都不显示，不在 MSG-ASSIGN 列表里；记录都保留，清空即重新启用 |
 | `version` | int | E-GEN-04；只管配置字段，状态字段走 E-GEN-05 |
 | `created_at` | timestamptz | |
 

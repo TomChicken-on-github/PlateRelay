@@ -184,8 +184,12 @@ daemon                                  面板
 
 ```json
 { "printers": [{ "printerId": "…", "brand": "bambu", "serial": "…", "host": "192.168.0.106",
-                 "accessCodeCipher": "base64…", "keyFingerprint": "…" }] }
+                 "accessCodeCipher": "base64…", "keyFingerprint": "…",
+                 "currentJobRef": "…", "cleanupJobRefs": ["…"] }] }
 ```
+
+- `currentJobRef` 是面板记的这台打印机的当前任务（没有为 null）；`cleanupJobRefs` 是已结束、但打印机上可能还留着文件（3mf、延时摄影）要收尾的任务。**是不是系统任务以面板为准**（Q228）。
+- 停用的打印机（E-PRN `disabled_at`）不在列表里（R-PRT-20）。
 
 - 访问码是浏览器用 daemon 公钥加密的密文，面板解不开，只是转交（INV-07）。daemon 在内存里解密，不落盘、不进日志。
 - 列表里没有的打印机，daemon 断开它、删掉它的本地状态。
@@ -252,15 +256,15 @@ daemon                                  面板
 | 编号 | 约定 |
 | --- | --- |
 | MSG-JOBREF-01 | 打印任务的 ID（E-JOB）就是 `jobRef`，一次派单一个。daemon 放到打印机上的文件名带上它：`pr-<jobRef 后 12 位十六进制>.gcode.3mf`。用后 12 位是因为 UUIDv7 的前 8 位是时间戳，大约 65 秒才变一次，一分钟内派的单会撞名；后 12 位是随机部分（Q219）。拓竹的任务名也用同一个后缀；daemon 清单里仍记完整的 `jobRef`。 |
-| MSG-JOBREF-02 | daemon 在本机留一份清单，记它放进打印机或从打印机下载过的每个文件和对应的 `jobRef`（F-PRT-11）。打印机上正在打的任务对得上清单 = 系统任务；对不上 = 外部任务（`external: true`，F-PRT-08）。 |
-| MSG-JOBREF-03 | daemon 只删清单里的文件（INV-15）：任务结束后删它下发的 3mf；延时摄影上传并核对成功后删原文件（F-PRT-10）。 |
+| MSG-JOBREF-02 | daemon 在本机留一份清单，记它放进打印机或从打印机下载过的每个文件和对应的 `jobRef`（F-PRT-11）。清单只是缓存，**是不是系统任务以面板为准**（Q228）：打印机上正在打的任务或存储里的 `pr-<后 12 位>` 文件对得上清单，或对得上 MSG-ASSIGN 下发的 `currentJobRef` / `cleanupJobRefs` = 系统任务；都对不上 = 外部任务（`external: true`，F-PRT-08）。对上面板下发的、但清单里没有的（如打印机刚移到新 daemon，或 daemon 重装丢了清单），daemon 把文件收进自己的清单再按系统任务处理。 |
+| MSG-JOBREF-03 | daemon 只删清单里的文件（INV-15），按 MSG-JOBREF-02 收进清单的也算：任务结束后删它下发的 3mf；延时摄影上传并核对成功后删原文件（F-PRT-10）。 |
 | MSG-RECON-01 | 重连后，daemon 先给每台打印机发一份快照，面板拿快照和自己的记录对（R-PRT-07）。 |
 | MSG-RECON-02 | 对账表： |
 
 | 面板记录 | 打印机快照 | 处理 |
 | --- | --- | --- |
 | 已派单 | 在打这个 `jobRef` | 补一条"开始打印"，S-ORD-T11 |
-| 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录 | 按结束记录补事件（打完或失败） |
+| 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录（清单丢了时按 MSG-JOBREF-02 用面板下发的 `currentJobRef` 认领） | 按结束记录补事件（打完或失败） |
 | 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
 | 已派单 / 打印中 | 空闲，找不到结束记录，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
