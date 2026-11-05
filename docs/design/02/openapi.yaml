@@ -2791,7 +2791,7 @@ components:
             description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
           printJobs:
             type: array
-            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下（R-VIS-09）
+            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下；默认只展开最新一次，之前的折叠（R-VIS-09、Q222）
             items:
               type: object
               properties:
