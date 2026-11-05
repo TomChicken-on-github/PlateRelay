@@ -338,7 +338,7 @@
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
 | `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。R-PRT-16 自动判的 → `SEND_FAILED`。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
 | `paused_ms` | 暂停累计 |
-| `skipped_parts` | int[]，已跳过的零件 ID |
+| `skipped_parts` | int[]，已跳过的零件 ID，以打印机上报为准（R-SKP-04）；重打是新任务，从空开始（R-SKP-07） |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 | `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
 
@@ -408,7 +408,7 @@
 | `id` | |
 | `order_id`、`at` | |
 | `node` | process_node，按文档 1 §5.8 的归属表 |
-| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`、`reprint.declined`、`reprint.decline_revoked`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
+| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`、`reprint.declined`、`reprint.decline_revoked`、`parts.skipped`（`data: { partIds }`，actor 是现场人员时对申请者只显示角色）；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
 | `actor_type`、`actor_id?` | |
 | `from_status?`、`to_status?` | 状态变化时有 |
 | `version_n?`、`job_id?` | |
