@@ -387,7 +387,7 @@ sequenceDiagram
 | 7 | 令牌过期 | 401，管理员重新生成 | F-DMN-01 |
 | 7 | 令牌已被使用 | 401，脚本提示管理员去 daemon 列表查有没有陌生的注册 | MSG-ENR、Q156 |
 | 12 | 签名不对 | 4401 断开 | MSG-AUTH-05 |
-| 12 | 同一个 daemon 又连了一条 | 新的顶掉旧的，旧的收到 4409 | MSG-AUTH-05 |
+| 12 | 同一个 daemon 又连了一条 | 新的顶掉旧的，旧的收到 4409。10 分钟内被不同 IP 顶掉 3 次及以上 → 通知管理员"疑似私钥泄露，请检查并吊销"，不自动吊销 | MSG-AUTH-05、R-OPS-02 |
 | 14 | 访问码是用旧公钥加密的 | connection.down（access_code_key_mismatch），面板提示重填 | MSG-ASSIGN |
 
 添加打印机：管理员在 getDaemonPublicKey 拿公钥，浏览器加密访问码，createPrinter（INV-07、F-PRT-12）；面板发新的 printers.assign。
