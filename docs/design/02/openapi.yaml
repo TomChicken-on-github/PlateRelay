@@ -1276,8 +1276,8 @@ paths:
       tags: [printers]
       summary: 编辑打印机
       x-permission: printer:manage
-      x-rules: [INV-09, F-PRT-12]
-      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码。
+      x-rules: [INV-09, F-PRT-12, R-PRT-20]
+      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码；新 daemon 按 MSG-ASSIGN 的 currentJobRef 认领还在打的系统任务（Q228）。disabled=true 停用、false 重新启用（R-PRT-20，Q229）：只在空闲、离线或维护中且没有当前任务时能停用，否则 409 state_conflict；停用后概况页和派单都不显示，记录保留。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1294,6 +1294,7 @@ paths:
                 daemonId: {type: string, format: uuid}
                 accessCodeCipher: {type: string}
                 keyFingerprint: {type: string}
+                disabled: {type: boolean}
               required: [version]
               additionalProperties: false
       responses:
@@ -2033,7 +2034,8 @@ paths:
       tags: [admin]
       summary: 改角色、停用
       x-permission: user:manage
-      x-rules: [INV-13, API-AUTH-04]
+      x-rules: [INV-13, API-AUTH-04, R-ACC-05]
+      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。待审核、排队中的同一个事务里取消，原因"账户停用"；已派单、打印中的照常打完，之后按 R-PCK-05 处理；失败的保持失败。
       parameters:
       - name: userId
         in: path
@@ -3146,6 +3148,7 @@ components:
               online: {type: boolean}
             required: [id, name, online]
             additionalProperties: false
+          disabledAt: {type: [string, 'null'], format: date-time, description: 停用时间（R-PRT-20）}
           modelId: {type: [string, 'null']}
           nozzles:
             type: array
