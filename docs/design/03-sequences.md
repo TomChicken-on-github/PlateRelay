@@ -151,7 +151,7 @@ sequenceDiagram
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
 | 15–17 | 锁着时有人点其他控制 | 409 `command_pending`；只有停止能发（SEQ-04） | R-CMD-03 |
-| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"判为没到"（markStartNotArrived → 任务结局 NOT_ARRIVED，订单回原位）或继续等。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、INV-16、MSG-CMD-START |
+| 15–17 | 开打指令发出后过了 CFG-CMD-03（默认 30 秒）还没进准备中 | 按钮解锁并提示看摄像头；待办提醒"开打可能没到"。现场人员看过后选"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或停止解锁时刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）或继续等。之后打印机才报准备中或开打 → 不挂回订单，打印机进外部占用并挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机空闲，不会打两次 | R-CMD-02、R-CMD-04、R-PRT-17、INV-16、MSG-CMD-START |
 | 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
