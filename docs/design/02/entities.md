@@ -53,7 +53,7 @@
 | 枚举 | 值 | 用在 |
 | --- | --- | --- |
 | `role` | `APPLICANT` `STAFF` `ADMIN` | E-USER（Q95；访客不是角色，是没登录） |
-| `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRINTER（R-PRT-03） |
+| `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRN（R-PRT-03） |
 | `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` `LATE_START` | E-PFLAG（S-FLG-ATTENTION） |
 | `version_kind` | `SUBMIT` `REPLACE` `REVISION` `RESTORE` | E-VER（R-VER-01、02、06） |
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
@@ -248,7 +248,7 @@
 | `file_id` | 主键 |
 | `status` | `QUEUED` / `RUNNING` / `DONE` / `ERROR` |
 | `parser_version` | 解析器版本，解析逻辑变了能看出来 |
-| `plates` | jsonb，每盘的元数据：盘号、名字、机型、喷嘴、耗材、时长、克数、零件、预览图键（IF-PARSE-02） |
+| `plates` | jsonb，每盘的元数据：盘号、名字、机型、喷嘴、耗材、时长、克数、零件、预览图键（IF-PARSE） |
 | `findings` | jsonb，校验发现：`{ check, severity, code, detail }[]`；`check` 是四项之一（F-SUB-02） |
 | `verdict` | `PASS` / `WARN` / `REJECT` |
 | `limits` | jsonb，校验时用的限值（适配器限值收紧后） |
