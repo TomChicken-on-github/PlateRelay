@@ -143,8 +143,8 @@ daemon                                  面板
 | `job.failed` | `{ reason, beforeStart }` | 开打前：S-ORD-T09；开打后：S-ORD-T13 |
 | `job.cancelled` | `{ commandId?, beforeStart }` | 带面板停止命令的 ID = 停止被确认（S-FLG-STOPPING 去掉）；没有 = 有人在打印机屏幕上停的。订单去向只看 `beforeStart`：开打前停下 → S-ORD-T09，开打后 → S-ORD-T13 |
 | `job.parts_skipped` | `{ partIds }` | 记一条"跳过零件"记录 |
-| `external.started` | `{ name }` | S-PRN-T09，R-PRT-11 |
-| `external.ended` | `{ result }` | S-PRN-T10 |
+| `external.started` | `{ name }` | S-PRN-T09，R-PRT-11（空闲、待清板进外部占用，待清板另挂 `UNCLEARED_START`；维护中保持维护中，只显示进度，Q225） |
+| `external.ended` | `{ result }` | S-PRN-T10（回待清板）；维护中时不变 |
 | `error.raised` | `{ error: ActiveError }` | 记 E-PERR，挂等待处理（R-PRT-03） |
 | `error.cleared` | `{ errorId, clearedBy: "PANEL" \| "DEVICE" \| "UNKNOWN" }` | 更新 E-PERR |
 | `storage.low` / `storage.ok` | `{ freeBytes, neededBytes }` | 挂 / 去掉存储不足（F-PRT-11） |
@@ -264,7 +264,7 @@ daemon                                  面板
 | 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
 | 已派单 / 打印中 | 空闲，找不到结束记录，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
-| 空闲 | 在打一个对不上的任务 | 外部占用（R-PRT-11） |
+| 空闲 / 待清板 / 维护中 | 在打一个对不上的任务 | 按 R-PRT-11：外部占用；待清板另挂 `UNCLEARED_START`；维护中保持维护中 |
 | 停止请求中 | 已经停了 | 按停止确认处理 |
 | 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单。打印机没有当前任务 → 外部占用；已有别的当前任务 → 打印机状态不变。都挂等待处理，原因 `LATE_START`（R-PRT-17） |
 

@@ -54,7 +54,7 @@
 | --- | --- | --- |
 | `role` | `APPLICANT` `STAFF` `ADMIN` | E-USER（Q95；访客不是角色，是没登录） |
 | `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRN（R-PRT-03） |
-| `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` `LATE_START` | E-PFLAG（S-FLG-ATTENTION） |
+| `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` `LATE_START` `UNCLEARED_START` | E-PFLAG（S-FLG-ATTENTION） |
 | `version_kind` | `SUBMIT` `REPLACE` `REVISION` `RESTORE` | E-VER（R-VER-01、02、06） |
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
@@ -210,7 +210,7 @@
 | 标记 | `data` |
 | --- | --- |
 | `STOPPING` | `{ commandId, requestedBy, reasonText }` |
-| `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }` |
+| `ATTENTION` | `{ jobId?, errorId? }`，对账不一致时 `{ lastKnown, reported }`。`jobId` 是挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉 `ERROR`、`RUNOUT`，`LATE_START` 在迟到的任务结束时去掉（文档 1 §4A，Q226） |
 | `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
 
