@@ -1383,6 +1383,39 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/commands/{commandId}/settle:
+    post:
+      operationId: settleCommandOnSite
+      tags: [printers]
+      summary: 现场确认了结命令
+      x-permission: printer:control
+      x-rules: [R-CMD-09, R-CMD-04]
+      description: 只在控制命令自动刷新后仍判断不了时可用（pendingCommand.refreshedAt 不为空），否则 409 state_conflict。不发任何命令，记审计。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: commandId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                observed: {type: string, enum: [NOT_RUNNING_JOB, RUNNING_JOB], description: 现场看到机器没在打 / 在打这个任务}
+                note: {type: string, maxLength: 500}
+              required: [observed]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/errors/{errorId}/resolve:
     post:
       operationId: resolveError
@@ -2911,7 +2944,7 @@ components:
         openToApplicants: {type: boolean}
         pendingCommand:
           type: [object, 'null']
-          description: API-ASYNC-04：没了结的控制命令（R-CMD-01、R-CMD-05）。不为空时，除停止外的控制按钮置灰。
+          description: API-ASYNC-04：没了结的控制命令（R-CMD-01、R-CMD-05）。不为空时，除停止和设定值命令外的控制按钮置灰。
           properties:
             commandId: {type: string, format: uuid}
             kind: {type: string}

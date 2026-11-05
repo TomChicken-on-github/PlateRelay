@@ -199,12 +199,12 @@ daemon                                  面板
 
 | `kind` | `params` | 有效期（送达） | 类 | 确认看什么（MSG-CMD-CONF） | 对应 |
 | --- | --- | --- | --- | --- | --- |
-| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机上报带这个 `jobRef` 的任务进了准备或打印 | S-ORD-T08 |
+| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中，任务文件是 `pr-<jobRef8>`。之后有没有开打不归命令管（R-CMD-02） | S-ORD-T08 |
 | `job.stop` | `{ jobRef }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束、机器不在打 | R-PRT-04 |
-| `job.recall` | `{ jobRef }` | 60 秒 | 控制 | 打印机不在打这个 `jobRef`，文件已删（INV-15） | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
+| `job.recall` | `{ jobRef }` | 60 秒 | 控制 | 打印机不在打这个 `jobRef`。删文件是之后的清理（INV-15），不作为条件 | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
 | `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表包含这些零件 | F-SUB-07 |
 | `error.resolve` | `{ errorId, action }` | 60 秒 | 控制 | 这条报错从打印机上报里消失，或状态变成动作对应的结果 | R-PRT-14 |
-| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 控制 | 打印机上报的对应状态和动作一致（灯、温度目标、暂停 / 继续等） | R-PRT-15 |
+| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态和动作一致；设定值不确认，界面显示上报的值（R-CMD-08） | R-PRT-15 |
 | `refresh` | `{}` | 10 秒 | 只读 | — | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
 | `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | 只读 | — | MSG-MEDIA、R-CAM-06 |
 | `camera.close` | `{}` | 30 秒 | 只读 | — | R-CAM-06 |
@@ -221,10 +221,11 @@ daemon                                  面板
 
 **MSG-CMD-CONF**（R-CMD、Q201）：
 
-- 控制命令建好时记 `confirm_by`：`job.start` 用 CFG-CMD-01（默认 10 分钟，含下载、加热、调平），其余用 CFG-CMD-02（默认 2 分钟）。
+- 控制命令记 `confirm_by` = 到达打印机的时间 + CFG-CMD-01（默认 2 分钟）。`job.start` 从 `job.staged`（文件传完）起算，传文件的时间不算；传文件本身出错走 `command.result failed`。
 - 期限内收到符合上表"确认看什么"的打印机上报，记 `EXECUTED`；收到证明没生效的上报（如开打后打印机空闲、没有这个 `jobRef`），或 daemon 回 `expired` / `rejected`，记 `NOT_EFFECTIVE`。`failed` 也算没生效，固件原话照样显示（R-PRT-15）。
 - 到 `confirm_by` 还是 `PENDING`，面板自动发一条 `refresh`（不占手动刷新限频），用刷新得到的完整状态再判一次（R-CMD-03）。
-- 刷新也判断不了（daemon 断线、刷新没回），保持 `PENDING`，挂待办提醒一次（R-CMD-04）；重连后对账（MSG-RECON）时一并了结，对不上按 R-PRT-08 由人判。
+- 刷新也判断不了（daemon 断线、刷新没回），保持 `PENDING`，挂待办提醒一次（R-CMD-04）；重连后对账（MSG-RECON）时一并了结，对不上按 R-PRT-08 由人判。现场人员也可以在机器前确认后了结（R-CMD-09，`settled_by = on_site`），不发任何命令。
+- 设定值命令（R-CMD-08）不建 `confirm_by`、不进锁：`params` 一律是目标值，不用切换或加减；连发以最后一条为准。
 - 面板永远不为了"解锁"而发反向命令或重发（INV-16）。`job.start` 未生效后，现场人员重新派单是一条新命令、新的 `commandId`，`jobRef` 照旧。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。

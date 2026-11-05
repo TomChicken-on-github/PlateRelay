@@ -62,7 +62,7 @@
 | `dispatch_outcome` | `RECALLED` `SEND_FAILED` `START_FAILED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` `CANCELLED` | E-DSP |
 | `command_status` | `QUEUED` `SENT` `ACCEPTED` `REJECTED` `EXPIRED` `FAILED` `DONE` | E-CMD（投递进度） |
 | `command_outcome` | `PENDING` `EXECUTED` `NOT_EFFECTIVE` | E-CMD（R-CMD-01：已发送等待确认 / 已执行 / 未生效） |
-| `command_class` | `CONTROL` `READ` | E-CMD（R-CMD 控制命令 / 只读命令） |
+| `command_class` | `CONTROL` `SETPOINT` `READ` | E-CMD（R-CMD 控制命令 / 设定值命令 / 只读命令） |
 | `actor_type` | `USER` `SYSTEM` `DAEMON` `PRINTER` | E-REC、E-AUD |
 
 ## 3. 实体总表
@@ -364,14 +364,14 @@
 | `id` | 命令 ID，也是协议里的 `commandId`（Q143） |
 | `daemon_id`、`printer_id?` | |
 | `kind` | MSG-CMD 的类型，如 `job.start` |
-| `class` | `CONTROL` / `READ`，由 `kind` 决定（MSG-CMD 表） |
+| `class` | `CONTROL` / `SETPOINT` / `READ`，由 `kind` 决定；`control` 按动作的 `category` 决定（MSG-CMD 表） |
 | `payload` | jsonb，不含任何凭据 |
 | `requested_by?` | 用户；系统发起的为空 |
 | `created_at`、`expires_at` | 有效期见 MSG-CMD-TTL |
 | `status` | `QUEUED` → `SENT` → `ACCEPTED` / `REJECTED` / `EXPIRED` / `FAILED` → `DONE`：投递进度，daemon 回什么记什么 |
 | `outcome` | 控制命令的业务结果，`PENDING` → `EXECUTED` / `NOT_EFFECTIVE`，只按事实改（R-CMD-02、MSG-CMD-CONF）；只读命令建好就是空 |
-| `confirm_by?` | 控制命令的确认期限（CFG-CMD-01 / 02），到期触发自动刷新（R-CMD-03） |
-| `settled_by?` | 了结它的事实：`printer_report`、`refresh`、`daemon_expired`、`daemon_rejected`、`reconcile`，以及对应的事件 ID |
+| `confirm_by?` | 控制命令的确认期限（CFG-CMD-01），开打从文件传完（`job.staged`）起算，到期触发自动刷新（R-CMD-03） |
+| `settled_by?` | 了结它的事实：`printer_report`、`refresh`、`daemon_expired`、`daemon_rejected`、`reconcile`、`on_site`（R-CMD-09，另记确认人和看到了什么），以及对应的事件 ID |
 | `result` | jsonb，daemon 回报的原样结果（含固件拒绝原因，R-PRT-15） |
 | `finished_at?` | |
 
