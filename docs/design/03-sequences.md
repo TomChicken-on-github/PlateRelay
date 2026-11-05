@@ -345,9 +345,12 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 1 | 文件已过保留期 | 按钮置灰，410 `file_expired`；请申请者重新提交 | R-PRT-10、R-ARB-03 |
 | 1 | 订单归档过 | 按钮置灰，422 `rule_violation` | R-PRT-09、R-ARC-02 |
+| 1 | 已被标为不重打 | 重打按钮隐藏，422 `rule_violation`；管理员 revokeReprintDecline 后恢复 | R-PRT-18、R-PRT-19 |
 | 1 | 不是失败状态 | 409 `state_conflict` | API-CONC-02 |
 
 版本、文件、修改次数都不变（R-VER-11）。申请者没有重打按钮（F-PRT-07）。
+
+重打只用于打印机或现场一方的问题。选手模型本身的问题，现场人员改用 declineReprint（不重打，请选手重新提交，必须填原因，默认选手可见）：订单仍是失败，移出待办，申请者收到通知后自己提交新订单（R-PRT-18，Q224）。
 
 ## SEQ-10 daemon 安装注册和连接认证
 
