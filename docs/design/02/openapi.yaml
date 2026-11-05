@@ -380,8 +380,8 @@ paths:
       tags: [files]
       summary: 上传 .gcode.3mf
       x-permission: order:submit
-      x-rules: [R-SUB-01, R-SUB-02, API-FILE-01]
-      description: 返回时校验通常还没完成，等 file.checked 推送或轮询。
+      x-rules: [R-SUB-01, R-SUB-02, R-SUB-10, R-SUB-13, API-FILE-01]
+      description: 返回时校验通常还没完成，等 file.checked 推送或轮询。这个人手上已有 CFG-SUB-08 − 1 个没提交的文件（校验被拒的和已提交的不算）时要带 captcha（先调 issueCaptcha），没带返回 422 captcha_required，和登录一样（R-SUB-13，Q236）。没提交的文件过了 CFG-SUB-07 自动删除，没有删除接口。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -392,6 +392,8 @@ paths:
               type: object
               properties:
                 file: {type: string, contentMediaType: application/octet-stream}
+                captchaChallengeId: {type: string}
+                captchaAnswer: {type: string}
               required: [file]
               additionalProperties: false
       responses:

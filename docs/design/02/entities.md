@@ -238,7 +238,8 @@
 
 `id`、`sha256`、`object_key`、`file_name`、`size_bytes`、`uploaded_by`、`uploaded_at`、`submitted_at?`、`purged_at?`。
 
-- 24 小时内没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）。
+- 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
+- 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
 - 订单进终态后过了保留期删文件，写 `purged_at`；预览图和元数据留着（R-FIL-01）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
 
