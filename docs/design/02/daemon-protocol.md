@@ -197,26 +197,35 @@ daemon                                  面板
 { "commandId": "…", "printerId": "…", "kind": "job.start", "expiresAt": "2026-11-04T12:01:00Z", "params": {} }
 ```
 
-| `kind` | `params` | 有效期 | 对应 |
-| --- | --- | --- | --- |
-| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | S-ORD-T08 |
-| `job.stop` | `{ jobRef }` | 60 秒 | R-PRT-04 |
-| `job.recall` | `{ jobRef }` | 60 秒 | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
-| `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | F-SUB-07 |
-| `error.resolve` | `{ errorId, action }` | 60 秒 | R-PRT-14 |
-| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | R-PRT-15 |
-| `refresh` | `{}` | 10 秒 | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
-| `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | MSG-MEDIA、R-CAM-06 |
-| `camera.close` | `{}` | 30 秒 | R-CAM-06 |
-| `snapshot.mode` | `{ watched: bool }`：这台打印机现在有没有人在看 | 30 秒 | R-CAM-08 |
-| `snapshot.now` | `{ reason: "FIRST_VIEWER" \| "ERROR" }` | 30 秒 | R-CAM-08、R-CAM-10 |
-| `timelapse.collect` | `{ jobRef }` | 1 小时 | R-CAM-04 |
+| `kind` | `params` | 有效期（送达） | 类 | 确认看什么（MSG-CMD-CONF） | 对应 |
+| --- | --- | --- | --- | --- | --- |
+| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机上报带这个 `jobRef` 的任务进了准备或打印 | S-ORD-T08 |
+| `job.stop` | `{ jobRef }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束、机器不在打 | R-PRT-04 |
+| `job.recall` | `{ jobRef }` | 60 秒 | 控制 | 打印机不在打这个 `jobRef`，文件已删（INV-15） | R-DSP-08、R-PRT-05、R-CAN-03、R-VER-04 |
+| `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表包含这些零件 | F-SUB-07 |
+| `error.resolve` | `{ errorId, action }` | 60 秒 | 控制 | 这条报错从打印机上报里消失，或状态变成动作对应的结果 | R-PRT-14 |
+| `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 控制 | 打印机上报的对应状态和动作一致（灯、温度目标、暂停 / 继续等） | R-PRT-15 |
+| `refresh` | `{}` | 10 秒 | 只读 | — | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
+| `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | 只读 | — | MSG-MEDIA、R-CAM-06 |
+| `camera.close` | `{}` | 30 秒 | 只读 | — | R-CAM-06 |
+| `snapshot.mode` | `{ watched: bool }`：这台打印机现在有没有人在看 | 30 秒 | 只读 | — | R-CAM-08 |
+| `snapshot.now` | `{ reason: "FIRST_VIEWER" \| "ERROR" }` | 30 秒 | 只读 | — | R-CAM-08、R-CAM-10 |
+| `timelapse.collect` | `{ jobRef }` | 1 小时 | 只读 | — | R-CAM-04 |
 
 **MSG-CMD-TTL**（Q143）：
 
 - 有效期指"必须在这之前开始执行"。`job.start` 下载文件的时间不算在内，开始下载就算开始执行。
 - daemon 按 `welcome.serverTime` 算出和面板的时钟差，用面板的时间判断过期。收到时已经过期的，回 `expired`，不执行。这样断线很久之后，积压的旧"开打"不会突然被执行。
-- 面板在 `expiresAt` 之后 10 秒还没收到结果，就把 E-CMD 标成 `EXPIRED`，按命令类型处理：`job.start` 过期 = 下发失败，订单回原位（R-DSP-08）；`job.stop` 过期 = 停止请求中继续挂着并提醒（R-PRT-04）。
+- daemon 回 `expired` 是事实（它保证过期的命令永远不再执行），控制命令据此记 `NOT_EFFECTIVE`：`job.start` = 下发失败，订单回原位（R-DSP-08）；`job.stop`、`job.recall` = 去掉停止请求中、撤回请求中，订单维持原状态。
+- 面板自己算出过了 `expiresAt` 但没收到回复，**不算事实**：daemon 可能在过期前已经执行、只是回复还在它的发件箱里（MSG-ENV-03）。这时只把 `status` 记成 `EXPIRED` 方便排查，`outcome` 仍是 `PENDING`，按 MSG-CMD-CONF 等事实。
+
+**MSG-CMD-CONF**（R-CMD、Q201）：
+
+- 控制命令建好时记 `confirm_by`：`job.start` 用 CFG-CMD-01（默认 10 分钟，含下载、加热、调平），其余用 CFG-CMD-02（默认 2 分钟）。
+- 期限内收到符合上表"确认看什么"的打印机上报，记 `EXECUTED`；收到证明没生效的上报（如开打后打印机空闲、没有这个 `jobRef`），或 daemon 回 `expired` / `rejected`，记 `NOT_EFFECTIVE`。`failed` 也算没生效，固件原话照样显示（R-PRT-15）。
+- 到 `confirm_by` 还是 `PENDING`，面板自动发一条 `refresh`（不占手动刷新限频），用刷新得到的完整状态再判一次（R-CMD-03）。
+- 刷新也判断不了（daemon 断线、刷新没回），保持 `PENDING`，挂待办提醒一次（R-CMD-04）；重连后对账（MSG-RECON）时一并了结，对不上按 R-PRT-08 由人判。
+- 面板永远不为了"解锁"而发反向命令或重发（INV-16）。`job.start` 未生效后，现场人员重新派单是一条新命令、新的 `commandId`，`jobRef` 照旧。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
 

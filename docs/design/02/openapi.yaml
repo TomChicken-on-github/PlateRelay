@@ -1383,32 +1383,6 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
         default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/stop/withdraw:
-    post:
-      operationId: withdrawStop
-      tags: [printers]
-      summary: 撤销停止请求
-      x-permission: printer:stop
-      x-rules: [R-PRT-04]
-      description: 只在打印机还没确认停止时有效；之后返回 409 state_conflict。
-      parameters:
-      - {$ref: '#/components/parameters/PrinterId'}
-      - {$ref: '#/components/parameters/IdempotencyKey'}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties: {}
-              additionalProperties: false
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PrinterDetail'}
-        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/errors/{errorId}/resolve:
     post:
       operationId: resolveError
@@ -2935,6 +2909,17 @@ components:
           items: {$ref: '#/components/schemas/PrinterFlag'}
         starred: {type: boolean}
         openToApplicants: {type: boolean}
+        pendingCommand:
+          type: [object, 'null']
+          description: API-ASYNC-04：没了结的控制命令（R-CMD-01、R-CMD-05）。不为空时，除停止外的控制按钮置灰。
+          properties:
+            commandId: {type: string, format: uuid}
+            kind: {type: string}
+            sentAt: {type: string, format: date-time}
+            confirmBy: {type: string, format: date-time}
+            refreshedAt: {type: [string, 'null'], format: date-time, description: R-CMD-03 自动刷新的时间；刷新后仍判断不了时不为空}
+          required: [commandId, kind, sentAt, confirmBy, refreshedAt]
+          additionalProperties: false
         job:
           type: [object, 'null']
           properties:
