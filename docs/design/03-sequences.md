@@ -73,7 +73,8 @@ sequenceDiagram
 | 9 | 机型或喷嘴和开放的打印机都对不上 | 422 `rule_violation`（R-SUB-05） | R-SUB-05 |
 | 9 | 超过排队上限 | 整次拒绝，422（R-SUB-08） | R-ARB-05 |
 | 9 | 表单已被管理员改过 | 409 `version_conflict`，前端重新拉表单 | E-FORM |
-| 8 之前 | 24 小时没提交 | 删文件 | R-SUB-10 |
+| 1 | 手上已有 CFG-SUB-08 − 1 个没提交的文件（默认从第 3 个起） | 422 `captcha_required`，前端弹人机验证后重传 | R-SUB-13、Q236 |
+| 8 之前 | 过了 CFG-SUB-07（默认 2 小时）没提交 | 删文件 | R-SUB-10 |
 | 14 | 另一个管理员已经审过 | 409 `state_conflict` | API-CONC-02 |
 | 14 | 驳回 | rejectOrder，必须填原因 → 已驳回（S-ORD-T03） | R-REV-02 |
 
