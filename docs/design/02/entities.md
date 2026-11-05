@@ -332,6 +332,7 @@
 | `outcome?` | 结束方式；没结束为空。这次派单上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）；现场判没到（R-CMD-04）→ `NOT_ARRIVED` |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID |
+| `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 
 `mapping` 的结构：
 
@@ -395,7 +396,7 @@
 | `id` | |
 | `order_id`、`at` | |
 | `node` | process_node，按文档 1 §5.8 的归属表 |
-| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
+| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
 | `actor_type`、`actor_id?` | |
 | `from_status?`、`to_status?` | 状态变化时有 |
 | `version_n?`、`dispatch_id?` | |
