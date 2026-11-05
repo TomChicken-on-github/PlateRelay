@@ -841,8 +841,8 @@ paths:
       summary: 重打
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
-      x-rules: [R-PRT-09, R-PRT-10, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过的失败订单返回 422 rule_violation（R-PRT-09）。
+      x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
+      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 rule_violation（R-PRT-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -857,6 +857,53 @@ paths:
                 note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
               required: [expectedStatus]
               additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/decline-reprint:
+    post:
+      operationId: declineReprint
+      tags: [orders]
+      summary: 不重打，请选手重新提交
+      x-permission: order:reprint
+      x-rules: [R-PRT-18, F-PRT-07]
+      description: 只用于选手模型本身的问题（Q224）。订单仍是失败，记下不重打，重打按钮隐藏，移出现场人员待办，通知申请者并带原因。时间线记 reprint.declined，挂在打印节点下，原因默认选手可见。归档过或已经标过返回 409 state_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [FAILED]}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+                reasonVisible: {type: boolean, default: true}
+              required: [expectedStatus, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: revokeReprintDecline
+      tags: [orders]
+      summary: 撤销不重打
+      x-permission: order:reprint:restore
+      x-rules: [R-PRT-19]
+      description: 只有管理员。清掉不重打标记，重打按钮恢复，订单回现场人员待办；时间线记 reprint.decline_revoked，记审计。没标过或归档过返回 409 state_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
       responses:
         '200':
           description: 成功
@@ -2812,7 +2859,19 @@ components:
                   additionalProperties: false
               required: [jobId, attempt, printerName, startedAt, endedAt, outcome, endPhoto]
               additionalProperties: false
-          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）}
+          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）、declined（R-PRT-18）}
+          reprintDeclined:
+            type: [object, 'null']
+            description: 现场人员点了不重打（R-PRT-18）。reason 按 reasonVisible 对申请者裁剪（R-VIS-07）
+            properties:
+              at: {type: string, format: date-time}
+              by:
+                oneOf:
+                - {$ref: '#/components/schemas/Person'}
+                - {type: 'null'}
+              reason: {type: [string, 'null']}
+            required: [at, by, reason]
+            additionalProperties: false
         required: [activeVersion, versions, revisions, nodes, actions]
         additionalProperties: false
     OrderRecord:

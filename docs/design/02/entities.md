@@ -279,6 +279,7 @@
 | `submitted_at` | timestamptz | |
 | `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
 | `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
+| `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；管理员撤销时三列一起清空（R-PRT-19）。只在失败时有值 |
 | `files_purged_at` | timestamptz? | 文件已删除；之后不能重打（R-PRT-10） |
 
 约束：
@@ -406,7 +407,7 @@
 | `id` | |
 | `order_id`、`at` | |
 | `node` | process_node，按文档 1 §5.8 的归属表 |
-| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
+| `kind` | 记录类型，英文点分，如 `order.approved`、`version.withdrawn`、`dispatch.stopped_before_start`、`print.stopped_on_device`、`note.added`、`reprint.declined`、`reprint.decline_revoked`；完整清单在代码里，和 i18n 文案一一对应，CI 检查每个 `kind` 都有中英文案（R-NTE-02） |
 | `actor_type`、`actor_id?` | |
 | `from_status?`、`to_status?` | 状态变化时有 |
 | `version_n?`、`job_id?` | |
