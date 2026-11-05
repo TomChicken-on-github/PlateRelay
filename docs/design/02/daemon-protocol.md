@@ -278,6 +278,7 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | MSG-HTTP-02 | `GET /daemon/v1/files/{fileId}?jobRef=` | 下载要打印的文件。只有派给这个 daemon 的打印机、还没结束的任务能下载。daemon 下完核对 SHA-256 |
 | MSG-HTTP-03 | `PUT /daemon/v1/snapshots/{printerId}` | 上传最新一张抓拍（`image/jpeg`），请求头 `X-Captured-At`。频率和错峰见 MSG-SNAP。面板只留内存里最新一张（R-CAM-03） |
 | MSG-HTTP-04 | `PUT /daemon/v1/timelapses/{jobRef}/{part}` | 上传延时摄影。请求头带 `X-Content-SHA256`；面板写进对象存储、核对大小和哈希，成功才返回 `201`，daemon 收到 `201` 才删打印机里的原文件（F-PRT-10） |
+| MSG-HTTP-05 | `PUT /daemon/v1/end-photos/{jobRef}` | 上传结束照片（`image/jpeg`，请求头 `X-Captured-At`）。daemon 在发 `job.finished`、`job.failed`、`job.cancelled` 时自己立刻拍，不等面板命令（R-CAM-11）；不走抓拍的替换队列，失败按退避重试，直到面板返回 `201` |
 
 ## 11. 媒体通道（MSG-MEDIA）
 
@@ -299,7 +300,7 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | 编号 | 约定 |
 | --- | --- |
 | MSG-SNAP-01 | 频率（R-CAM-08）：面板用 `snapshot.mode` 告诉 daemon 每台打印机现在有没有人在看（有人开着概况页或这台的详情，靠 SSE 的订阅知道）。有人看：打印中按 `watchedPrintingSeconds`，其他状态按 `watchedOtherSeconds`；没人看：按 `unwatchedSeconds`。 |
-| MSG-SNAP-02 | 第一个人打开时面板发 `snapshot.now`，daemon 立刻补拍一张；打印机报错时也发一次（R-CAM-10）。 |
+| MSG-SNAP-02 | 第一个人打开时面板发 `snapshot.now`，daemon 立刻补拍一张；打印机报错时也发一次（R-CAM-10）。任务结束时 daemon 自己拍结束照片，走 MSG-HTTP-05（R-CAM-11）。 |
 | MSG-SNAP-03 | 正在推流时，daemon 从流里截帧当抓拍，不另外去拍。 |
 | MSG-SNAP-04 | 错峰（R-CAM-09）：daemon 把它名下的打印机按 ID 排序，第 k 台的拍照时间偏移 `k × staggerSeconds`，再加 ±10% 随机抖动；`snapshot.now` 同时来了好几台时，也按这个顺序依次拍。 |
 | MSG-SNAP-05 | 上传队列：一个 daemon 只有一个抓拍上传队列，一张传完再传下一张，总速率不超过 `uploadKbps`。同一台打印机还没传出去的旧图被新图替换，不补传旧的。 |

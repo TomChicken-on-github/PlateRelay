@@ -581,6 +581,35 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/OrderRecord'}
         default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: addDeviceStopNote
+      tags: [orders]
+      summary: 给"在设备端停止"补一条备注
+      x-permission: printer:operate
+      x-rules: [R-NTE-01, R-NTE-03]
+      description: 只能指向 kind=print.stopped_on_device 的记录。记录只追加（E-GEN-10），所以备注是一条新记录 note.added，data.refRecordId 指向原记录，归在"打印"节点下（Q217）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refRecordId: {type: string, format: uuid}
+                note: {type: string, minLength: 1, maxLength: 2000}
+                noteVisible: {type: boolean, default: false}
+              required: [refRecordId, note]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderRecord'}
+        default: {$ref: '#/components/responses/Problem'}
   /orders/{orderId}/versions/{n}/file:
     get:
       operationId: downloadVersionFile
@@ -2737,7 +2766,18 @@ components:
             type: array
             items: {type: string}
             description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
-          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）}
+          endPhotos:
+            type: array
+            description: 每次派单的结束照片，最新的在前（R-CAM-11、Q217）
+            items:
+              type: object
+              properties:
+                dispatchId: {type: string, format: uuid}
+                capturedAt: {type: string, format: date-time}
+                url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+              required: [dispatchId, capturedAt, url]
+              additionalProperties: false
+          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）}
         required: [activeVersion, versions, revisions, nodes, actions]
         additionalProperties: false
     OrderRecord:
