@@ -276,7 +276,7 @@
 | `storage_slot` | text? | 入库暂存位（R-PCK-01） |
 | `store_photo_key` | text? | 入库照片 |
 | `submitted_at` | timestamptz | |
-| `closed_at` | timestamptz? | 进终态的时间；文件保留期从这里算（R-FIL-01）。失败按终态算【建议，同 R-FIL-02】 |
+| `closed_at` | timestamptz? | 进终态的时间；文件保留期从这里算（R-FIL-01）。失败从进失败时开始算（R-FIL-02） |
 | `files_purged_at` | timestamptz? | 文件已删除；之后不能重打（R-PRT-10） |
 
 约束：
