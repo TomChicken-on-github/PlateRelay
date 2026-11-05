@@ -1393,8 +1393,8 @@ paths:
       summary: 停止打印
       x-permission: printer:stop
       x-transitions: [S-ORD-T09, S-ORD-T13]
-      x-rules: [R-PRT-04, R-PRT-05, R-CMD-03, P-01]
-      description: 前端先让人选原因并二次确认。准备中、打印中、暂停中都发 job.stop、挂停止请求中，不受控制命令锁限制，停止请求中也能再发（Q203）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。
+      x-rules: [R-PRT-04, R-PRT-05, R-CMD-03, R-CMD-04, P-01]
+      description: 前端先让人选原因并二次确认。准备中、打印中、暂停中都发 job.stop、挂停止请求中，不受控制命令锁限制，停止请求中也能再发（Q203）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或解锁时刷新为空闲且无这次任务痕迹后才回原位（R-CMD-04），没有单独的"判为没到"接口（Q220）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1412,37 +1412,6 @@ paths:
               additionalProperties: false
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
-        default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/start-not-arrived:
-    post:
-      operationId: markStartNotArrived
-      tags: [printers]
-      summary: 判为开打没到
-      x-permission: order:dispatch
-      x-transitions: [S-ORD-T09, S-PRN-T05]
-      x-rules: [R-CMD-04, R-DSP-08]
-      description: 只在开打到期还没进准备中、待办已提醒时可用，否则 409 state_conflict。现场人员看过摄像头后判断。不发任何命令，打印任务结束为 NOT_ARRIVED，按映射表订单回原位（文档 1 §4A），记审计。
-      parameters:
-      - {$ref: '#/components/parameters/PrinterId'}
-      - {$ref: '#/components/parameters/IdempotencyKey'}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                expectedState: {type: string, enum: [PREPARING]}
-                jobId: {type: string, format: uuid}
-                note: {type: string, maxLength: 500}
-              required: [expectedState, jobId]
-              additionalProperties: false
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PrinterDetail'}
         default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/errors/{errorId}/resolve:
     post:
@@ -2779,7 +2748,7 @@ components:
                 endedAt: {type: [string, 'null'], format: date-time}
                 outcome:
                   type: ['string', 'null']
-                  enum: [SEND_FAILED, START_FAILED, NOT_ARRIVED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
+                  enum: [SEND_FAILED, START_FAILED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
                 endPhoto:
                   type: [object, 'null']
                   properties:
