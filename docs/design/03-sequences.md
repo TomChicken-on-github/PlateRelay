@@ -305,7 +305,7 @@ sequenceDiagram
     P-->>D: 201
     D->>R: 删掉原文件（F-PRT-10）
   end
-  S->>P: storeOrder（暂存位，照片，热床已清理）
+  S->>P: storeOrder（暂存位，照片，热床已清理；表单列出跳过的零件，R-SKP-05）
   P->>P: 同一个事务：订单 待取件（S-ORD-T16），打印机 空闲（S-PRN-T11、INV-12）
   P-->>A: 通知"可取件"（不能关，R-NTF-02）
   A->>P: issuePickupCode
