@@ -1606,6 +1606,44 @@ paths:
                 required: [items, nextCursor]
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/presence:
+    put:
+      operationId: putPrinterPresence
+      tags: [printers]
+      summary: 打印机详情页在场心跳
+      x-permission: printer:operate
+      x-rules: [R-VIS-10, R-CMD-10, API-RT-07]
+      description: 详情页打开时每 20 秒调一次，45 秒没续上就算离开。只在内存里记，不进数据库（Q245）。只是提示，不挡任何操作。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                streamId: {type: string, description: 这个浏览器 SSE 连接的 ID，用来区分同一个人开的多个页面}
+              required: [streamId]
+              additionalProperties: false
+      responses:
+        '204': {description: 已记下}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deletePrinterPresence
+      tags: [printers]
+      summary: 离开打印机详情页
+      x-permission: printer:operate
+      x-rules: [R-VIS-10, API-RT-07]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: streamId
+        in: query
+        required: true
+        schema: {type: string}
+      responses:
+        '204': {description: 已去掉}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/jobs:
     get:
       operationId: listPrinterJobs
