@@ -40,7 +40,7 @@
 | 状态值 | 文档 1 | | 标记值 | 文档 1 |
 | --- | --- | --- | --- | --- |
 | `OFFLINE` | S-PRN-OFFLINE | | `ATTENTION` | S-FLG-ATTENTION |
-| `IDLE` | S-PRN-IDLE | | `STOPPING` | S-FLG-STOPPING |
+| `IDLE` | S-PRN-IDLE | | | |
 | `PREPARING` | S-PRN-PREPARING | | `LOST` | S-FLG-LOST |
 | `PRINTING` | S-PRN-PRINTING | | `STORAGE_LOW` | S-FLG-STORAGE |
 | `PAUSED` | S-PRN-PAUSED | | `DAEMON_UPGRADE` | S-FLG-UPGRADE |
@@ -211,7 +211,6 @@
 
 | 标记 | `data` |
 | --- | --- |
-| `STOPPING` | `{ commandId, requestedBy, reasonText }` |
 | `ATTENTION` | `{ jobId?, errorId? }`，对账不一致时 `{ lastKnown, reported }`。`jobId` 是挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉 `ERROR`、`RUNOUT`，`LATE_START` 在迟到的任务结束时去掉（文档 1 §4A，Q226） |
 | `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
@@ -377,21 +376,19 @@
 | 列 | 说明 |
 | --- | --- |
 | `id` | 命令 ID，也是协议里的 `commandId`（Q143） |
-| `daemon_id`、`printer_id?`、`job_id?` | 和任务有关的命令（开打、停止、跳过零件、处理报错）挂在任务上；锁也按任务记（Q218） |
+| `daemon_id`、`printer_id?`、`job_id?` | 和任务有关的命令（开打、停止、跳过零件、处理报错）挂在任务上（Q218） |
 | `kind` | MSG-CMD 的类型，如 `job.start` |
 | `class` | `CONTROL` / `SETPOINT` / `READ`，由 `kind` 决定；`control` 按动作的 `category` 决定（MSG-CMD 表） |
 | `payload` | jsonb，不含任何凭据 |
 | `requested_by?` | 用户；系统发起的为空 |
 | `created_at`、`expires_at` | 有效期见 MSG-CMD-TTL |
 | `status` | `QUEUED` → `SENT` → `ACCEPTED` / `REJECTED` / `EXPIRED` / `FAILED` → `DONE`：投递进度，daemon 回什么记什么 |
-| `unlock_at?` | 控制命令的解锁时间（R-CMD-02，MSG-CMD-LOCK）：到达打印机 + CFG-CMD-01；还没收到回复时 = `expires_at` + CFG-CMD-01。`job.start` 传文件期间为空（按进度锁住），`job.staged` 后 = 那一刻 + CFG-CMD-03 |
-| `unlocked_at?`、`unlocked_by?` | 实际解锁的时间和原因：`printer_report`（打印机上报了状态变化）、`timeout`、`daemon_result`（回了 `rejected` / `expired` / `failed`） |
 | `result` | jsonb，daemon 回报的原样结果（含固件拒绝原因，R-PRT-15） |
 | `finished_at?` | |
 
 `ACCEPTED` 只表示打印机收下了命令；业务状态只跟着打印机上报的事件走（P-01）。
 
-- 一台打印机同一时间最多一条锁着的控制命令，停止除外（R-CMD-03、INV-16）：`unique (printer_id) where class = 'CONTROL' and kind <> 'job.stop' and unlocked_at is null`。到了 `unlock_at` 由面板的定时任务写 `unlocked_at`。发停止不受这条约束，也不解除别的命令的锁。
+- 没有命令锁，不限制同一台打印机同时有几条控制命令（Q243）；`unlock_at`、`unlocked_at`、`unlocked_by` 和锁的唯一索引已删除。
 - 不记命令"执行了没有"（Q215）：订单和打印机状态只跟着打印机上报的事件走（P-01）。
 
 ### E-PCK `pickup_codes`

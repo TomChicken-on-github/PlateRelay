@@ -76,7 +76,6 @@
 | 409 | `idempotency_in_progress` | 同一个幂等键的上一个请求还没处理完 |
 | 409 | `printer_unreachable` | 打印机的 daemon 不在线，命令发不出去 |
 | 409 | `printer_flagged` | 打印机挂了阻止派单的标记、在维护中或已停用，不能派单（R-DSP-15，Q233），`params.flags`（如 `["ATTENTION"]`，维护中为 `MAINTENANCE`，停用为 `DISABLED`） |
-| 409 | `command_pending` | 这台打印机上一条控制命令还没解锁（R-CMD-03），`params.commandId`、`params.unlockAt`；停止和设定值命令（R-CMD-06）不会收到这个错误 |
 | 410 | `file_expired` | 文件已过保留期被删（R-PRT-10、R-FIL-01） |
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
@@ -125,8 +124,8 @@
 | 编号 | 约定 |
 | --- | --- |
 | API-ASYNC-01 | 会发命令给打印机的接口（派单、停止、处理报错、设备控制、跳过零件、刷新）只负责"记下请求并发出命令"，返回 `202 Accepted` 和命令 ID（E-CMD）。 |
-| API-ASYNC-02 | 返回 202 时，业务状态最多进入中间态（停止请求中），中间态不能撤销（R-PRT-04），不进入打印机确认后才能进的状态（P-01）。真正的结果通过实时推送（API-RT）和打印机上报到达。 |
-| API-ASYNC-04 | 打印机卡片和详情带 `pendingCommand`（锁着的那条控制命令：类型、发出时间、解锁时间）和 `pendingStop`（最近一次还没确认的停止）。界面据此让点过的按钮变灰并转加载圆环、置灰其他控制按钮（R-CMD-01、R-CMD-03）；解锁时推 `command.updated` 和 `printer.updated`（Q211、Q215）。 |
+| API-ASYNC-02 | 返回 202 时，业务状态不变，不进入打印机确认后才能进的状态（P-01）。真正的结果通过实时推送（API-RT）和打印机上报到达。 |
+| API-ASYNC-04 | 没有命令锁，接口不因"上一条命令还没结果"拒绝（Q243）。按钮能不能点由前端按打印机上报的状态和 IF-ADP-05 决定，服务端按同一张表校验，不符返回 409 `state_conflict`。点过的按钮转圈是纯前端行为（最多 10 秒，R-CMD-01），不进数据库。daemon 回报失败时推 `command.updated`，前端原样显示固件给的原因（R-PRT-15）。`pendingCommand`、`pendingStop` 已删除（Q243）。 |
 | API-ASYNC-03 | 打印机的 daemon 不在线时直接返回 409 `printer_unreachable`，不排队等它上线；命令有效期见 MSG-CMD-TTL。 |
 
 ## 9. 实时推送
