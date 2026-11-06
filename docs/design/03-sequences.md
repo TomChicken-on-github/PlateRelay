@@ -136,7 +136,7 @@ sequenceDiagram
   D->>R: FTPS 上传 pr-{jobRef 后 12 位}.gcode.3mf（面板显示传输进度）
   D->>D: 确认打印机没在跑任务（空闲或停在打完 / 失败 / 已取消都行；准备中、打印中、暂停中回 rejected printer_busy，不发，Q239）
   D->>R: 发开打指令（带映射）
-  D-->>P: printer.event job.staged（R-CMD-04 的 60 秒从这里算）
+  D-->>P: printer.event job.staged（R-CMD-04 的 CFG-CMD-05 从这里算）
   R-->>D: 状态：准备中 → 打印中
   D-->>P: printer.event job.started
   P->>P: 订单 打印中（S-ORD-T11、R-PRT-01），打印机 打印中（S-PRN-T04）
@@ -153,7 +153,7 @@ sequenceDiagram
 | 11–14 | 传文件期间有人点停止 | daemon 中止传输、删掉传了一半的文件、记下这个 jobRef 不再发开打，回 job.cancelled beforeStart=true → 任务结局 STOPPED_BEFORE_START，订单回原位（SEQ-04） | MSG-CMD-START、Q223 |
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
-| 15–17 | job.staged 后 60 秒（后端常量，真机实测再定），任务 prepared_at 仍为空（打印机自己没报过准备中） | 进待办"开打可能没到"，一直留到有人处理或打印机有上报。现场人员看摄像头后点"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机没在跑任务，不会打两次 | R-CMD-04、R-PRT-17、MSG-CMD-START、Q243 |
+| 15–17 | job.staged 后过了 CFG-CMD-05（默认 60 秒，真机实测再定），任务 prepared_at 仍为空（打印机自己没报过准备中） | 进待办"开打可能没到"，一直留到有人处理或打印机有上报。现场人员看摄像头后点"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机没在跑任务，不会打两次 | R-CMD-04、R-PRT-17、MSG-CMD-START、Q243 |
 | 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
