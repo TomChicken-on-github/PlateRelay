@@ -134,7 +134,7 @@ sequenceDiagram
   P->>O: 签名读取
   D->>D: 核对 SHA-256
   D->>R: FTPS 上传 pr-{jobRef 后 12 位}.gcode.3mf（传输期间按进度锁住，不计时）
-  D->>D: 确认打印机空闲（不空闲回 rejected printer_busy，不发）
+  D->>D: 确认打印机没在跑任务（空闲或停在打完 / 失败 / 已取消都行；准备中、打印中、暂停中回 rejected printer_busy，不发，Q239）
   D->>R: 发开打指令（带映射）
   D-->>P: printer.event job.staged（CFG-CMD-03 计时从这里开始，MSG-CMD-LOCK）
   R-->>D: 状态：准备中 → 打印中
@@ -235,6 +235,7 @@ sequenceDiagram
 | 8 | 需要现场处理的选项没确认在现场 | 422 | E-PERR、驱动草稿 §6.5 |
 | 8 | 别人已经处理了 | 409 | 驱动草稿 §6.5 |
 | 8 | 这台打印机上一条控制命令还锁着（包括上一次处理报错） | 409 `command_pending`；选"停止"的动作除外 | R-CMD-03 |
+| 2 | 报错发生在准备阶段（进料失败、堵头、自检，开打前） | 任务 准备中 → 暂停中（paused_from=PREPARING），订单仍是已派单，打印机仍是准备中并挂等待处理；同样走 resolveError；恢复后任务回准备中，真正开打才进打印中。这时停止 → STOPPED_BEFORE_START，订单回原位 | S-JOB、Q240 |
 | 10–12 | 到 CFG-CMD-01 还没看到报错清除 | 按钮解锁并提示看摄像头，由人判断要不要重新选动作（新命令），不自动重发 | R-CMD-02、INV-16 |
 | 10 | 固件拒绝 | command.result failed，原样显示固件的话 | R-PRT-15 |
 | 11 | 有人在打印机屏幕上处理了 | error.cleared clearedBy=DEVICE，记"在设备端处理" | MSG-EVT |
@@ -262,6 +263,8 @@ sequenceDiagram
   P->>P: 按 seq 去重、按 MSG-RECON-02 对账表推进
   alt 对得上
     P->>P: 补齐状态转换，去掉失联（R-PRT-07）
+  else 断线期间打印机重启过（deviceBoot 变了，实际最先检查）
+    P->>P: 不自动结束，挂等待处理 RECONCILE_MISMATCH，人判（Q242）
   else 打印机最后一个任务是这个 jobRef，停在打完或失败
     P->>P: 按打印机事实结束任务 FINISHED / FAILED，不要人判（MSG-RECON-02、Q234）
   else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹
@@ -323,6 +326,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 11 | 哈希不对 | 面板不返回 201，daemon 不删原文件，下次重试 | F-PRT-10 |
 | 14 | 没勾"热床已清理" / 没照片 | 422 | R-PCK-01 |
+| 14 前 | 打印机进待清板超过 CFG-PRT-04（默认 10 分钟）还没入库或清板 | 提醒现场人员，之后每隔 CFG-PRT-04 再提醒，直到清板 | R-PRT-21、Q241 |
 | 18 | 码过期、作废、不存在 | 404，申请者重新签发 | R-PCK-03 |
 | 19 | 两个现场人员同时扫 | 后到的 409 `state_conflict` | INV-05 |
 | 15 后 | 长期没人取 | 每 CFG-PCK-02 提醒；管理员可以 disposeOrder（S-ORD-T21） | R-PCK-05 |
