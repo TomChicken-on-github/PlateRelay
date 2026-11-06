@@ -327,6 +327,7 @@
 | `attempt` | 这个订单的第几次打印，从 1 开始；订单详情的"打印记录"显示"第 N 次" |
 | `phase` | `job_phase`（文档 1 §4A.1） |
 | `phase_since` | |
+| `paused_from?` | `PREPARING` 或 `PRINTING`：只在 `phase = PAUSED` 时有值，恢复时回到它（文档 1 §4A，Q240） |
 | `order_id`、`version_id`、`printer_id` | |
 | `dispatched_by`、`dispatched_at` | |
 | `suggested` | 是不是系统建议的那一单（R-DSP-02） |
