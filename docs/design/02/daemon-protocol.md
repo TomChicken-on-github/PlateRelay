@@ -102,7 +102,7 @@ daemon                                  面板
   "job": {
     "jobRef": "0192…",
     "external": false,
-    "name": "pr-0192f3c1.gcode.3mf",
+    "name": "pr-a1b2c3d4e5f6.gcode.3mf",
     "percent": 37,
     "remainingSeconds": 3120,
     "layer": 58, "totalLayers": 210,
@@ -115,12 +115,14 @@ daemon                                  面板
   "storage": [{ "medium": "internal", "present": true, "writable": true, "freeBytes": 1234567890 }],
   "activeErrors": [],
   "controls": { "light": "on", "speedLevel": 2 },
-  "camera": { "stream": true, "snapshot": true }
+  "camera": { "stream": true, "snapshot": true },
+  "deviceBoot": "…"
 }
 ```
 
 - `state` 用适配器的标准状态（IF-ADP-03），不是面板的打印机状态；换算规则在面板（IF-ADP-04）。
 - `job.jobRef` 是这次的打印任务 ID（E-JOB）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
+- `deviceBoot` 是适配器给的"打印机这次开机"的标识（如从运行时长推出的开机时刻），拿不到就省略。面板和上次见到的比，变了 = 断线期间打印机重启过（Q242）。
 - 拿不到的字段省略，不填假值。
 
 ### MSG-EVT `printer.event`
@@ -237,7 +239,7 @@ daemon                                  面板
 - daemon 收到 `job.start` 开始下载就回 `accepted`；文件放到打印机上、开打指令已发出后发 `job.staged`。
 - 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发）。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
-- 发开打指令之前，daemon 先确认打印机上报的是空闲；在准备中、打印中或别的非空闲状态时回 `rejected`（`code: printer_busy`），什么都不发，按下发失败处理。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
+- 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
 - 传文件期间（开打指令还没发）收到这个 `jobRef` 的 `job.stop`：daemon 中止下载或上传，删掉自己传了一半的文件（INV-15），把"这个 `jobRef` 不再发开打"和命令 ID 一样先写进硬盘（R-CMD-08），然后回 `job.cancelled { commandId, beforeStart: true }`。面板把任务结束为 `STOPPED_BEFORE_START`，订单回原位。开打指令只有 daemon 发，所以这里以 daemon 为准，不用等打印机（Q223）。
 - 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。
 
@@ -263,11 +265,12 @@ daemon                                  面板
 
 | 面板记录 | 打印机快照 | 处理 |
 | --- | --- | --- |
+| 已派单 / 打印中 / 停止请求中 | 快照的 `deviceBoot` 和上次见到的不一样（断线期间打印机重启过，比如断电续打） | 不自动结束任务，也不按快照推进；挂等待处理，原因 `RECONCILE_MISMATCH`，现场人员判（R-PRT-07、Q242）。放在第一行，最先检查 |
 | 停止请求中 | 已经停了 | 按停止确认处理 |
 | 停止请求中 | 还在打或暂停着这个 `jobRef` | 停止未生效（R-CMD-05）：去掉停止请求中，待办提醒，可以再按停止（Q234） |
 | 已派单 | 这个 `jobRef` 准备中 | 只记 `prepared_at`（没记过的话），订单仍是已派单 |
 | 已派单 | 这个 `jobRef` 在打印 | 补一条"开始打印"，S-ORD-T11 |
-| 已派单 / 打印中 | 同一个 `jobRef`，但断线期间状态变了（暂停、报错、断料、继续） | 按快照经 S-JOB 映射表推进：暂停原因、等待处理、恢复（Q234） |
+| 已派单 / 打印中 | 同一个 `jobRef`，但断线期间状态变了（暂停、报错、断料、继续；准备阶段的暂停也算，Q240） | 按快照经 S-JOB 映射表推进：暂停原因、等待处理、恢复（Q234） |
 | 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录（清单丢了时按 MSG-JOBREF-02 用面板下发的 `currentJobRef` 认领） | 按结束记录补事件（打完或失败） |
 | 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
 | 已派单 / 打印中 | 打印机最后一个任务就是这个 `jobRef`（任务名或文件后缀对得上），打印机自己停在打完或失败（如拓竹 `gcode_state` = `FINISH` / `FAILED`） | 按打印机这个事实把任务结束为 `FINISHED` 或 `FAILED`，不要人判（P-01、Q234）。先于下一行检查 |
