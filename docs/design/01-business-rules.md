@@ -114,7 +114,7 @@
 | S-ORD-PENDING | 待审核 | Pending review | 新提交，或修改后等重审。有排序值 = 修改待重审，冻结在原位（Q84）。 | |
 | S-ORD-REJECTED | 已驳回 | Rejected | 新提交被驳回。 | ● |
 | S-ORD-QUEUED | 排队中 | Queued | 审核通过，等派单。 | |
-| S-ORD-DISPATCHED | 已派单 | Dispatched | 任务已发到打印机，还没开始打印（Q76）。 | |
+| S-ORD-DISPATCHED | 已派单 | Dispatched | 订单有一个指定了打印机的当前任务，打印机还没报开始打印。传文件和准备中两个阶段都算（Q76、Q246）。 | |
 | S-ORD-PRINTING | 打印中 | Printing | 打印机报告已开始打印。暂停期间仍是打印中（Q90）。 | |
 | S-ORD-FAILED | 失败 | Failed | 打印机确认终止。是结果：唯一出口是重打（R-PRT-09），不能取消，不点就一直停在这里。 | |
 | S-ORD-PRINTED | 待入库 | Printed, awaiting storage | 打印机确认打完，等铲件入库。 | |
@@ -161,7 +161,7 @@
 | --- | --- | --- | --- |
 | S-PRN-OFFLINE | 离线 | Offline | 连不上这台打印机（或它的 daemon 断线），而且断线时它是空闲（Q78、Q92、Q208）。 |
 | S-PRN-IDLE | 空闲 | Idle | 可以接单（还要看开放开关、存储空间、标记）。 |
-| S-PRN-PREPARING | 准备中 | Preparing | 任务已下发，还没开始打印。对应订单"已派单"。 |
+| S-PRN-PREPARING | 准备中 | Preparing | 有一个派给它的当前任务，还没开始打印（含 daemon 还在传文件）。对应订单"已派单"（Q246）。 |
 | S-PRN-PRINTING | 打印中 | Printing | 正在打印。 |
 | S-PRN-PAUSED | 暂停中 | Paused | 打印暂停，带原因：人工暂停、报错暂停、断料（Q90）。 |
 | S-PRN-CLEARING | 待清板 | Clearing required | 打完或停下，等人确认铲件、清板（INV-01）。 |
