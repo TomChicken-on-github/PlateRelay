@@ -129,7 +129,7 @@ sequenceDiagram
   P->>P: 按映射表（§4A）：订单 已派单（S-ORD-T08），打印机 准备中（S-PRN-T03），记越过的单（R-DSP-02）
   P->>D: command job.start（jobRef = 打印任务 ID，60 秒有效）
   P-->>S: 202 CommandAccepted
-  D-->>P: command.result accepted（开始下载）
+  D-->>P: command.result accepted（进下载队列，DAE-XFER）
   D->>P: GET /daemon/v1/files/{fileId}（MSG-HTTP-02）
   P->>O: 签名读取
   D->>D: 核对 SHA-256
