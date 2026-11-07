@@ -178,7 +178,7 @@ sequenceDiagram
   alt 已经开打
     P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08）
   else 还没开打
-    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机 空闲（S-PRN-T05），任务结局 STOPPED_BEFORE_START
+    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机报过准备中 → 待清板（S-PRN-T16，Q306），没报过 → 空闲（S-PRN-T05），任务结局 STOPPED_BEFORE_START
   end
   P-->>S: SSE printer.updated / order.updated，前端停转圈
 ```
