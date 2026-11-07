@@ -191,6 +191,7 @@
 | `maintenance_reason` | text? | 只在 `MAINTENANCE` 时有值（Q148） |
 | `current_job_id` | uuid? | 正在占用它的打印任务；`CLEARING_REQUIRED` 时指向刚结束的那个 |
 | `bed_type` | text? | 打印机报的板型；报不了时为空（R-DSP-09） |
+| `last_seen_job_name` | text? | 打印机上报的最后一个任务名（含外部任务），每次上报变了就更新。离线重连时和打印机报的比较，判断离线期间有没有外部任务打完（S-PRN-T15，Q304） |
 | `access_code_cipher` | text? | 浏览器用 daemon 公钥加密的访问码（RSA-OAEP），面板解不开 |
 | `access_code_key_fingerprint` | text? | 用哪把公钥加密的；和 daemon 公钥对不上时要重填 |
 | `access_code_set_at` | timestamptz? | |

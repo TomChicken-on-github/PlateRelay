@@ -143,7 +143,7 @@ daemon                                  面板
 | `job.paused` | `{ reason: "USER" \| "ERROR" \| "RUNOUT" }` | S-PRN-T06，R-PRT-03 |
 | `job.resumed` | | S-PRN-T07 |
 | `job.finished` | | S-ORD-T12、S-PRN-T08 |
-| `job.failed` | `{ reason, beforeStart }` | 开打前：S-ORD-T09；开打后：S-ORD-T13 |
+| `job.failed` | `{ reason, beforeStart }` | 开打前：任务以 `START_FAILED` 结束，S-ORD-T09（R-PRT-23）；开打后：S-ORD-T13 |
 | `job.cancelled` | `{ commandId?, beforeStart }` | 带面板停止命令的 ID = 面板发的停止生效了；没有 = 有人在打印机屏幕上停的。订单去向只看 `beforeStart`：开打前停下 → S-ORD-T09，开打后 → S-ORD-T13 |
 | `job.parts_skipped` | `{ partIds }` | 打印机上报的已跳过列表，写进 E-JOB `skipped_parts`，记一条"跳过零件"记录（R-SKP-04、R-SKP-06） |
 | `external.started` | `{ name }` | S-PRN-T09，R-PRT-11（空闲、待清板进外部占用，待清板另挂 `UNCLEARED_START`；维护中保持维护中，只显示进度，Q225） |
@@ -275,7 +275,9 @@ daemon                                  面板
 | 已派单 / 打印中 | 打印机最后一个任务就是这个 `jobRef`（任务名或文件后缀对得上），打印机自己停在打完或失败（如拓竹 `gcode_state` = `FINISH` / `FAILED`） | 按打印机这个事实把任务结束为 `FINISHED` 或 `FAILED`，不要人判（P-01、Q234）。先于下一行检查 |
 | 已派单 / 打印中 | 空闲，找不到结束记录，也看不到上一行那种打完 / 失败状态，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
-| 空闲 / 待清板 / 维护中 | 在打一个对不上的任务 | 按 R-PRT-11：外部占用；待清板另挂 `UNCLEARED_START`；维护中保持维护中 |
+| 空闲 / 离线 / 待清板 / 维护中 | 在打一个对不上的任务 | 按 R-PRT-11：外部占用（离线出发是 S-PRN-T14）；待清板另挂 `UNCLEARED_START`；维护中保持维护中 |
+| 离线 | 停在打完 / 失败 / 已取消，最后任务名和 `last_seen_job_name` 不一样 | 离线期间外部任务结束了：待清板（S-PRN-T15，Q304） |
+| 离线 | 其他（空闲；或停在打完 / 失败但任务名和上次一样） | 空闲（S-PRN-T01） |
 | 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单。打印机没有当前任务 → 外部占用；已有别的当前任务 → 打印机状态不变。都挂等待处理，原因 `LATE_START`（R-PRT-17） |
 
 不只是重连：在线时 `printer.event` 报了一个已结束任务的准备中或开打，面板也按上表最后一行处理（R-PRT-17）。
