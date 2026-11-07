@@ -219,7 +219,7 @@ daemon                                  面板
 
 **MSG-CMD-TTL**（Q143）：
 
-- 有效期指"必须在这之前开始执行"。`job.start` 下载文件的时间不算在内，开始下载就算开始执行。
+- 有效期指"必须在这之前开始执行"。`job.start` 排队和下载文件的时间不算在内，进了下载队列就算开始执行（DAE-XFER-02，Q254）。
 - daemon 按 `welcome.serverTime` 算出和面板的时钟差，用面板的时间判断过期。收到时已经过期的，回 `expired`，不执行。这样断线很久之后，积压的旧"开打"不会突然被执行。
 - daemon 回 `expired` 是事实（它保证过期的命令永远不再执行）：`job.start` = 下发失败，订单回原位（R-DSP-08）；`job.stop` = 这次停止没执行，停止按钮照常可点（R-CMD-05）。
 - 面板自己算出过了 `expiresAt` 但没收到回复，**不算事实**：daemon 可能在过期前已经执行、只是回复还在它的发件箱里（MSG-ENV-03）。这时只把 `status` 记成 `EXPIRED` 方便排查，订单和打印机状态等打印机上报。
@@ -235,18 +235,18 @@ daemon                                  面板
 
 **MSG-CMD-START**（传文件，Q205）：
 
-- daemon 收到 `job.start` 开始下载就回 `accepted`；文件放到打印机上、开打指令已发出后发 `job.staged`。
-- 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发）。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
+- daemon 收到 `job.start`、进了下载队列就回 `accepted`。同时下载的个数受 CFG-CMD-06 限制（默认 2），本机缓存里有同一 sha256 的文件就跳过下载（CFG-CMD-07，DAE-XFER、DAE-STO-05）；文件放到打印机上、开打指令已发出后发 `job.staged`。
+- 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发），从真正开始传起算，排队时间不算。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
 - 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
 - 传文件期间（开打指令还没发）收到这个 `jobRef` 的 `job.stop`：daemon 中止下载或上传，删掉自己传了一半的文件（INV-15），把"这个 `jobRef` 不再发开打"和命令 ID 一样先写进硬盘（R-CMD-08），然后回 `job.cancelled { commandId, beforeStart: true }`。面板把任务结束为 `STOPPED_BEFORE_START`，订单回原位。开打指令只有 daemon 发，所以这里以 daemon 为准，不用等打印机（Q223）。
-- 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。
+- 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。进度用 `command.result.data.step`：`queued` → `download` → `upload`，前端据此显示"排队中"。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
 
 ### MSG-CFG `config.update`
 
-面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, discoveryEnabled }`。对应 CFG-CAM-02、03、07、08、09 和 CFG-CMD-02。
+面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, downloadConcurrency, fileCacheBytes, discoveryEnabled }`。对应 CFG-CAM-02、03、07、08、09 和 CFG-CMD-02、06、07。
 
 ### 其他
 

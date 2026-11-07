@@ -433,6 +433,8 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ### 9.1 包的拆分
 
+> 2026-11-07（Q251）：v1 **不拆包**，适配器放在 daemon 包里（`platerelay_daemon/adapter_api/` + `adapters/<brand>/`），不用 entry point；本节和 §9.2 留作以后有第二个品牌时的方向。daemon 内部结构以[文档 2 · daemon-internals.md](design/02/daemon-internals.md) 为准。
+
 | 包 | 内容 |
 |---|---|
 | `driver-api` | 只放接口：基类、数据模型（状态、事件、报错、能力清单）、错误类型、**一致性测试套件** |
