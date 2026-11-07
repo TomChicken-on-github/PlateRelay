@@ -211,6 +211,7 @@ daemon                                  面板
 | `error.resolve` | `{ errorId, action }` | 60 秒 | 控制；动作是"停止"时按 `job.stop` 处理 | 这条报错从上报里消失，或打印机状态变了 | R-PRT-14 |
 | `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态变了；设定值：界面短暂保持刚设的值，之后显示上报的值（R-CMD-06） | R-PRT-15 |
 | `refresh` | `{}` | 10 秒 | 只读 | — | R-PRT-12（拓竹 = 一次 `pushall`，只读） |
+| `storage.list` | `{}` | 10 秒 | 只读 | — | R-PRT-22、F-PRT-11。回 `done`，`data = { media: [{ medium, present, freeBytes, totalBytes }], files: [{ medium, name, sizeBytes, modifiedAt, system }] }`；`system` 按 MSG-JOBREF-02 判断。只列，不删不下载 |
 | `camera.open` | H.264 机型：`{ srtUrl, rtspsUrl, publishToken, latencyMs, expiresAt }`；JPEG 帧机型：`{ framesUrl }` | 30 秒 | 只读 | — | MSG-MEDIA、R-CAM-06 |
 | `camera.close` | `{}` | 30 秒 | 只读 | — | R-CAM-06 |
 | `snapshot.mode` | `{ watched: bool }`：这台打印机现在有没有人在看 | 30 秒 | 只读 | — | R-CAM-08 |
