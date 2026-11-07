@@ -20,7 +20,7 @@
 | --- | --- |
 | API-AUTH-01 | 浏览器用会话 Cookie：`pr_session`，`HttpOnly`、`Secure`、`SameSite=Lax`、`Path=/`。库里只存哈希（E-SESS）。 |
 | API-AUTH-02 | 防 CSRF（Q153）：所有写请求检查 `Origin`（缺了就看 `Sec-Fetch-Site`），不是本站来源一律 403；再加上 `SameSite=Lax`。不另发 CSRF 令牌。 |
-| API-AUTH-03 | 没登录 = 访客。访客只能调声明为 `guest` 的接口，并且要看开关（概况页 CFG-UI-01、实况 CFG-CAM-01）。 |
+| API-AUTH-03 | 没登录 = 访客。访客只能调声明为 `guest` 的接口，并且要看开关（概况页 CFG-UI-01、实况 CFG-CAM-01、概况卡片文件名 CFG-UI-02）。 |
 | API-AUTH-04 | 用户被停用或改了角色，他的会话立刻按新状态生效：停用 = 全部会话作废，改角色 = 下一个请求就用新权限。两种情况服务端都立刻断开这个用户所有的 SSE 连接（API-RT-04）和实况会话（API-CAM-01，WHEP / LL-HLS / WebSocket 令牌作废），让他按新状态重连（Q235）。 |
 | API-AUTH-05 | v1 没有个人访问令牌（文档 0 §7）。daemon 不走这套接口，走 [daemon 协议](daemon-protocol.md)。 |
 | API-AUTH-06 | 设备令牌（Q182）：第一次成功登录后，服务器给这个浏览器发一个签名的长期 Cookie `pr_device`（`HttpOnly`、`Secure`，1 年），只用来区分设备、放宽 IP 兜底限频，不能用来登录。不收集浏览器指纹。 |
@@ -32,7 +32,7 @@
 | API-PERM-01 | openapi.yaml 里每个操作都有 `x-permission`，值是文档 1 §2.2 的一个权限节点，或者下面三个特殊值之一。CI 遍历代码里的路由，没有声明的、和 openapi.yaml 不一致的都失败（F-API-02）。 |
 | API-PERM-02 | 特殊值：`public` = 谁都能调（登录、注册、初始化向导）；`guest` = 访客也能调，但受开关约束（API-AUTH-03）；`authenticated` = 登录就行（个人设置、自己的通知）。 |
 | API-PERM-03 | 一个操作要求"自己的或者有某权限"时写成 `x-permission: [order:cancel:own, order:cancel:any]`，表示满足任意一个即可；`:own` 由服务端按订单所有者判断。 |
-| API-PERM-04 | 字段按权限裁剪：schema 里标了 `x-requires: <权限节点>` 的字段，没有这个权限的人收到的响应里**没有这个字段**（不是 `null`）。比如订单的文件名对没有 `order:view:any` 的人隐藏（R-VIS-02）。 |
+| API-PERM-04 | 字段按权限裁剪：schema 里标了 `x-requires: <权限节点>` 的字段，没有这个权限的人收到的响应里**没有这个字段**（不是 `null`）。比如订单的文件名对没有 `order:view:any` 的人隐藏（R-VIS-01）；概况卡片上当前任务的文件名要 `overview:filename:view`，访客要 CFG-UI-02 打开（R-VIS-02）。 |
 | API-PERM-05 | 看不到的东西返回 404，不返回 403，免得暴露"它存在"。比如申请者查别人的订单。只有"看得到但不能做"才返回 403。 |
 | API-PERM-06 | 被拒绝的写请求也记审计，`result = DENIED`。 |
 

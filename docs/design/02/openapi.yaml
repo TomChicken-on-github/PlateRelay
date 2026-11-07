@@ -3129,7 +3129,7 @@ components:
               oneOf:
               - {$ref: '#/components/schemas/Person'}
               - {type: 'null'}
-            fileName: {type: string, description: 'x-requires: order:view:any（R-VIS-02）'}
+            fileName: {type: string, description: 'x-requires: overview:filename:view（访客看 CFG-UI-02）。本系统派的任务 = 选手上传时的原文件名，不是打印机上的 pr-<jobRef 后 12 位> 文件名；external 为 true 时是打印机上报的文件名，只给 order:view:any（R-VIS-02，Q246）'}
             external: {type: boolean}
             percent: {type: [integer, 'null']}
             remainingSeconds: {type: [integer, 'null'], minimum: 0}
