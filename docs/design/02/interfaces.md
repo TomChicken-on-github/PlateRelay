@@ -114,7 +114,7 @@ class Discovery(Protocol):
 | `PRINTING` | 打印中 / 外部占用 |
 | `PAUSED` | 暂停中，原因 `USER` |
 | `ERROR_PAUSED` | 暂停中，原因 `ERROR` 或 `RUNOUT`，挂等待处理 |
-| `FINISHED`、`FAILED`、`CANCELLED` | 待清板（INV-01）；订单按事件走 |
+| `FINISHED`、`FAILED`、`CANCELLED` | 只在**进入**这个状态时（上一次报的不是它）→ 待清板（INV-01），订单按事件走。拓竹打完后一直停在 FINISH，清完板也不变，所以停留在这个状态不算新事件；清板后不会被它拉回待清板。离线重连时按 MSG-RECON-02 的离线行判断（S-PRN-T15，Q304） |
 | `FAULT` | 挂等待处理；订单不自动判失败（P-03），等打印机确认或人判 |
 | `UNKNOWN` | 不改状态，记日志 |
 

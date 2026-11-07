@@ -1430,7 +1430,11 @@ paths:
               type: object
               properties:
                 expectedState: {type: string, enum: [MAINTENANCE]}
-              required: [expectedState]
+                bedCleared:
+                  type: boolean
+                  const: true
+                  description: 对话框里勾"热床已清理"，必须为 true 才能关维护（S-PRN-T13，INV-01，Q305）
+              required: [expectedState, bedCleared]
               additionalProperties: false
       responses:
         '200':
