@@ -2619,7 +2619,7 @@ components:
       - COMPLETED
       - CANCELLED
       - DISPOSED
-      description: entities.md §2.1。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算（文档 1 S-ORD-DISPATCHED，Q246）
+      description: entities.md §2.1。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算（文档 1 S-ORD-DISPATCHED，Q248）
     PrinterState:
       type: string
       enum: [OFFLINE, IDLE, PREPARING, PRINTING, PAUSED, CLEARING_REQUIRED, EXTERNAL, MAINTENANCE]
