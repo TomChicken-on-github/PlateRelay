@@ -17,8 +17,9 @@
 
 ### IF-ADP-01 结构
 
-- 每个品牌一个包：`platerelay_daemon/adapters/<brand>/`，通过 Python entry point `platerelay.adapters` 注册，daemon 启动时加载。
+- 每个品牌一个目录：`platerelay_daemon/adapters/<brand>/`，接口和类型在 `platerelay_daemon/adapter_api/`。适配器跟 daemon 一起安装、一起定版本，v1 不用 entry point（Q251、DAE-ADP-01）。`adapters` 只能 import `adapter_api`，CI 用 import-linter 检查。
 - 品牌库的类型（比如 pybambu 的对象）不越过适配器边界（F-PRT-01）：适配器对外只用本节定义的类型。
+- 适配器只报"这台打印机现在是什么样"，不认识 `jobRef`；系统任务 / 外部任务的判断、`job.*` 事件的合成、`beforeStart` 都在 daemon 核心（Q258、DAE-ADP-02、DAE-ADP-03）。
 - 适配器有"只读模式"：打开时拒绝一切会改变打印机状态的调用，抛 `ControlNotAllowed`。开发和调试默认打开（项目开发规则：除非用户在开发驱动时明确同意，否则不发控制命令）。
 
 ### IF-ADP-02 静态描述
@@ -70,13 +71,16 @@ class PrinterSession(Protocol):
     async def connect(self, host: str, serial: str, access_code: SecretStr) -> None: ...
     async def close(self) -> None: ...
 
-    def events(self) -> AsyncIterator[DriverEvent]: ...  # 驱动草稿 §5.1；daemon 转成 MSG-EVT
+    def events(self) -> AsyncIterator[DriverEvent]: ...  # 只有设备层面的变化（连接、状态、报错、存储）；
+                                                          # job.* 由 daemon 核心比较快照合成（Q258）
     async def snapshot(self) -> DeviceSnapshot: ...       # 合并后的完整状态；daemon 转成 MSG-SNAPSHOT
     async def refresh(self) -> None: ...                  # 只读，拓竹 = pushall（R-PRT-12）
 
-    async def start(self, job: StartJob) -> CommandResult: ...      # 上传文件 + 开打
-    async def stop(self, job_ref: str) -> CommandResult: ...        # 准备中和打印中都用它；没有单独的撤回（Q203、Q207）
-    async def skip_parts(self, job_ref: str, part_ids: list[int]) -> CommandResult: ...
+    async def upload(self, local_file: Path, remote_name: str) -> RemoteFile: ...  # FTPS 等；重试由核心管（MSG-CMD-START）
+    async def start(self, job: StartJob) -> CommandResult: ...      # 只发开打指令，文件已在打印机上
+    async def stop(self) -> CommandResult: ...                      # 停当前任务；核心先确认当前任务就是那个 jobRef（Q258）。
+                                                                    # 准备中和打印中都用它；没有单独的撤回（Q203、Q207）
+    async def skip_parts(self, part_ids: list[int]) -> CommandResult: ...
     async def resolve_error(self, error_id: str, action: StandardErrorAction) -> CommandResult: ...
     async def control(self, action: str, args: dict) -> CommandResult: ...   # action 必须在 ControlSpec 里
 
@@ -85,7 +89,8 @@ class PrinterSession(Protocol):
                                                                # JPEG 帧：一个产出 JPEG 的异步迭代器；不支持：None
     async def storage_status(self) -> list[StorageStatus]: ...
 
-    async def list_timelapses(self, job_ref: str) -> list[RemoteFile]: ...
+    async def list_files(self) -> list[RemoteFile]: ...   # 存储里的文件；对清单是核心的事（MSG-JOBREF-02）
+    async def list_timelapses(self) -> list[RemoteFile]: ...
     async def fetch(self, file: RemoteFile) -> Path: ...
     async def delete(self, file: RemoteFile) -> CommandResult: ...  # 只能删 daemon 清单里的（INV-15）
 
@@ -94,7 +99,7 @@ class Discovery(Protocol):
     def listen(self) -> AsyncIterator[DiscoveredPrinter]: ...
 ```
 
-`StartJob = { job_ref, local_file, sha256, plate_index, bed_type, mapping, timelapse }`。适配器负责把 `mapping` 翻译成品牌自己的格式（拓竹是 `ams_mapping`），不改切片里定好的挤出机分配（R-DSP-11）。
+`StartJob = { remote_file, task_name, plate_index, bed_type, mapping, timelapse }`，`remote_file` 和 `task_name` 由核心按 MSG-JOBREF-01 起名（`pr-<jobRef 后 12 位>`），适配器不认识 `jobRef`（Q258）。适配器负责把 `mapping` 翻译成品牌自己的格式（拓竹是 `ams_mapping`），不改切片里定好的挤出机分配（R-DSP-11）。
 
 ### IF-ADP-04 标准状态到面板状态
 
@@ -154,7 +159,8 @@ class Discovery(Protocol):
 
 ### IF-ADP-08 测试
 
-- 每个适配器配一个模拟适配器，用录下来的真机消息回放（MSG-SCH-04）。
+- `adapters/fake` 是一台带完整状态机的模拟打印机，能注入报错、断料、断线、重启、固件拒绝、传输中断，用来测控制类流程（DAE-TST-01，Q260）。
+- 品牌适配器另用录下来的真机消息回放，测状态换算（MSG-SCH-04、DAE-TST-02）。
 - 一致性测试套件对所有适配器跑同一组用例：状态换算、事件顺序、白名单拒绝、只读模式拒绝、文件清单只删自己的。
 
 ## 2. 对象存储（IF-STO）
