@@ -92,6 +92,7 @@
 | E-SET | `settings` | 系统设置，每个分区一行 |
 | E-FORM | `form_versions` | 申请表单的版本 |
 | E-CAT | `filament_catalog` | 耗材目录的库存行和自动行设置 |
+| E-BED | `model_bed_types` | 打印板目录：每个机型本场能用的板型 |
 | E-NTF | `notifications` | 站内通知 |
 | E-NDLV | `notification_deliveries` | 邮件、飞书的投递记录 |
 | E-NPREF | `notification_prefs` | 个人通知设置 |
@@ -454,6 +455,15 @@
 | `version` | E-GEN-04 |
 
 自动行本身不存：每次从开放给选手的打印机当前料位算出来（Q116），再套上这里的 `AUTO` 设置。
+
+### E-BED `model_bed_types`
+
+| 列 | 说明 |
+| --- | --- |
+| `model_id` | 机型（适配器报的机型 ID） |
+| `bed_type` | 板型，取切片里的板型名（`curr_bed_type`） |
+
+主键 `(model_id, bed_type)`。管理员在可用资源的机型编辑里勾选，整组替换（R-SUB-11、Q274）。不记块数、不分装没装上（Q265）。R-SUB-15 和自选板选项（R-SUB-09）按这张表算。v1 没有"板系列"，同一块板能上哪些机型留给以后的资源管理。
 
 ## 8. 通知、审计、幂等、归档
 
