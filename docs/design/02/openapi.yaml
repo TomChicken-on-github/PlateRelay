@@ -1540,6 +1540,47 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/storage:
+    get:
+      operationId: getPrinterStorage
+      tags: [printers]
+      summary: 打印机存储（只读）
+      x-permission: printer:operate
+      x-rules: [R-PRT-22, F-PRT-11]
+      description: 面板向 daemon 发一次 storage.list，等结果（最多 10 秒）再返回。daemon 不在线或超时返回 503。只读，没有删除和下载。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      responses:
+        '200':
+          description: 用量和文件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [media, files]
+                properties:
+                  media:
+                    type: array
+                    items:
+                      type: object
+                      required: [medium, present]
+                      properties:
+                        medium: {type: string, examples: [internal, sd]}
+                        present: {type: boolean}
+                        freeBytes: {type: integer}
+                        totalBytes: {type: integer}
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, system]
+                      properties:
+                        medium: {type: string}
+                        name: {type: string, description: 打印机上的路径}
+                        sizeBytes: {type: integer}
+                        modifiedAt: {type: string, format: date-time}
+                        system: {type: boolean, description: 是否系统文件（MSG-JOBREF-02）}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/clear-bed:
     post:
       operationId: confirmBedCleared
