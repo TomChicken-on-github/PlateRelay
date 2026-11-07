@@ -38,8 +38,9 @@ const Resources = z.object({
   show: z.boolean(),
   showWait: z.boolean(),
   colourMissing: z.enum(["warn", "block"]),
+  bedMissing: z.enum(["warn", "block", "off"]),
   bulletin: z.string().trim().max(200),
-  models: z.record(z.string().min(1).max(20), z.object({ hidden: z.boolean().optional(), note: Note.optional(), wait: z.enum(WAIT_BUCKETS).nullish(), order: count(9999).optional() })),
+  models: z.record(z.string().min(1).max(20), z.object({ hidden: z.boolean().optional(), note: Note.optional(), wait: z.enum(WAIT_BUCKETS).nullish(), order: count(9999).optional(), bedTypes: z.array(z.string().min(1).max(40)).max(20).optional() })),
   materials: z.record(z.string().min(1).max(40), z.object({ hidden: z.boolean().optional(), note: Note.optional(), order: count(9999).optional() })),
   stock: z
     .array(z.object({ id: z.string().min(1).max(40), type: z.string().trim().min(1).max(40), color: Hex, name: z.string().trim().min(1).max(20), modelIds: z.array(z.string().min(1).max(20)).min(1, "至少选一个机型").max(20) }))
