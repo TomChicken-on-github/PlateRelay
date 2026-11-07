@@ -2079,6 +2079,35 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CatalogRow'}
         default: {$ref: '#/components/responses/Problem'}
+  /catalog/models/{modelId}/bed-types:
+    put:
+      operationId: setModelBedTypes
+      tags: [catalog]
+      summary: 设置某个机型本场能用的板型（整组替换）
+      x-permission: filament:catalog
+      x-rules: [R-SUB-11]
+      parameters:
+      - name: modelId
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bedTypes:
+                  type: array
+                  items: {type: string}
+                  uniqueItems: true
+              required: [bedTypes]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
   /users:
     get:
       operationId: listUsers
@@ -3339,7 +3368,11 @@ components:
                 items: {$ref: '#/components/schemas/Nozzle'}
               count: {type: integer}
               available: {type: integer}
-            required: [modelId, modelName, nozzles, count, available]
+              bedTypes:
+                type: array
+                items: {type: string}
+                description: 这个机型本场能用的板型（E-BED，R-SUB-11）
+            required: [modelId, modelName, nozzles, count, available, bedTypes]
             additionalProperties: false
         catalog:
           type: array
@@ -3354,7 +3387,7 @@ components:
         bedTypes:
           type: [array, 'null']
           items: {type: string}
-          description: 自选板打开时可选（CFG-QUE-09）
+          description: 自选板打开时为各机型板型的并集；提交页按选中各盘的机型取交集（CFG-QUE-09、R-SUB-09）
       required: [printers, catalog, wait, bedTypes]
       additionalProperties: false
     TodoItem:
