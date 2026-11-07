@@ -266,6 +266,8 @@ sequenceDiagram
     P->>P: 按打印机事实结束任务 FINISHED / FAILED，不要人判（MSG-RECON-02、Q234）
   else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹
     P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位（R-PRT-16、R-DSP-08）
+  else 原来是离线（空闲时断的线）
+    P->>P: 在跑对不上的任务 → 外部占用（S-PRN-T14）；停在打完/失败且任务名和上次不同 → 待清板（S-PRN-T15）；否则空闲（S-PRN-T01，Q304）
   else 其他对不上
     P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
     S->>P: reconcileOrder（outcome=FAILED 或 PRINTED）
