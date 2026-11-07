@@ -9,6 +9,7 @@
 | [版本功能边界清单](docs/design/00-scope-and-principles.md) | 设计层文档第 0 份：非目标、取舍顺序、原则、不变量、v1 范围。**与简报冲突时以它为准。** |
 | [业务规约与状态机清单](docs/design/01-business-rules.md) | 设计层文档第 1 份：术语、权限矩阵、订单和打印机状态机、规则、参数表、冲突裁决。只服从文档 0。 |
 | [数据模型与通信契约](docs/design/02/README.md) | 设计层文档第 2 份：实体、HTTP 约定、[OpenAPI](docs/design/02/openapi.yaml)（接口唯一来源）、daemon 协议、可插拔接口。服从文档 0、1。 |
+| [核心交互时序图](docs/design/03-sequences.md) | 设计层文档第 3 份：12 个关键流程的时序图和失败分支，只引用上层编号，不新增规则。 |
 | [项目简报](docs/project-brief.md) | 定位、已定决策、第一阶段范围、状态机、开放问题。**§0 与后文冲突时以 §0 为准。** |
 | [Driver 接口草稿](docs/printer-driver-interface-draft.md) | 设备能力、标准状态、原始状态映射、报错处理、摄像头、存储、实测清单。 |
 | [MD3 概况页规格](docs/ui/figma-md3-overview-spec.md) | 从 Figma 读出的概况页布局、颜色、字体、尺寸。[原型](docs/ui/platerelay-md3-prototype.html)是对照它做的静态页面，只作视觉参考。 |
