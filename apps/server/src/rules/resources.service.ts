@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { type PlateCheck, type ResourceSettings, type ResourcesView, waitBucket } from "@platerelay/shared";
+import { BED_TYPE_LABEL, type PlateCheck, type ResourceSettings, type ResourcesView, waitBucket } from "@platerelay/shared";
 import { and, eq, isNotNull, or } from "drizzle-orm";
 import { type Ctx, can } from "../auth/actor.js";
 import { DB, type Db } from "../db/db.js";
@@ -10,11 +10,18 @@ import { compatible } from "../printers/compat.js";
 import type { PrinterRow } from "../printers/printer-state.js";
 import { SettingsService } from "../settings/settings.service.js";
 
-type Plate = Pick<OrderRow, "printerModelId" | "nozzles" | "filaments"> & { printerModel?: string | null };
+type Plate = Pick<OrderRow, "printerModelId" | "nozzles" | "filaments"> & { printerModel?: string | null; bedType?: string | null };
 
 const shortModel = (m: string | null, id: string) => (m ?? id).replace(/^Bambu Lab /, "");
 const hex = (c: string) => c.slice(0, 7).toLowerCase();
 const down = (p: PrinterRow) => p.state === "OFFLINE" || p.state === "MAINTENANCE";
+
+/** 打印板目录 (E-BED, Q274): the bed types ticked for a model; none ticked yet = what its open printers report. */
+function bedTypesOf(o: Offer, modelId: string): string[] {
+  const set = o.settings.models[modelId]?.bedTypes;
+  if (set) return set;
+  return [...new Set(o.open.filter((p) => p.modelId === modelId).map((p) => p.bedType).filter((b): b is string => !!b))];
+}
 
 /** What is on offer this event: one snapshot of the open printers, the queue and the 可用资源 settings. */
 export interface Offer {
@@ -75,7 +82,7 @@ export class ResourcesService {
           idle: ps.filter((p) => p.state === "IDLE").length,
           nozzles: [...new Set(ps.flatMap((p) => (p.nozzles ?? []).map((n) => n.diameter)))].sort(),
           dual: ps.some((p) => (p.nozzles?.length ?? 0) > 1),
-          bedTypes: [...new Set(ps.map((p) => p.bedType).filter((b): b is string => !!b))],
+          bedTypes: bedTypesOf(o, modelId),
           wait: showWait || configure ? (manual ?? waitBucket(ahead)) : null,
           waitManual: configure && !!manual,
           note: cfg?.note ?? "",
@@ -100,7 +107,7 @@ export class ResourcesService {
       .sort((a, b) => a.sort - b.sort)
       .map(({ sort: _s, ...m }) => m);
     const show = o.settings.show || configure;
-    return { show: o.settings.show, bulletin: o.settings.bulletin, colourMissing: o.settings.colourMissing, models: show ? models : [], materials: show ? materials : [] };
+    return { show: o.settings.show, bulletin: o.settings.bulletin, colourMissing: o.settings.colourMissing, bedMissing: o.settings.bedMissing, models: show ? models : [], materials: show ? materials : [] };
   }
 
   /** Seconds of printing ahead per model: queued plates (frozen ones included) plus what is left of the running ones. */
@@ -130,8 +137,17 @@ export class ResourcesService {
       const want = [...new Set(plate.nozzles.map((n) => n.diameter))].join(" / ");
       return { block: [`本场的 ${model} 没有 ${want} mm 喷嘴`], missingColours: [] };
     }
+    /* 打印板目录 (R-SUB-15): the sliced (or chosen) bed type must be on offer for this model; an empty list cannot be checked */
+    let bedMissing: string | undefined;
+    const beds = bedTypesOf(o, plate.printerModelId);
+    if (o.settings.bedMissing !== "off" && plate.bedType && beds.length && !beds.includes(plate.bedType)) {
+      const msg = `本场的 ${model} 没有${BED_TYPE_LABEL[plate.bedType] ?? plate.bedType}`;
+      if (o.settings.bedMissing === "block") block.push(msg);
+      else bedMissing = msg;
+    }
+    const done = (missingColours: string[]): PlateCheck => (bedMissing ? { block, missingColours, bedMissing } : { block, missingColours });
     /* nothing reported and no stock entered yet: materials cannot be checked */
-    if (!o.materials.size) return { block, missingColours: [] };
+    if (!o.materials.size) return done([]);
     const missingColours: string[] = [];
     for (const f of plate.filaments) {
       const colours = o.settings.materials[f.type]?.hidden ? undefined : o.materials.get(f.type);
@@ -143,6 +159,6 @@ export class ResourcesService {
       }
       if (!onModel.some(([c]) => c === hex(f.color)) && !missingColours.includes(hex(f.color))) missingColours.push(hex(f.color));
     }
-    return { block, missingColours };
+    return done(missingColours);
   }
 }
