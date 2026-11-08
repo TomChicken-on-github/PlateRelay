@@ -1463,10 +1463,17 @@ paths:
               type: object
               properties:
                 expectedState: {$ref: '#/components/schemas/PrinterState'}
-                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部占用时不带（Q326）}
                 reason: {type: string, minLength: 1}
                 reasonVisible: {type: boolean, default: true}
-              required: [expectedState, expectedJobId, reason]
+              required: [expectedState, reason]
+              if:
+                properties:
+                  expectedState: {const: EXTERNAL}
+              then:
+                not: {required: [expectedJobId]}
+              else:
+                required: [expectedJobId]
               additionalProperties: false
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
@@ -1586,6 +1593,35 @@ paths:
                         modifiedAt: {type: string, format: date-time}
                         system: {type: boolean, description: 是否系统文件（MSG-JOBREF-02）}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/attention/dismiss:
+    post:
+      operationId: dismissAttention
+      tags: [printers]
+      summary: 等待处理标记已处理
+      x-permission: printer:operate
+      x-rules: [R-PRT-24, S-FLG-ATTENTION]
+      description: 只能去掉 START_FAILED 和 UNCLEARED_START 两种原因（Q325）；其他原因返回 422。写审计。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, enum: [START_FAILED, UNCLEARED_START]}
+                jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时）}
+              required: [reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/clear-bed:
     post:
       operationId: confirmBedCleared
@@ -1594,7 +1630,7 @@ paths:
       x-permission: order:store
       x-transitions: [S-PRN-T11]
       x-rules: [R-PCK-02, INV-01]
-      description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。
+      description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。同一个事务里去掉等待处理的 START_FAILED、UNCLEARED_START 原因（Q325）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1750,7 +1786,7 @@ paths:
       summary: 申请看实况
       x-permission: [guest, 'printer:camera:stream']
       x-rules: [R-CAM-01, R-CAM-02, R-CAM-06, R-CAM-07, API-CAM-01, API-CAM-02]
-      description: 访客要 CFG-CAM-01 打开。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
+      description: 没登录的访客要 CFG-UI-01 和 CFG-CAM-01 都开，否则 401（Q323）。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}

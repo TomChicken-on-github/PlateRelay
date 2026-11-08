@@ -27,6 +27,7 @@
 | 3 | daemon 在本机生成 RSA-3072 密钥对。私钥只存在本机：Linux 是权限 0600 的文件，Windows 用 DPAPI 加密后存，Docker 放在挂载卷里（F-DMN-02、INV-07）。 |
 | 4 | daemon 调 `POST /daemon/v1/enroll`：`{ token, publicKey, name, platform, daemonVersion, protocolVersion }`，`publicKey` 是 SPKI DER 的 base64。 |
 | 5 | 面板校验令牌，作废它，新建 E-DMN，返回 `{ daemonId }`。daemon 把面板地址和 `daemonId` 写进自己的配置文件（不含任何秘密）。 |
+| 6 | 安装脚本在终端显示公钥指纹（SHA-256，分组显示）；面板 daemon 卡片显示同一个指纹。管理员给这个 daemon 绑打印机（填访问码）之前先核对两边一致，防止令牌被人抢先用掉、骗走访问码。不加"待放行"状态（Q330）。 |
 
 一次性令牌出现在安装命令里，是 F-DMN-01 明确允许的唯一例外：它 15 分钟过期、用一次就作废，daemon 不把它写进配置或日志。真正的保护靠这几点，而不是传法：只能用一次、15 分钟过期、安装成功即作废；注册时如果报"令牌已被使用"，安装脚本明确提示管理员去 daemon 列表里查有没有陌生的注册。
 
@@ -209,7 +210,7 @@ daemon                                  面板
 | `kind` | `params` | 有效期（送达） | 类 | 什么上报算"状态变了"（前端停转圈，R-CMD-01） | 对应 |
 | --- | --- | --- | --- | --- | --- |
 | `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中、开始打印或报开打前失败；传文件见 MSG-CMD-START | S-ORD-T08 |
-| `job.stop` | `{ jobRef }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。传文件、准备中和打印中都用它；没有单独的撤回命令（Q203、Q207）。传文件期间收到：见 MSG-CMD-START，daemon 直接回 `job.cancelled { beforeStart: true }`（Q223） | R-PRT-04、R-PRT-05 |
+| `job.stop` | `{ jobRef }` 或 `{ external: true }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。`external: true` 是外部占用（含迟到的开打）时的停止，停掉打印机上正在跑的任务，以打印机上报结束为准（Q326）。传文件、准备中和打印中都用它；没有单独的撤回命令（Q203、Q207）。传文件期间收到：见 MSG-CMD-START，daemon 直接回 `job.cancelled { beforeStart: true }`（Q223） | R-PRT-04、R-PRT-05 |
 | `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表变了 | F-SUB-07 |
 | `error.resolve` | `{ errorId, action }` | 60 秒 | 控制；动作是"停止"时按 `job.stop` 处理 | 这条报错从上报里消失，或打印机状态变了 | R-PRT-14 |
 | `control` | `{ action, args }`，`action` 必须在这台打印机的静态命令清单里（IF-ADP-02） | 30 秒 | 按动作的 `category`：`light` `temperature` `fan` `speed` 是设定值，其余（`pause` `resume` `filament` `dry` `motion`）是控制 | 控制：打印机上报的状态变了；设定值：界面短暂保持刚设的值，之后显示上报的值（R-CMD-06） | R-PRT-15 |
@@ -306,7 +307,7 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | 编号 | 约定 |
 | --- | --- |
 | MSG-MEDIA-01 | 媒体服务用 mediamtx（MIT），在官方 docker compose 里单独一个容器，由面板管理：配置由面板生成，健康状态显示在系统设置·运维，管理接口不对外，WHEP 和 LL-HLS 地址经面板的域名反代（Q172）。对外开放 UDP + TCP 8189（WebRTC）和 UDP 8890（SRT）。v1 不上 CDN（Q171）。 |
-| MSG-MEDIA-02 | **H.264 机型**（X1、X2D、H2 等，打印机本身出 RTSP）：面板发 `camera.open`，带一次性的推流地址和令牌；daemon 从打印机拉 RTSP，**原样**（不解码、不转码）推到媒体服务（Q163）。默认用 SRT（UDP，延迟上限 `latencyMs` = CFG-CAM-10，超时的包直接丢）；连不上 SRT 时自动退到 RTSPS（TCP），并在 `command.result.data.transport` 里报实际用的是哪种，界面上标出来（Q170）。仍然是 daemon 往外连（NG-08）。 |
+| MSG-MEDIA-02 | **H.264 机型**（X1、X2D、H2 等，打印机本身出 RTSP）：面板发 `camera.open`，带一次性的推流地址和令牌；daemon 从打印机拉 RTSP，**原样**（不解码、不转码）推到媒体服务（Q163）。默认用 SRT（UDP，延迟上限 `latencyMs` = CFG-CAM-10，超时的包直接丢）；连不上 SRT 时自动退到 RTSPS（TCP），并在 `command.result.data.transport` 里报实际用的是哪种，界面上标出来（Q170）。仍然是 daemon 往外连（NG-08）。daemon 只往注册时绑定的那个面板的媒体主机推：`camera.open` 里地址的主机名必须和面板地址配置的媒体主机一致，否则回 `rejected`（Q328）。不拦内网地址：面板和 daemon 常在同一个局域网。 |
 | MSG-MEDIA-03 | **JPEG 帧机型**（P1、A1，打印机只给一帧帧 JPEG）：daemon 开一条 `wss://<面板>/daemon/v1/frames/{printerId}`，每个二进制帧是一张 JPEG，原样转发；面板再用 WebSocket 发给浏览器。帧率本来就低，带宽不是问题。 |
 | MSG-MEDIA-04 | 推流令牌由面板签发，只对这台打印机、这一次推流有效，到期或 `camera.close` 后作废。媒体服务向面板校验令牌（HTTP 鉴权回调），浏览器拉流用的令牌同理。用户被停用或改角色时，面板作废他的观看令牌，并经媒体服务的管理接口踢掉他正在看的会话（API-AUTH-04，Q235）。 |
 | MSG-MEDIA-05 | 按需（R-CAM-06）：第一个观众点播放时面板发 `camera.open`；面板从媒体服务查观众数，最后一个离开超过 CFG-CAM-04 后发 `camera.close`。 |
