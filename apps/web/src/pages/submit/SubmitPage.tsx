@@ -10,9 +10,9 @@ import { FilamentDots, ModelThumb } from "../../components/ModelThumb";
 import { Page, PageHeader } from "../../components/Page";
 import { Sheet } from "../../components/Sheet";
 import { BED_TYPES, BED_TYPE_LABEL, COLOUR_PREFS, COLOUR_PREF_LABEL, type ColourPref, DEFAULT_COLOUR_PREF, type FormView, type OrderPreview, type OrderView, type ParsedUpload, type PlateCheck, type ResourcesView } from "@platerelay/shared";
-import { LinearIndeterminate } from "../../components/WavyProgress";
+import { LinearDeterminate, LinearIndeterminate } from "../../components/WavyProgress";
 import { useToast } from "../../components/Toast";
-import { LIVE, api } from "../../lib/api";
+import { LIVE, api, upload as uploadFile } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { t } from "../../lib/motion";
 import { fmtDur, live, shortModel } from "../../lib/ordersApi";
@@ -94,6 +94,7 @@ function previewPlates(r: OrderPreview): Plate[] {
     if (p.check.block.length) return { ...plate, st: "err", note: p.check.block.join("；"), res: "models" };
     if (p.outside) return { ...plate, st: "warn", note: "有物体超出打印区域，请在切片软件里检查后重新导出" };
     if (p.availability.state !== "ok") return { ...plate, st: "warn", note: p.availability.message, res: "models" };
+    if (p.check.bedMissing) return { ...plate, st: "warn", note: `${p.check.bedMissing}，审核时会和你确认`, res: "models" };
     return plate;
   });
 }
@@ -126,10 +127,10 @@ const COLOUR_HINT: Record<ColourPref, string> = {
 };
 
 /* Prototype builds still parse real files on the server, only availability is mocked. */
-async function parseOnServer<T>(url: string, f: File): Promise<T> {
+async function parseOnServer<T>(url: string, f: File, onProgress: (sent: number, total: number) => void): Promise<T> {
   const body = new FormData();
   body.append("file", f);
-  const r = await api<T>(url, { method: "POST", body });
+  const r = await uploadFile<T>(url, body, onProgress);
   if (!r.ok) throw new Error(r.error.code === "network" ? "连不上解析服务，请稍后再试。" : r.error.message || "解析失败");
   return r.data;
 }
@@ -234,7 +235,11 @@ export function SubmitPage() {
   const [upload, setUpload] = useState<File | null>(null);
   const [queue, setQueue] = useState<{ length: number; aheadSeconds: number } | null>({ length: MOCK_QUEUE_AHEAD, aheadSeconds: 0 });
   const [sending, setSending] = useState(false);
-  const [phase, setPhase] = useState<"idle" | "parsing" | "parsed">("idle");
+  const [phase, setPhase] = useState<"idle" | "uploading" | "parsing" | "parsed">("idle");
+  /** Upload progress 0–1 while uploading (R-SUB-14). */
+  const [sent, setSent] = useState(0);
+  /** Bumped on every load/reset so a late answer for an old file is dropped. */
+  const run = useRef(0);
   const [file, setFile] = useState<{ name: string; mb: number } | null>(null);
   const [parsed, setParsed] = useState<Plate[]>([]);
   const [error, setError] = useState("");
@@ -263,6 +268,9 @@ export function SubmitPage() {
 
   const plates = phase === "parsed" ? parsed.map((p) => withColour(p, colour, res?.colourMissing ?? "warn")) : [];
   const sel = plates.filter((p) => pick[p.n] && p.st !== "err");
+  /* 自选板 (R-SUB-09): only bed types every selected plate's model has on offer */
+  const selModels = [...new Set(sel.map((p) => p.modelId).filter((m): m is string => !!m))].map((id) => res?.models.find((m) => m.modelId === id)).filter((m) => !!m);
+  const bedOptions: string[] = selModels.length ? selModels.reduce<string[]>((a, m) => a.filter((b) => m.bedTypes.includes(b)), selModels[0].bedTypes) : [...BED_TYPES];
 
   const show = (ps: Plate[]) => {
     setParsed(ps);
@@ -275,28 +283,51 @@ export function SubmitPage() {
     setError("");
     if (!/\.gcode\.3mf$/i.test(f.name)) return setError("只能提交 .gcode.3mf 文件（由你自行切片后导出），当前文件格式不对。");
     if (mb > MAX_MB) return setError(`文件 ${mb.toFixed(0)} MB，超过 ${MAX_MB} MB 上限。`);
+    const id = ++run.current;
+    const alive = () => run.current === id;
     setFile({ name: f.name, mb });
-    setPhase("parsing");
-    if (!(f instanceof File)) return void setTimeout(() => (setFileBed("Textured PEI Plate"), show(f.plates)), 1100);
+    setSent(0);
+    setPhase("uploading");
+    const progress = (s: number, total: number) => {
+      if (!alive()) return;
+      setSent(total ? s / total : 0);
+      if (total && s >= total) setPhase("parsing");
+    };
+    if (!(f instanceof File)) {
+      /* the sample file: pretend to upload it, then parse */
+      const t0 = performance.now(), dur = 900 + mb * 45;
+      const tick = (now: number) => {
+        if (!alive()) return;
+        const k = Math.min(1, (now - t0) / dur);
+        progress(k, 1);
+        if (k < 1) return void requestAnimationFrame(tick);
+        setTimeout(() => alive() && (setFileBed("Textured PEI Plate"), show(f.plates)), 1100);
+      };
+      return void requestAnimationFrame(tick);
+    }
     try {
       if (LIVE) {
-        const r = await parseOnServer<OrderPreview>("/api/orders/preview", f);
+        const r = await parseOnServer<OrderPreview>("/api/orders/preview", f, progress);
+        if (!alive()) return;
         setUpload(f);
         setQueue(r.queue);
         setFileBed(r.bedType);
         show(previewPlates(r));
       } else {
-        const r = await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f);
+        const r = await parseOnServer<ParsedUpload>("/api/gcode3mf/parse", f, progress);
+        if (!alive()) return;
         setFileBed(r.bedType);
         show(toPlates(r, res));
       }
     } catch (e) {
+      if (!alive()) return;
       setPhase("idle");
       setFile(null);
       setError(e instanceof Error ? e.message : String(e));
     }
   };
   const reset = () => {
+    run.current++;
     setPhase("idle");
     setFile(null);
     setUpload(null);
@@ -338,7 +369,7 @@ export function SubmitPage() {
     body.append("answers", JSON.stringify(Object.fromEntries(FIELDS.map((f) => [f.id, f.type === "number" && form[f.id] ? Number(form[f.id]) : (form[f.id] ?? "")]))));
     body.append("plates", JSON.stringify(sel.map((p) => p.n)));
     body.append("colour", colour);
-    if (rules?.allowPlateChoice && bed) body.append("bedType", bed);
+    if (rules?.allowPlateChoice && bed && bedOptions.includes(bed)) body.append("bedType", bed);
     setSending(true);
     const r = await api<{ orders: OrderView[] }>("/api/orders", { method: "POST", body });
     setSending(false);
@@ -490,8 +521,11 @@ export function SubmitPage() {
                     <div className="min-w-0 flex-1">
                       <b className="block overflow-hidden text-label-l font-medium text-ellipsis whitespace-nowrap">{file!.name}</b>
                       <small className="block text-body-s text-on-variant">
-                        {file!.mb.toFixed(1)} MB · {phase === "parsing" ? "正在解析，校验文件结构…" : `已解析，${plates.length} 个打印板`}
+                        {phase === "uploading"
+                          ? `${(file!.mb * sent).toFixed(1)} / ${file!.mb.toFixed(1)} MB · 正在上传 ${Math.floor(sent * 100)}%`
+                          : `${file!.mb.toFixed(1)} MB · ${phase === "parsing" ? "正在解析，校验文件结构…" : `已解析，${plates.length} 个打印板`}`}
                       </small>
+                      {phase === "uploading" && <LinearDeterminate pct={sent * 100} label="正在上传" />}
                       {phase === "parsing" && <LinearIndeterminate />}
                     </div>
                     {phase === "parsed" && <IconButton icon="delete" label="移除文件" onClick={reset} />}
@@ -573,9 +607,9 @@ export function SubmitPage() {
                   {rules?.allowPlateChoice && (
                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl bg-sc-high px-4 py-3">
                       <b className="text-label-l font-medium">热床板</b>
-                      <select aria-label="热床板" value={bed} onChange={(e) => setBed(e.target.value)} className="h-9 rounded-lg border-0 bg-transparent px-3 text-label-l text-on-surface shadow-[inset_0_0_0_1px_var(--md-outline)] outline-0 focus:shadow-[inset_0_0_0_2px_var(--md-primary)]">
+                      <select aria-label="热床板" value={bedOptions.includes(bed) ? bed : ""} onChange={(e) => setBed(e.target.value)} className="h-9 rounded-lg border-0 bg-transparent px-3 text-label-l text-on-surface shadow-[inset_0_0_0_1px_var(--md-outline)] outline-0 focus:shadow-[inset_0_0_0_2px_var(--md-primary)]">
                         <option value="">按文件{fileBed ? `（${BED_TYPE_LABEL[fileBed] ?? fileBed}）` : ""}</option>
-                        {BED_TYPES.map((b) => <option key={b} value={b}>{BED_TYPE_LABEL[b]}</option>)}
+                        {bedOptions.map((b) => <option key={b} value={b}>{BED_TYPE_LABEL[b] ?? b}</option>)}
                       </select>
                     </div>
                   )}

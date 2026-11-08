@@ -81,14 +81,32 @@ def load_printer(name: str | None) -> tuple[str, dict[str, str]]:
     return name, json.loads(raw)
 
 
+def find_by_serial(serial: str) -> str | None:
+    """按序列号找已保存的打印机名字。同一台机器换 IP、换访问码时更新它，不另存一份。"""
+    for name in list_printers():
+        raw = _keyring().get_password(KEYRING_SERVICE, name)
+        if raw and json.loads(raw).get("serial") == serial:
+            return name
+    return None
+
+
 def save_printer(name: str, host: str, serial: str, code: str) -> None:
     kr = _keyring()
+    old = find_by_serial(serial)
     kr.set_password(KEYRING_SERVICE, name, json.dumps({"host": host, "serial": serial, "access_code": code}))
     names = list_printers()
+    if old and old != name:
+        # 同一序列号换了名字：替换旧条目，保持原来的顺序
+        try:
+            kr.delete_password(KEYRING_SERVICE, old)
+        except Exception:  # noqa: BLE001
+            pass
+        names = [name if n == old else n for n in names]
     if name not in names:
         names.append(name)
-        kr.set_password(KEYRING_SERVICE, INDEX_KEY, json.dumps(names))
-    print(f"已保存 {name}（{host}）。已配置：{', '.join(list_printers())}")
+    names = list(dict.fromkeys(names))
+    kr.set_password(KEYRING_SERVICE, INDEX_KEY, json.dumps(names))
+    print(f"已保存 {name}（{host}）{f'，替换了同一台的旧条目 {old}' if old and old != name else ''}。已配置：{', '.join(list_printers())}")
 
 
 def setup(name: str) -> None:
@@ -430,6 +448,12 @@ _connections: dict[str, PrinterConnection] = {}
 
 def conn(printer: str | None) -> PrinterConnection:
     name, cfg = load_printer(printer)
+    old = _connections.get(name)
+    if old and (old.host, old.serial, old._code) != (cfg["host"], cfg["serial"], cfg["access_code"]):
+        # 凭据库里的 IP 或访问码改过了：丢掉旧连接，不用重启 MCP
+        old._client.loop_stop()
+        old._client.disconnect()
+        del _connections[name]
     if name not in _connections:
         _connections[name] = PrinterConnection(name, cfg)
     c = _connections[name]

@@ -14,7 +14,7 @@ const live = {
 function mockView(s: ResourceSettings): ResourcesView {
   const order = (o: number | undefined, i: number) => o ?? 1000 + i;
   const models = reported.models
-    .map((m, i) => ({ m: { ...m, note: s.models[m.modelId]?.note ?? "", hidden: !!s.models[m.modelId]?.hidden, wait: s.models[m.modelId]?.wait ?? m.wait, waitManual: !!s.models[m.modelId]?.wait }, k: order(s.models[m.modelId]?.order, i) }))
+    .map((m, i) => ({ m: { ...m, note: s.models[m.modelId]?.note ?? "", hidden: !!s.models[m.modelId]?.hidden, wait: s.models[m.modelId]?.wait ?? m.wait, bedTypes: s.models[m.modelId]?.bedTypes ?? m.bedTypes, waitManual: !!s.models[m.modelId]?.wait }, k: order(s.models[m.modelId]?.order, i) }))
     .sort((a, b) => a.k - b.k)
     .map((x) => x.m);
   const types = [...new Set([...reported.materials.map((m) => m.type), ...s.stock.map((x) => x.type)])];
@@ -26,7 +26,7 @@ function mockView(s: ResourceSettings): ResourcesView {
     })
     .sort((a, b) => a.k - b.k)
     .map((x) => x.m);
-  return { show: s.show, bulletin: s.bulletin, colourMissing: s.colourMissing, models, materials };
+  return { show: s.show, bulletin: s.bulletin, colourMissing: s.colourMissing, bedMissing: s.bedMissing, models, materials };
 }
 
 export function useResources(): { data: ResourcesView | null; error: string | null } {

@@ -145,6 +145,21 @@ describe("print rules", () => {
       assert.equal(o.colourPref, "similar", "颜色要求 defaults to 相近");
     });
 
+    it("checks the bed type against the model's 打印板目录: warn by default, block or skip when set", async () => {
+      const cfg = (await builder.get("/api/settings/resources").expect(200)).body;
+      const preview = async () => ((await user.post("/api/orders/preview").attach("file", x2dTwoPlates(), "a.gcode.3mf").expect(200)).body as OrderPreview).plates[0].check;
+      await builder.put("/api/settings/resources").send({ ...cfg, models: { N6: { bedTypes: ["Cool Plate"] } } }).expect(204);
+      assert.deepEqual(((await user.get("/api/resources").expect(200)).body as ResourcesView).models[0].bedTypes, ["Cool Plate"]);
+      assert.equal((await preview()).bedMissing, "本场的 X2D 没有纹理 PEI 板");
+      await submit(user, x2dTwoPlates()).expect(201);
+      await builder.put("/api/settings/resources").send({ ...cfg, bedMissing: "block", models: { N6: { bedTypes: ["Cool Plate"] } } }).expect(204);
+      assert.deepEqual((await preview()).block, ["本场的 X2D 没有纹理 PEI 板"]);
+      assert.equal((await submit(user, x2dTwoPlates()).expect(422)).body.code, "plate-blocked");
+      await builder.put("/api/settings/resources").send({ ...cfg, bedMissing: "off", models: { N6: { bedTypes: ["Cool Plate"] } } }).expect(204);
+      assert.deepEqual(await preview(), { block: [], missingColours: [] });
+      await builder.put("/api/settings/resources").send(cfg).expect(204);
+    });
+
   });
 
   describe("建议派单", () => {
