@@ -137,6 +137,62 @@ def show_status() -> None:
                   f"{t.get('tray_sub_brands', '')} #{t.get('tray_color', '')[:6]} 余量 {t.get('remain', '?')}")
 
 
+NOISY = ("temp", "temper", "fan", "speed", "wifi_signal", "remain_time", "mc_remaining_time", "humidity", "_kb", "hnow", "snow", "spre", "star", "hpre", "htar")
+
+
+def watch_changes() -> None:
+    """实时打印每条报文带来的字段变化，Ctrl+C 停止。只收不发（连上时的那一次 pushall 除外）。"""
+    name = _pick_printer()
+    if not name or name == BACK:
+        return
+    path = _ask(questionary.text("只看哪个前缀？（如 print.ams，直接回车看全部）"))
+    if path is None:
+        return
+    quiet = _ask(questionary.confirm("隐藏温度、风扇、剩余时间等每秒都在变的字段？", default=True))
+    if quiet is None:
+        return
+    c = _connect(name)
+    if not c:
+        return
+    state = c.snapshot()
+    prev = srv.flatten(state)
+    buf: list[tuple[float, dict]] = []
+    with c._lock:
+        c._listeners.append(buf)
+    print("开始监听，Ctrl+C 停止……")
+    try:
+        while True:
+            time.sleep(0.5)
+            with c._lock:
+                msgs, buf[:] = list(buf), []
+            for t, data in msgs:
+                ts = time.strftime("%H:%M:%S", time.localtime(t))
+                for k, v in data.items():
+                    if not isinstance(v, dict):
+                        continue
+                    cmd = v.get("command")
+                    if cmd and cmd != "push_status":
+                        # 命令回执（暂停、继续、灯光等）整条显示，不并进状态
+                        print(f"{ts}  [{k}.{cmd}] {json.dumps(v, ensure_ascii=False)[:200]}")
+                        continue
+                    srv.deep_merge(state, {k: v})
+                cur = srv.flatten(state)
+                for key in sorted(set(prev) | set(cur)):
+                    if path and not key.startswith(path.strip()):
+                        continue
+                    if quiet and any(n in key for n in NOISY):
+                        continue
+                    a, b = prev.get(key, "<无>"), cur.get(key, "<无>")
+                    if a != b:
+                        print(f"{ts}  {key}: {json.dumps(a, ensure_ascii=False)} → {json.dumps(b, ensure_ascii=False)}")
+                prev = cur
+    except KeyboardInterrupt:
+        print("已停止")
+    finally:
+        with c._lock:
+            c._listeners.remove(buf)
+
+
 def control() -> None:
     name = _pick_printer()
     if not name or name == BACK:
@@ -161,6 +217,7 @@ def control() -> None:
 
 ACTIONS = {
     "查看状态": show_status,
+    "实时查看变化（Ctrl+C 停止）": watch_changes,
     "控制打印机（需要确认）": control,
     "扫描局域网添加": add_by_scan,
     "手动添加": add_manually,
