@@ -3101,10 +3101,12 @@ components:
         subType: {type: [string, 'null']}
         colour: {type: [string, 'null']}
         remainingPercent: {type: [integer, 'null']}
+        rfid: {type: boolean, description: 料位信息是否来自 RFID 识别；RFID 料位只能查看，不能改（R-DSP-14）}
+        serial: {type: [string, 'null'], description: RFID 耗材卷的序列号（拓竹 `tray_uuid`），只读显示；非 RFID 料位为 null（Q353）}
         extruders:
           type: array
           items: {type: integer}
-      required: [unit, slot, label, extruders]
+      required: [unit, slot, label, rfid, serial, extruders]
       additionalProperties: false
     MappingCheck:
       type: object
