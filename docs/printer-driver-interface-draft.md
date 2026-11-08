@@ -268,7 +268,7 @@ type DriverEvent =
 
 **拓竹"取消"的问题**：拓竹的任务被停止后落到 `FAILED`，打印机侧本身不区分"失败"和"被人停止"【推断，需实测】。所以拓竹 driver 应该记下自己下发过的 `stop` 命令，在停止后的 `FAILED` 上补报 `job.cancelled`。由打印机屏幕上直接停止的，就区分不了，只能报 `failed`。
 
-X2D 实测（2026-11-08）：屏幕上停止后同样落到 `FAILED`，但 `print_error` 变成 `0300_400C`，看起来是「任务被取消」的专用码【推断，待对照 HMS 资料】。如果确认，driver 不管是谁停的都能报 `job.cancelled`；`fail_reason` 头几秒会残留上一次报错的值，以 `print_error` 为准。
+X2D 实测（2026-11-08）：屏幕上停止后同样落到 `FAILED`，但 `print_error` 变成 `0300400C`，拓竹官方 HMS 表里的文案是「The task was canceled.」【官方源码 + 实测】。所以至少在 X2D 上，driver 不管是谁停的都能报 `job.cancelled`；`fail_reason` 头几秒会残留上一次报错的值，以 `print_error` 为准。P1 是否一样还要测。
 
 ### 5.2 命令（daemon → driver）
 
@@ -567,7 +567,7 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ## 11. 第一批真机实测清单（拓竹）
 
-> 2026-11-08 已在 X2D 上测过第 1、2、3、4、7、8、9、10、13、16 条（第 13 条剩余空间除外），以及人工暂停时的字段变化，结果见 [X2D 实测记录](hardware/x2d-power-on-capture.md) §6 到 §9。P1 仍未测。
+> 2026-11-08 已在 X2D 上测过第 1、2、3、4、7、8、9、10、13、16 条（第 13 条剩余空间除外），以及人工暂停时的字段变化，结果见 [X2D 实测记录](hardware/x2d-power-on-capture.md) §6 到 §9。第 6 条已查清：`hms_action_<序列号前 3 位>.json` 和各语言的 `hms_<语言>_<前缀>.json` 都在 Bambu Studio 仓库的 `resources/hms/` 里，可以离线用（实测记录 §10）。P1 仍未测。
 
 1. P1 系列在仅局域网 + 开发者模式下，`gcode_state` 实际会出现哪些值，`INIT` 是否会出现。
 2. `RUNNING` 期间 `stg_cur` 是否真的会报加热、调平等准备阶段。
