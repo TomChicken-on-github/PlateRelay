@@ -167,7 +167,8 @@ sequenceDiagram
   participant P as 面板
   participant D as daemon
   participant R as 打印机
-  S->>P: stopPrint（expectedState，必选原因，前端已二次确认）
+  S->>P: stopPrint（expectedState、expectedJobId，必选原因，前端已二次确认）
+  P->>P: 锁行，核对状态和当前任务，对不上 409 job_mismatch（Q313）
   P->>P: 不挂标记，订单和打印机状态都不动（P-01）；前端停止按钮转圈，直到上报变了或 10 秒（R-CMD-01）
   P->>D: command job.stop（60 秒有效）
   P-->>S: 202
@@ -264,10 +265,12 @@ sequenceDiagram
     P->>P: 不自动结束，挂等待处理 RECONCILE_MISMATCH，人判（Q242）
   else 打印机最后一个任务是这个 jobRef，停在打完或失败
     P->>P: 按打印机事实结束任务 FINISHED / FAILED，不要人判（MSG-RECON-02、Q234）
-  else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹
+  else 已派单，快照 pendingStarts 里有这个 jobRef（daemon 还在排队、下载或上传）
+    P->>P: 仍是已派单，不判下发失败；要退回队列只能发 job.stop，等 daemon 回 job.cancelled beforeStart（R-PRT-16、Q223、Q308）
+  else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹、daemon 也不再持有它
     P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位（R-PRT-16、R-DSP-08）
   else 原来是离线（空闲时断的线）
-    P->>P: 在跑对不上的任务 → 外部占用（S-PRN-T14）；停在打完/失败且任务名和上次不同 → 待清板（S-PRN-T15）；否则空闲（S-PRN-T01，Q304）
+    P->>P: 在跑对不上的任务 → 外部占用（S-PRN-T14）；停在打完/失败/已取消 → 待清板（S-PRN-T15，任务名一样也不算证明，Q309）；否则空闲（S-PRN-T01，Q304）
   else 其他对不上
     P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
     S->>P: reconcileOrder（outcome=FAILED 或 PRINTED）
