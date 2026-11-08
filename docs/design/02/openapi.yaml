@@ -844,7 +844,7 @@ paths:
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
       x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 rule_violation（R-PRT-09）。
+      description: 文件过期返回 410 file_expired；归档过、被标为不重打（R-PRT-18）或申请者账户已停用（Q341）的失败订单返回 422 rule_violation（R-PRT-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1600,7 +1600,7 @@ paths:
       summary: 等待处理标记已处理
       x-permission: printer:operate
       x-rules: [R-PRT-24, S-FLG-ATTENTION]
-      description: 只能去掉 START_FAILED 和 UNCLEARED_START 两种原因（Q325）；其他原因返回 422。写审计。
+      description: 只能去掉 START_FAILED、UNCLEARED_START、LATE_START 三种原因（Q325、Q340）；其他原因返回 422。写审计。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1611,8 +1611,8 @@ paths:
             schema:
               type: object
               properties:
-                reason: {type: string, enum: [START_FAILED, UNCLEARED_START]}
-                jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时）}
+                reason: {type: string, enum: [START_FAILED, UNCLEARED_START, LATE_START]}
+                jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时是结束的任务，LATE_START 时是那个迟到的任务）}
               required: [reason]
               additionalProperties: false
       responses:

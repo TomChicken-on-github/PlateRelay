@@ -212,7 +212,7 @@
 
 | 标记 | `data` |
 | --- | --- |
-| `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }`。任务 ID 在 `job_id` 列：挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉这个任务的 `ERROR`、`RUNOUT` 行，`LATE_START` 在迟到的任务结束时去掉，别的原因的行不动（文档 1 §4A，Q226、Q315） |
+| `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }`。任务 ID 在 `job_id` 列：挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉这个任务的 `ERROR`、`RUNOUT` 行，`LATE_START` 在打印机报告这次迟到的运行结束时去掉，也可以人工去掉（dismissAttention，Q340），别的原因的行不动（文档 1 §4A，Q226、Q315） |
 | `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
 
