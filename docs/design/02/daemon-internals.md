@@ -74,7 +74,7 @@ platerelay_daemon/
 
 | 编号 | 约定 |
 | --- | --- |
-| DAE-MED-01 | H.264 机型：每路正在推的流一个 ffmpeg 子进程，拉 RTSPS，`-c copy` 推 SRT，连不上退回 RTSPS（MSG-MEDIA-02，Q253）。断了由 `media` 重拉。 |
+| DAE-MED-01 | H.264 机型：每路正在推的流一个 ffmpeg 子进程，拉 RTSPS，`-c copy` 推 SRT，连不上退回 RTSPS（MSG-MEDIA-02，Q253）。断了由 `media` 重拉。参数列表直接传给子进程，不经过 shell；加 `-nostdin` 和 `-protocol_whitelist`（只放 RTSP/RTSPS/SRT/TCP/TLS/UDP 等需要的）；推流令牌到期或 `camera.close` 后强制结束进程（先 SIGTERM，几秒不退就 SIGKILL）（Q328）。 |
 | DAE-MED-02 | 推流期间的截帧（MSG-SNAP-03）在同一个 ffmpeg 里多开一路输出，`-skip_frame nokey` 只解关键帧。 |
 | DAE-MED-03 | JPEG 帧机型（P1、A1）不用 ffmpeg，用适配器自己的实现，走 MSG-MEDIA-03。 |
 | DAE-MED-04 | 延时摄影不转码（F-PRT-10），不经过 ffmpeg。 |

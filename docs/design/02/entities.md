@@ -154,7 +154,7 @@
 | `id` | uuid | |
 | `name` | text | 管理员起的名字 |
 | `public_key` | text | RSA-3072 公钥，SPKI DER 的 base64（F-DMN-02） |
-| `key_fingerprint` | text | 公钥 SHA-256，唯一 |
+| `key_fingerprint` | text | 公钥 SHA-256，唯一。安装终端和面板的 daemon 卡片上都显示，给 daemon 绑打印机前管理员核对两边一致（MSG-ENR 步骤 6，Q330） |
 | `protocol_version` | text | 最近一次握手报的协议版本（F-DMN-05） |
 | `daemon_version` | text | |
 | `platform` | text | `linux` / `windows` / `docker`（F-DMN-06） |
@@ -241,7 +241,7 @@
 
 - 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
 - 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
-- 过期按订单算（E-ORD `files_expired_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
+- 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
 - 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
 
@@ -284,7 +284,7 @@
 | `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
 | `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
 | `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；管理员撤销时三列一起清空（R-PRT-19）。只在失败时有值 |
-| `files_expired_at` | timestamptz? | 这张订单的文件过期了（R-FIL-01、R-FIL-02）；之后不能下载、不能重打（R-PRT-10）。文件对象是否真删看 E-FILE（Q314） |
+| `files_expire_at` | timestamptz? | 订单进终态或进失败时按当时的 CFG-FIL-01 算好存下（`closed_at` + 保留天数），之后改参数不影响已经算好的（P-04，Q324）；重打时清空。过了这个时间，这张订单的文件就过期，不能下载、不能重打（R-FIL-01、R-FIL-02、R-PRT-10）。文件对象是否真删看 E-FILE（Q314） |
 
 约束：
 
