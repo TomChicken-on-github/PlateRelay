@@ -604,9 +604,19 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ## 参考来源
 
-- [Bambu Studio（拓竹官方开源客户端）](https://github.com/bambulab/BambuStudio)：`src/slic3r/GUI/DeviceManager.cpp`、`DeviceErrorDialog.cpp/.hpp`、`HMS.cpp`
-- [ha-bambulab](https://github.com/greghesp/ha-bambulab)：`custom_components/bambu_lab/pybambu/const.py`（社区）
-- [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md)（社区，内容较少）
+拓竹没有公开完整的局域网协议文档。查资料按这个顺序【建议】：协议细节以 Bambu Studio 源码为准，字段含义用 ha-bambulab 和 OpenBambuAPI 补，报错怎么处理看官方 Wiki，最后都以我们自己的真机录制（`docs/hardware/`）为准。
+
+拓竹：
+
+- [Bambu Studio（拓竹官方开源客户端）](https://github.com/bambulab/BambuStudio)【官方】：最权威。`src/slic3r/GUI/DeviceManager.cpp`（命令怎么拼、上报怎么解析）、`DeviceErrorDialog.cpp/.hpp`（报错按钮 ID 和对应命令）、`HMS.cpp`。网络插件闭源，云端部分看不到。
+- [Bambu Studio `resources/hms/`](https://github.com/bambulab/BambuStudio/tree/master/resources/hms)【官方】：各机型报错文案 `hms_<语言>_<序列号前 3 位>.json`（`device_error` 对应 `print_error`，`device_hms` 对应 `hms`）和处理按钮表 `hms_action_<前缀>.json`，可以离线用。X2D 是 `20P`。
+- [拓竹官方 Wiki · HMS](https://wiki.bambulab.com/en/hms/home)【官方】：每个报错码一页，写原因和现场处理步骤，不讲协议。另有局域网模式、开发者模式的说明。
+- [ha-bambulab](https://github.com/greghesp/ha-bambulab)（社区）：维护最活跃的实现，我们内置的 pybambu 来自这里。`custom_components/bambu_lab/pybambu/const.py` 有准备阶段等枚举，issue 里有大量各机型真机报文。
+- [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md)（社区）：MQTT、FTPS、摄像头都有，结构清楚，但不少地方标着 TODO，新机型覆盖不全。
+- [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)（社区）：Bambu Studio 的分叉，用来交叉对照。
+- [拓竹官方论坛](https://forum.bambulab.com/)（社区）：真机现象的线索，比如局域网模式下的对时问题，不能当结论。
+
+Klipper 等其他品牌：
 - [Moonraker 文档：Printer Objects](https://moonraker.readthedocs.io/en/latest/printer_objects/)
 - [Moonraker 文档：Printer 接口](https://moonraker.readthedocs.io/en/latest/external_api/printer/)
 - [Klipper 文档：Status Reference](https://www.klipper3d.org/Status_Reference.html)
