@@ -348,7 +348,7 @@ sequenceDiagram
   P->>P: 排队锁内：订单回排队中，用原排序值（S-ORD-T15、R-PRT-09）
   P->>P: 打印机松开这张单，仍是待清板（R-PRT-09）
   P-->>A: 通知"重打"
-  S->>P: confirmBedCleared（S-PRN-T11）
+  S->>P: confirmBedCleared（S-PRN-T11；同一事务去掉 START_FAILED、UNCLEARED_START，Q325）
   Note over S,P: 之后按 SEQ-03 派单
 ```
 
@@ -379,6 +379,7 @@ sequenceDiagram
   D->>P: POST /daemon/v1/enroll（token，publicKey，平台，版本）
   P->>P: 校验并作废令牌，建 E-DMN
   P-->>D: daemonId
+  D->>D: 终端显示公钥指纹；管理员和面板 daemon 卡片上的指纹核对一致后才给它绑打印机（MSG-ENR 步骤 6，Q330）
   D->>P: wss 连接 + hello（MSG-AUTH-01）
   P-->>D: challenge（nonce）
   D->>P: auth（RSA-PSS 签名，MSG-AUTH-03）
@@ -413,6 +414,7 @@ sequenceDiagram
   P->>P: 检查权限、CFG-CAM-05 / CFG-CAM-06 上限（R-CAM-07）
   alt 这台还没在推流
     P->>D: command camera.open（srtUrl，rtspsUrl，一次性推流令牌）
+    D->>D: 核对推流主机是注册时绑定的面板媒体主机，不是就拒绝；ffmpeg 不经 shell，-nostdin、协议白名单，到期强制结束（Q328）
     D->>R: 拉 RTSP（只读）
     D->>X: 原样推流，SRT，不通退 RTSPS（Q170）
     X->>P: 推流令牌鉴权回调
@@ -430,7 +432,8 @@ sequenceDiagram
 
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
-| 2 | 访客且 CFG-CAM-01 关 / 机型不支持 | 409 `stream_unavailable`，看抓拍 | R-CAM-02 |
+| 2 | 没登录且 CFG-UI-01 或 CFG-CAM-01 关 | 401（Q323） | R-VIS-03、API-CAM-02 |
+| 2 | 机型不支持 / 断流 | 409 `stream_unavailable`，看抓拍 | R-CAM-02 |
 | 2 | 到上限 | 409 `camera_limit`，看抓拍 | R-CAM-07 |
 | 7 | 拉流失败 | command.result failed `stream_unavailable` → 观众看抓拍 | MSG-MEDIA-07 |
 | 10 | 浏览器 WebRTC 不通 | "自动"时换 LL-HLS | CFG-CAM-11 |
