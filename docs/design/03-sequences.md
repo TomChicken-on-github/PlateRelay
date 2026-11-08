@@ -154,7 +154,7 @@ sequenceDiagram
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
 | 15–17 | job.staged 后过了 CFG-CMD-05（默认 60 秒，真机实测再定），任务 prepared_at 仍为空（打印机自己没报过准备中） | 进待办"开打可能没到"，一直留到有人处理或打印机有上报。现场人员看摄像头后点"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机没在跑任务，不会打两次 | R-CMD-04、R-PRT-17、MSG-CMD-START、Q243 |
-| 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位 | MSG-CMD-START |
+| 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位；打印机跟最新上报走，在跑外部任务就进外部占用（S-PRN-T17，Q317） | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
 
@@ -273,7 +273,7 @@ sequenceDiagram
     P->>P: 在跑对不上的任务 → 外部占用（S-PRN-T14）；停在打完/失败/已取消 → 待清板（S-PRN-T15，任务名一样也不算证明，Q309）；否则空闲（S-PRN-T01，Q304）
   else 其他对不上
     P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
-    S->>P: reconcileOrder（outcome=FAILED 或 PRINTED）
+    S->>P: reconcileOrder（expectedStatus=DISPATCHED 或 PRINTING，outcome=FAILED 或 PRINTED，Q318）
     P->>P: S-ORD-T13 或 S-ORD-T14
   end
 ```
@@ -300,8 +300,8 @@ sequenceDiagram
   actor A as 申请者
   R-->>D: 打印完成
   D-->>P: printer.event job.finished
-  D->>D: 立刻拍结束照片（R-CAM-11）
-  D->>P: PUT /daemon/v1/end-photos/{jobRef}（MSG-HTTP-05）
+  D->>D: 立刻拍结束照片（R-CAM-11），JPEG 和待上传记录跟结束记录一起落盘（DAE-STO-03，Q319）
+  D->>P: PUT /daemon/v1/end-photos/{jobRef}（MSG-HTTP-05），失败退避重试，收到 201 才删本机照片（Q319）
   P->>O: put end-photos/{jobId}.jpg，永久保留
   P->>P: 订单 待入库（S-ORD-T12），打印机 待清板（S-PRN-T08、INV-01）
   P-->>S: 通知"打完待入库"
