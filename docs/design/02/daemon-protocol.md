@@ -108,6 +108,7 @@ daemon                                  面板
     "layer": 58, "totalLayers": 210,
     "skippedParts": [3]
   },
+  "pendingStarts": [{ "jobRef": "0193…", "stage": "DOWNLOADING" }],
   "temps": { "nozzle1": { "current": 220, "target": 220 }, "bed": { "current": 55, "target": 55 }, "chamber": { "current": 31 } },
   "nozzles": [{ "extruder": 1, "diameterMm": 0.4, "flow": "standard" }],
   "trays": [{ "unit": 0, "slot": 0, "label": "AMS 1 · 1", "material": "PLA", "subType": "PLA Basic", "colour": "#FFFFFF", "remainingPercent": 80, "extruders": [1] }],
@@ -122,6 +123,7 @@ daemon                                  面板
 
 - `state` 用适配器的标准状态（IF-ADP-03），不是面板的打印机状态；换算规则在面板（IF-ADP-04）。
 - `substage` 是标准子阶段（驱动草稿 §3），界面只在准备中显示（R-VIS-11）。
+- `pendingStarts` 是 daemon 手里还没发出开打指令的任务（`stage`：`QUEUED`、`DOWNLOADING`、`UPLOADING`），已经停下（持久化了"不再开打"）的不列。对账靠它区分"还在传"和"下发失败"（MSG-RECON-02、R-PRT-16，Q308）。
 - `job.jobRef` 是这次的打印任务 ID（E-JOB）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
 - `deviceBoot` 是适配器给的"打印机这次开机"的标识（如从运行时长推出的开机时刻），拿不到就省略。面板和上次见到的比，变了 = 断线期间打印机重启过（Q242）。
 - 拿不到的字段省略，不填假值。
@@ -271,13 +273,14 @@ daemon                                  面板
 | 已派单 | 这个 `jobRef` 在打印 | 补一条"开始打印"，S-ORD-T11 |
 | 已派单 / 打印中 | 同一个 `jobRef`，但断线期间状态变了（暂停、报错、断料、继续；准备阶段的暂停也算，Q240） | 按快照经 S-JOB 映射表推进：暂停原因、等待处理、恢复（Q234） |
 | 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录（清单丢了时按 MSG-JOBREF-02 用面板下发的 `currentJobRef` 认领） | 按结束记录补事件（打完或失败） |
+| 已派单 | 快照 `pendingStarts` 里有这个 `jobRef`（daemon 还在排队、下载或上传） | 仍是已派单，不判下发失败：daemon 传完照样会开打。要退回队列只能发 `job.stop`，等 daemon 回 `job.cancelled { beforeStart: true }`（MSG-CMD-START，Q223、Q308） |
 | 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
 | 已派单 / 打印中 | 打印机最后一个任务就是这个 `jobRef`（任务名或文件后缀对得上），打印机自己停在打完或失败（如拓竹 `gcode_state` = `FINISH` / `FAILED`） | 按打印机这个事实把任务结束为 `FINISHED` 或 `FAILED`，不要人判（P-01、Q234）。先于下一行检查 |
 | 已派单 / 打印中 | 空闲，找不到结束记录，也看不到上一行那种打完 / 失败状态，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
 | 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
 | 空闲 / 离线 / 待清板 / 维护中 | 在打一个对不上的任务 | 按 R-PRT-11：外部占用（离线出发是 S-PRN-T14）；待清板另挂 `UNCLEARED_START`；维护中保持维护中 |
-| 离线 | 停在打完 / 失败 / 已取消，最后任务名和 `last_seen_job_name` 不一样 | 离线期间外部任务结束了：待清板（S-PRN-T15，Q304） |
-| 离线 | 其他（空闲；或停在打完 / 失败但任务名和上次一样） | 空闲（S-PRN-T01） |
+| 离线 | 停在打完 / 失败 / 已取消 | 待清板（S-PRN-T15）。证明不了是断线前已经处理过的那一次打印，任务名一样也不算：离线期间可能有人在屏幕上把同一个文件又打了一遍（Q304、Q309） |
+| 离线 | 其他（空闲） | 空闲（S-PRN-T01） |
 | 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单。打印机没有当前任务 → 外部占用；已有别的当前任务 → 打印机状态不变。都挂等待处理，原因 `LATE_START`（R-PRT-17） |
 
 不只是重连：在线时 `printer.event` 报了一个已结束任务的准备中或开打，面板也按上表最后一行处理（R-PRT-17）。
