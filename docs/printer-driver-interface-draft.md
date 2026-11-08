@@ -615,11 +615,12 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 - [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md)（社区）：MQTT、FTPS、摄像头都有，结构清楚，但不少地方标着 TODO，新机型覆盖不全。
 - [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)（社区）：Bambu Studio 的分叉，用来交叉对照。
 - [拓竹官方论坛](https://forum.bambulab.com/)（社区）：真机现象的线索，比如局域网模式下的对时问题，不能当结论。
+- [拓竹论坛：通过 FTP 访问 P1/A1 的文件（含 Timelapse 文件夹）](https://forum.bambulab.com/t/we-can-now-connect-to-ftp-on-the-p1-and-a1-series/6464/102)（社区）
+- [拓竹论坛：延时摄影 AVI 与 MP4 格式](https://forum.bambulab.com/t/change-the-timelapse-file-format-from-avi-to-mp4/62678)（社区）
+- [拓竹论坛：LAN mode system time no NTP](https://forum.bambulab.com/t/lan-mode-system-time-no-ntp/212547)（社区）
 
 Klipper 等其他品牌：
 - [Moonraker 文档：Printer Objects](https://moonraker.readthedocs.io/en/latest/printer_objects/)
 - [Moonraker 文档：Printer 接口](https://moonraker.readthedocs.io/en/latest/external_api/printer/)
 - [Klipper 文档：Status Reference](https://www.klipper3d.org/Status_Reference.html)
-- [拓竹论坛：通过 FTP 访问 P1/A1 的文件（含 Timelapse 文件夹）](https://forum.bambulab.com/t/we-can-now-connect-to-ftp-on-the-p1-and-a1-series/6464/102)（社区）
-- [拓竹论坛：延时摄影 AVI 与 MP4 格式](https://forum.bambulab.com/t/change-the-timelapse-file-format-from-avi-to-mp4/62678)（社区）
 - [moonraker-timelapse 配置文档](https://github.com/webino/moonraker-timelapse/blob/main/docs/configuration.md)（社区插件）
