@@ -1,6 +1,8 @@
-# 打印机 Driver 抽象层 · 接口草稿 v0.5
+# 打印机 Driver 抽象层 · 接口草稿 v0.6
 
 > 除标 **【已定】** 的条目外，设计内容均为 **【建议】**，尚未经用户确认。§1–§8 的类型用 TypeScript 风格表述，仅作示意；实现语言已定为 Python，见 §9。
+>
+> **v0.6 改动**：【已定】driver 要处理打印机 IP 变动（X2D 上电实测 DHCP 地址会漂，见 [上电抓包记录](hardware/x2d-power-on-capture.md)）。新增 §5.3，`DriverEvent` 加 `address_changed`；新增 §5.4 访问码刷新的处理（含 X2D 实测结果）；新增 §5.5 时间戳以 daemon 时钟为准；§11 加两条实测项。
 >
 > **v0.5 改动**：①【已定】存储按机型声明，新增能力 `storage` 和遥测 `StorageStatus`（来自 X2D 只读探测）；②【已定】摄像头画面对选手公开，改写 §10.1；③ §11 加一条存储实测项。
 >
@@ -258,11 +260,15 @@ type DriverEvent =
   | { type: "error_raised"; error: ActiveError }     // 见 §6
   | { type: "error_cleared"; errorId: string;
       clearedBy: "panel" | "device" | "unknown" }     // device = 有人在打印机屏幕上点掉了
+  | { type: "address_changed"; serial: string; oldHost: string; newHost: string;
+      source: "discovery" | "manual" }               // 见 §5.3
   | { type: "alert"; severity: "info" | "warn"; code: string; message: string };
 // 每个事件都带 printerId、seq（单台设备内单调递增）、ts
 ```
 
 **拓竹"取消"的问题**：拓竹的任务被停止后落到 `FAILED`，打印机侧本身不区分"失败"和"被人停止"【推断，需实测】。所以拓竹 driver 应该记下自己下发过的 `stop` 命令，在停止后的 `FAILED` 上补报 `job.cancelled`。由打印机屏幕上直接停止的，就区分不了，只能报 `failed`。
+
+X2D 实测（2026-11-08）：屏幕上停止后同样落到 `FAILED`，但 `print_error` 变成 `0300400C`，拓竹官方 HMS 表里的文案是「The task was canceled.」【官方源码 + 实测】。所以至少在 X2D 上，driver 不管是谁停的都能报 `job.cancelled`；`fail_reason` 头几秒会残留上一次报错的值，以 `print_error` 为准。P1 是否一样还要测。
 
 ### 5.2 命令（daemon → driver）
 
@@ -302,6 +308,42 @@ interface PrinterDriver {
   subscribe(handler: (e: DriverEvent) => void): Unsubscribe;
 }
 ```
+
+### 5.3 地址变动
+
+【已定】要处理。X2D 走 DHCP，实测同一台机器先后拿到过 .106、.103、.104，局域网上能被动拿到新地址的只有它的 SSDP 广播。以下做法是【建议】：
+
+1. **按序列号认打印机，不按 IP。** `printerId` 绑定序列号，IP 只是一个会过期的缓存。
+2. **daemon 一直被动监听发现广播。** 拓竹是 UDP 2021 上发往 `255.255.255.255` 的 SSDP NOTIFY（X2D 约 5 秒一次），`USN` 是序列号、`Location` 是当前 IP。只听不发，和 F-PRT-12 的自动发现共用同一个监听器。
+3. **序列号对上、IP 不同时**：更新地址、发 `address_changed` 事件（daemon 记审计），然后 driver 断开旧连接、按新地址重连。不需要人确认，因为序列号和访问码都没变。
+4. **断线时两边一起等**：按退避重试旧 IP，同时等发现广播；哪边先成功用哪边。
+5. **一直收不到广播**（跨网段、AP 拦广播）：保持「失联」，面板提示人手动改 IP，手动改的也发 `address_changed`（`source: "manual"`）。
+6. **防冒充**：广播是明文、谁都能发。换地址后第一次连接必须用原来的访问码登录成功，并且上报里的序列号一致，才算换成功；否则退回旧地址并告警。
+
+部署建议：在路由器上按 MAC 给打印机做 DHCP 地址保留，平时 IP 就不会变，上面的自动更新只是兜底。
+
+### 5.4 访问码刷新
+
+拓竹打印机屏幕上可以随时刷新局域网访问码。X2D 实测（2026-11-08，空闲状态）：**一点刷新，打印机在 1 毫秒内主动断开所有已连接的 MQTT 会话**（TCP FIN），用旧码重连立刻返回 `Not authorized`，FTPS 用旧码登录返回 `530 Login incorrect`。所以 driver 是马上就能察觉的，不会出现「连接还在、但下次才失败」的情况。详见 [上电抓包记录 §5](hardware/x2d-power-on-capture.md#5-刷新访问码)。
+
+和 IP 变动不同，新访问码不会出现在任何广播里，只显示在打印机屏幕上，**driver 没法自己找回，只能由人重新填**。以下做法是【建议】：
+
+1. **认证失败和网络失败分开。** MQTT CONNACK 返回用户名或密码错误、FTPS 登录返回 530，就判定为访问码失效，报 `connection.disconnected`，`reason: "auth_failed"`，不按断网退避一直重试（最多低频探测）。
+2. **单独的「凭据失效」状态。** 面板标红并通知管理员，这台机器暂停派单，排队的订单留在队列里不动。
+3. **管理员在面板上填新访问码。** 访问码只传给 daemon，存在 daemon 一侧的凭据存储里（§1 原则 6），面板不落库。daemon 先用新码试连，成功后才替换旧码，并记审计（只记「已更换」，不记码本身）。
+4. **重连后先对账。** 失联期间打印机会继续打，重连后先拿一次完整状态（`snapshot()`），和最后已知状态对比，补发漏掉的 `job`、`error_raised` / `error_cleared` 事件。
+5. **和地址变动叠加。** 换到新地址后认证失败，分不清是访问码换了还是有人冒充（见 §5.3 第 6 条），这时不自动切换地址，交给人判断。
+6. **当成需要立即处理的告警。** 黑客松现场谁都能走到打印机前点刷新，把 daemon 踢下线。
+
+### 5.5 时间戳
+
+【已定】事件时间以 daemon 的时钟为准。X2D 实测（2026-11-08）打印机墙上时间慢了约 3 天 23 小时，HMS 的 `ts_unix`、延时摄影文件名都跟着错。以下做法是【建议】：
+
+1. 事件的 `ts` 用 daemon 收到消息的时间。打印机每秒实时推送、不缓存，收到时间和发生时间差 1 秒左右；daemon 主机要对时。
+2. 打印机带 `ts_boot`（开机后的毫秒数，不受墙上时钟影响）的数据，比如 HMS，用开机时刻换算：daemon 持续记录「收到时间 − `ts_boot`」得到开机时刻（取最小值，消掉网络延迟），之后任何 `ts_boot` 都换算成真实时间。
+3. 打印机自己的 `ts_unix` 只原样存进原始数据，不用来排序。延时摄影文件按「这一单开始打印后第一个新出现的文件」认领，不按文件名里的时间匹配。
+4. 断线期间的事件靠重连后对账补（§5.4 第 4 条），补出来的事件标明是对账得出的，时间取对账时刻。
+5. 让打印机自己对时（屏幕设置、放行 NTP）作为部署建议，另外调查，不作为依赖。
 
 ---
 
@@ -527,6 +569,8 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ## 11. 第一批真机实测清单（拓竹）
 
+> 2026-11-08 已在 X2D 上测过第 1、2、3、4、7、8、9、10、13、16 条（第 13 条剩余空间除外），以及人工暂停时的字段变化，结果见 [X2D 实测记录](hardware/x2d-power-on-capture.md) §6 到 §9。第 6 条已查清：`hms_action_<序列号前 3 位>.json` 和各语言的 `hms_<语言>_<前缀>.json` 都在 Bambu Studio 仓库的 `resources/hms/` 里，可以离线用（实测记录 §10）。P1 仍未测。
+
 1. P1 系列在仅局域网 + 开发者模式下，`gcode_state` 实际会出现哪些值，`INIT` 是否会出现。
 2. `RUNNING` 期间 `stg_cur` 是否真的会报加热、调平等准备阶段。
 3. 任务结束后是否一直停在 `FINISH / FAILED`，直到下一个任务开始。
@@ -549,6 +593,8 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 20. 带板型识别的机型（X2D 等）放的板和切片板型不一致时：报哪个 HMS / `print_error` 码、能不能选继续；识别关掉后是否直接开打（Q273，要真的开打一次，实测前要用户本人同意）。
 21. 报开始打印之前（加热、调平、擦嘴、标定线阶段）停止或报错，热床上会不会留料；决定开打前结束要不要进待清板（Q306，文档 1 S-PRN-T16，暂定进）。
 22. 上报里有没有能区分每一次打印的字段（开打时间、任务 ID、计数等），同一个文件在屏幕上再打一次时它会变。找到了，离线重连停在打完 / 失败时就能放宽 S-PRN-T15（Q309）。
+23. 打印中途 IP 变了（比如 DHCP 续约换地址、路由器重启）：打印会不会受影响，MQTT 多久能按新地址重连上，重连后状态和报错是否完整。
+24. 打印中刷新访问码，打印本身会不会受影响；用新码重连后能否拿到完整的进度和报错（要在打印中操作，实测前要用户同意）。
 
 ---
 
@@ -568,12 +614,23 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ## 参考来源
 
-- [Bambu Studio（拓竹官方开源客户端）](https://github.com/bambulab/BambuStudio)：`src/slic3r/GUI/DeviceManager.cpp`、`DeviceErrorDialog.cpp/.hpp`、`HMS.cpp`
-- [ha-bambulab](https://github.com/greghesp/ha-bambulab)：`custom_components/bambu_lab/pybambu/const.py`（社区）
-- [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md)（社区，内容较少）
+拓竹没有公开完整的局域网协议文档。查资料按这个顺序【建议】：协议细节以 Bambu Studio 源码为准，字段含义用 ha-bambulab 和 OpenBambuAPI 补，报错怎么处理看官方 Wiki，最后都以我们自己的真机录制（`docs/hardware/`）为准。
+
+拓竹：
+
+- [Bambu Studio（拓竹官方开源客户端）](https://github.com/bambulab/BambuStudio)【官方】：最权威。`src/slic3r/GUI/DeviceManager.cpp`（命令怎么拼、上报怎么解析）、`DeviceErrorDialog.cpp/.hpp`（报错按钮 ID 和对应命令）、`HMS.cpp`。网络插件闭源，云端部分看不到。
+- [Bambu Studio `resources/hms/`](https://github.com/bambulab/BambuStudio/tree/master/resources/hms)【官方】：各机型报错文案 `hms_<语言>_<序列号前 3 位>.json`（`device_error` 对应 `print_error`，`device_hms` 对应 `hms`）和处理按钮表 `hms_action_<前缀>.json`，可以离线用。X2D 是 `20P`。
+- [拓竹官方 Wiki · HMS](https://wiki.bambulab.com/en/hms/home)【官方】：每个报错码一页，写原因和现场处理步骤，不讲协议。另有局域网模式、开发者模式的说明。
+- [ha-bambulab](https://github.com/greghesp/ha-bambulab)（社区）：维护最活跃的实现，我们内置的 pybambu 来自这里。`custom_components/bambu_lab/pybambu/const.py` 有准备阶段等枚举，issue 里有大量各机型真机报文。
+- [OpenBambuAPI](https://github.com/Doridian/OpenBambuAPI/blob/main/mqtt.md)（社区）：MQTT、FTPS、摄像头都有，结构清楚，但不少地方标着 TODO，新机型覆盖不全。
+- [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)（社区）：Bambu Studio 的分叉，用来交叉对照。
+- [拓竹官方论坛](https://forum.bambulab.com/)（社区）：真机现象的线索，比如局域网模式下的对时问题，不能当结论。
+- [拓竹论坛：通过 FTP 访问 P1/A1 的文件（含 Timelapse 文件夹）](https://forum.bambulab.com/t/we-can-now-connect-to-ftp-on-the-p1-and-a1-series/6464/102)（社区）
+- [拓竹论坛：延时摄影 AVI 与 MP4 格式](https://forum.bambulab.com/t/change-the-timelapse-file-format-from-avi-to-mp4/62678)（社区）
+- [拓竹论坛：LAN mode system time no NTP](https://forum.bambulab.com/t/lan-mode-system-time-no-ntp/212547)（社区）
+
+Klipper 等其他品牌：
 - [Moonraker 文档：Printer Objects](https://moonraker.readthedocs.io/en/latest/printer_objects/)
 - [Moonraker 文档：Printer 接口](https://moonraker.readthedocs.io/en/latest/external_api/printer/)
 - [Klipper 文档：Status Reference](https://www.klipper3d.org/Status_Reference.html)
-- [拓竹论坛：通过 FTP 访问 P1/A1 的文件（含 Timelapse 文件夹）](https://forum.bambulab.com/t/we-can-now-connect-to-ftp-on-the-p1-and-a1-series/6464/102)（社区）
-- [拓竹论坛：延时摄影 AVI 与 MP4 格式](https://forum.bambulab.com/t/change-the-timelapse-file-format-from-avi-to-mp4/62678)（社区）
 - [moonraker-timelapse 配置文档](https://github.com/webino/moonraker-timelapse/blob/main/docs/configuration.md)（社区插件）

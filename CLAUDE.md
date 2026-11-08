@@ -14,6 +14,7 @@
 | [Driver 接口草稿](docs/printer-driver-interface-draft.md) | 设备能力、标准状态、原始状态映射、报错处理、摄像头、存储、实测清单。 |
 | [MD3 概况页规格](docs/ui/figma-md3-overview-spec.md) | 从 Figma 读出的概况页布局、颜色、字体、尺寸。[原型](docs/ui/platerelay-md3-prototype.html)是对照它做的静态页面，只作视觉参考。 |
 | [打印机调试 MCP + TUI](tools/printer_mcp/README.md) | 本机 Claude Code 查打印机状态、录报文变化、列 FTPS 目录；访问码存 Windows 凭据管理器。调试真机优先用它，不要再临时写脚本。`control` 工具只能发白名单命令（暂停/继续/停止/腔室灯），**每次都要用户本人在确认框里二次确认**，不得代为确认或绕过。 |
+| [X2D 实测记录](docs/hardware/x2d-power-on-capture.md) | 上电后只有 SSDP 和 ARP、IP 会漂、MQTT 约 1 秒一条整包、开机标记 `ams.version`、刷新访问码立刻踢线、U 盘字段、摄像头流、一次完整打印的状态序列、打印机时钟不准。 |
 | [只读探测脚本](tools/bambu_probe.py) | 对拓竹打印机做只读探测：MQTT 收状态、发一次 `pushall`、FTPS 只列目录。 |
 
 文档里标【建议】【倾向】【待定】的条目不是用户的决定，实现前要先确认。
