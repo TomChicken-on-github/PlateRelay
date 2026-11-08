@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditListQuery, type AuditLogView, BED_TYPE_LABEL, MAX_UPLOAD_BYTES, type QueueRules, type ResourceSettings, type ResourcesView, WAIT_BUCKETS, WAIT_BUCKET_LABEL, type WaitBucket } from "@platerelay/shared";
+import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditListQuery, type AuditLogView, BED_TYPES, BED_TYPE_LABEL, MAX_UPLOAD_BYTES, type QueueRules, type ResourceSettings, type ResourcesView, WAIT_BUCKETS, WAIT_BUCKET_LABEL, type WaitBucket } from "@platerelay/shared";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { Button, IconButton } from "../../components/Button";
@@ -350,7 +350,7 @@ const MATERIAL_TYPES = ["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF",
 
 /** "2 台 · 0.4 mm 双喷嘴 · 纹理 PEI 板" */
 export const modelSummary = (m: ResourcesView["models"][number]) =>
-  [`${m.count} 台`, `${m.nozzles.join(" / ")} mm ${m.dual ? "双" : "单"}喷嘴`, m.bedTypes.map((b) => BED_TYPE_LABEL[b] ?? b).join(" / ")].filter((x) => x && x !== " mm 单喷嘴").join(" · ");
+  [`${m.count} 台`, `${m.nozzles.join(" / ")} mm ${m.dual ? "双" : "单"}喷嘴`].filter((x) => x && x !== " mm 单喷嘴").join(" · ");
 
 export function ColourDot({ color, name, stock }: { color: string; name: string | null; stock?: boolean }) {
   return (
@@ -361,19 +361,19 @@ export function ColourDot({ color, name, stock }: { color: string; name: string 
   );
 }
 
-type ResSheet = { kind: "model"; id: string; note: string; wait: WaitBucket | "" } | { kind: "material"; id: string; note: string } | { kind: "stock"; type: string; color: string; name: string; on: string[] };
+type ResSheet = { kind: "model"; id: string; note: string; wait: WaitBucket | ""; beds: string[] } | { kind: "material"; id: string; note: string } | { kind: "stock"; type: string; color: string; name: string; on: string[] };
 
 function ResourcesTab() {
   const toast = useToast();
   const view = useResources();
   const cfg = useResourceSettings();
-  const [form, setForm] = useState<Pick<ResourceSettings, "show" | "showWait" | "colourMissing" | "bulletin"> | null>(null);
+  const [form, setForm] = useState<Pick<ResourceSettings, "show" | "showWait" | "colourMissing" | "bedMissing" | "bulletin"> | null>(null);
   const [sheet, setSheet] = useState<ResSheet | null>(null);
   const s = cfg.data;
   const v = view.data;
   if (!s || !v) return <Section title="提交页展示">{(cfg.error || view.error) && <StatusBlock tone="err" icon="error" title={cfg.error ?? view.error} />}</Section>;
-  const f = form ?? { show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bulletin: s.bulletin };
-  const dirty = JSON.stringify(f) !== JSON.stringify({ show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bulletin: s.bulletin });
+  const f = form ?? { show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bedMissing: s.bedMissing, bulletin: s.bulletin };
+  const dirty = JSON.stringify(f) !== JSON.stringify({ show: s.show, showWait: s.showWait, colourMissing: s.colourMissing, bedMissing: s.bedMissing, bulletin: s.bulletin });
   const openModels = v.models.filter((m) => !m.hidden);
 
   async function save(next: ResourceSettings, msg: string) {
@@ -427,6 +427,15 @@ function ResourcesTab() {
             </select>
           )}
         </Field>
+        <Field label="切片用的打印板本场没有">
+          {(id, cls) => (
+            <select id={id} className={cls} value={f.bedMissing} onChange={(e) => setForm({ ...f, bedMissing: e.target.value as ResourceSettings["bedMissing"] })}>
+              <option value="warn">提示，可以提交</option>
+              <option value="block">拦下，不能提交</option>
+              <option value="off">不检查</option>
+            </select>
+          )}
+        </Field>
         <Field label="顶部说明（选填）" counter={`${f.bulletin.length}/200`}>
           {(id, cls) => <TextArea id={id} className={cls} maxLength={200} placeholder="例如：现场换料约 10 分钟" value={f.bulletin} onChange={(e) => setForm({ ...f, bulletin: e.target.value })} />}
         </Field>
@@ -437,8 +446,8 @@ function ResourcesTab() {
       <Section title="机型">
         <div>
           {v.models.length ? v.models.map((m) =>
-            row(m.modelId, m.model, modelSummary(m), m.hidden, <>{note(m.note)}{m.waitManual && m.wait && note(`${WAIT_BUCKET_LABEL[m.wait]}（手动）`, "预计等待")}</>,
-              () => setSheet({ kind: "model", id: m.modelId, note: s.models[m.modelId]?.note ?? "", wait: s.models[m.modelId]?.wait ?? "" }),
+            row(m.modelId, m.model, modelSummary(m), m.hidden, <>{!!m.bedTypes.length && note(m.bedTypes.map((b) => BED_TYPE_LABEL[b] ?? b).join(" · "), "打印板")}{note(m.note)}{m.waitManual && m.wait && note(`${WAIT_BUCKET_LABEL[m.wait]}（手动）`, "预计等待")}</>,
+              () => setSheet({ kind: "model", id: m.modelId, note: s.models[m.modelId]?.note ?? "", wait: s.models[m.modelId]?.wait ?? "", beds: [...m.bedTypes] }),
               (x) => save(setModel(m.modelId, { hidden: !x }), `${m.model} 已${x ? "显示" : "隐藏"}`)),
           ) : <Empty icon="print_disabled" title="没有开放给选手的打印机" />}
         </div>
@@ -472,7 +481,7 @@ function ResourcesTab() {
               onClick={async () => {
                 if (!sheet) return;
                 const next =
-                  sheet.kind === "model" ? setModel(sheet.id, { note: sheet.note.trim(), wait: sheet.wait || null })
+                  sheet.kind === "model" ? setModel(sheet.id, { note: sheet.note.trim(), wait: sheet.wait || null, bedTypes: BED_TYPES.filter((b) => sheet.beds.includes(b)) })
                   : sheet.kind === "material" ? setMaterial(sheet.id, { note: sheet.note.trim() })
                   : { ...s, stock: [...s.stock, { id: `s${Date.now().toString(36)}`, type: sheet.type, color: sheet.color, name: sheet.name.trim(), modelIds: sheet.on }] };
                 if (await save(next, sheet.kind === "stock" ? "已添加库存耗材" : "已保存")) setSheet(null);
@@ -496,6 +505,18 @@ function ResourcesTab() {
                   </select>
                 )}
               </Field>
+            )}
+            {sheet.kind === "model" && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-note font-medium tracking-[0.1px] text-on-variant">打印板</span>
+                <div className="flex flex-wrap gap-2">
+                  {BED_TYPES.map((b) => (
+                    <SelectChip key={b} selected={sheet.beds.includes(b)} onClick={() => setSheet({ ...sheet, beds: sheet.beds.includes(b) ? sheet.beds.filter((x) => x !== b) : [...sheet.beds, b] })}>
+                      {BED_TYPE_LABEL[b]}
+                    </SelectChip>
+                  ))}
+                </div>
+              </div>
             )}
             {sheet.kind === "material" && s.stock.some((x) => x.type === sheet.id) && (
               <div className="flex flex-col gap-1.5">

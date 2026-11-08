@@ -271,7 +271,7 @@ export class OrdersService {
       plates: parsed.plates.map((p) => ({
         ...p,
         availability: availability({ printerModel: parsed.printerModel, printerModelId: p.printerModelId, nozzles: p.nozzles }, offer.open),
-        check: this.resources.check(offer, { ...p, printerModel: parsed.printerModel }),
+        check: this.resources.check(offer, { ...p, printerModel: parsed.printerModel, bedType: parsed.bedType }),
       })),
       queue: can(ctx, "queue:wait:view") ? { length: queued.length, aheadSeconds: queued.reduce((a, o) => a + o.s, 0) } : null,
     };
@@ -309,7 +309,7 @@ export class OrdersService {
     const info = plates ? { ...parsed, plates: parsed.plates.filter((p) => plates.includes(p.index)) } : parsed;
     const rules = await this.settings.get("queue.rules");
     if (choices.bedType && !rules.allowPlateChoice) throw new ApiError(HttpStatus.BAD_REQUEST, "plate-choice-disabled", "本场不能自选热床板");
-    await this.assertOnOffer(await this.resources.offer(), info.printerModel, info.plates, choices.colourPref);
+    await this.assertOnOffer(await this.resources.offer(), info.printerModel, info.plates, choices.colourPref, choices.bedType ?? parsed.bedType);
     const form = await this.forms.current();
     const answers = this.forms.answer(form, rawAnswers);
     const fileId = uuidv7();
@@ -384,10 +384,10 @@ export class OrdersService {
   }
 
   /** Refuses plates the event cannot print (本场可用资源, rules doc §1.5): 422 plate-blocked with the reasons per plate. */
-  private async assertOnOffer(offer: Offer, printerModel: string | null, plates: Plate[], colourPref: ColourPref) {
+  private async assertOnOffer(offer: Offer, printerModel: string | null, plates: Plate[], colourPref: ColourPref, bedType: string | null) {
     const blocked: { plate: number; reasons: string[] }[] = [];
     for (const p of plates) {
-      const c = this.resources.check(offer, { ...p, printerModel });
+      const c = this.resources.check(offer, { ...p, printerModel, bedType });
       const reasons = [...c.block];
       if (colourPref === "exact" && c.missingColours.length && offer.settings.colourMissing === "block") reasons.push(`本场没有这些颜色：${c.missingColours.join("、")}`);
       if (reasons.length) blocked.push({ plate: p.index, reasons });
@@ -438,7 +438,7 @@ export class OrdersService {
     };
     const d = this.policy.revise(rules, base, fields, !!printer);
     if (!d.allowed) throw new ApiError(HttpStatus.CONFLICT, d.code, d.message, { orderId: id });
-    await this.assertOnOffer(await this.resources.offer(), parsed.printerModel, [plate], cur.colourPref);
+    await this.assertOnOffer(await this.resources.offer(), parsed.printerModel, [plate], cur.colourPref, cur.bedType ?? parsed.bedType);
 
     const fileKey = `uploads/${fileId}.gcode.3mf`;
     const written: string[] = [];

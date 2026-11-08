@@ -31,3 +31,33 @@ export async function api<T, E = ApiErr>(url: string, init?: RequestInit & { jso
     return { ok: false, error: { code: "network", message: "连不上面板服务器" } };
   }
 }
+
+/**
+ * Multipart upload with byte progress (R-SUB-14). fetch cannot report upload progress, so this one call
+ * uses XHR; responses and errors are handled the same way as `api`.
+ */
+export function upload<T, E = ApiErr>(url: string, body: FormData, onProgress: (sent: number, total: number) => void): Promise<Res<T, E>> {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", url);
+    x.withCredentials = true;
+    x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded, e.total);
+    x.onerror = () => resolve({ ok: false, error: { code: "network", message: "连不上面板服务器" } });
+    x.onload = () => {
+      let data: unknown = null;
+      try {
+        data = JSON.parse(x.responseText);
+      } catch {
+        /* not JSON */
+      }
+      if (x.status >= 200 && x.status < 300) return resolve({ ok: true, data: data as T });
+      const b = data as { code?: unknown } | null;
+      if (b && typeof b.code === "string") {
+        if (x.status === 401 && b.code === "unauthenticated") onUnauthenticated();
+        return resolve({ ok: false, error: b as E });
+      }
+      resolve({ ok: false, error: { code: "network", message: `服务器返回 ${x.status}` } });
+    };
+    x.send(body);
+  });
+}
