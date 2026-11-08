@@ -187,11 +187,10 @@
 | `open_to_applicants` | bool | 开放给选手，新加的默认关 |
 | `state` | printer_state | 准备中、打印中、暂停中、待清板，以及任务结束回到空闲，只能经打印任务映射表改（文档 1 §4A） |
 | `state_since` | timestamptz | |
-| `pause_reason` | pause_reason? | 只在 `PAUSED` 时有值 |
+| `pause_reason` | pause_reason? | `PAUSED` 时有值；准备阶段暂停时打印机仍是 `PREPARING`，也记在这里（Q240、Q310） |
 | `maintenance_reason` | text? | 只在 `MAINTENANCE` 时有值（Q148） |
 | `current_job_id` | uuid? | 正在占用它的打印任务；`CLEARING_REQUIRED` 时指向刚结束的那个 |
 | `bed_type` | text? | 打印机报的板型；报不了时为空（R-DSP-09） |
-| `last_seen_job_name` | text? | 打印机上报的最后一个任务名（含外部任务），每次上报变了就更新。离线重连时和打印机报的比较，判断离线期间有没有外部任务打完（S-PRN-T15，Q304） |
 | `access_code_cipher` | text? | 浏览器用 daemon 公钥加密的访问码（RSA-OAEP），面板解不开 |
 | `access_code_key_fingerprint` | text? | 用哪把公钥加密的；和 daemon 公钥对不上时要重填 |
 | `access_code_set_at` | timestamptz? | |
@@ -202,18 +201,18 @@
 
 约束：
 
-- `state = 'PAUSED'` ⇔ `pause_reason` 不为空；`state = 'MAINTENANCE'` ⇔ `maintenance_reason` 不为空。
+- `state = 'PAUSED'` ⇒ `pause_reason` 不为空；`pause_reason` 不为空 ⇒ `state in ('PAUSED','PREPARING')`；`state = 'MAINTENANCE'` ⇔ `maintenance_reason` 不为空。
 - 移到别的 daemon 只能由管理员显式操作（INV-09、F-PRT-12）。
 
 ### E-PFLAG `printer_flags`
 
-`printer_id`、`flag`、`since`、`reason`（`attention_reason`，只给 `ATTENTION`）、`data jsonb`、`by?`。主键 `(printer_id, flag)`，同一种标记同时只挂一个。
+`id`、`printer_id`、`flag`、`since`、`reason`（`attention_reason`，只给 `ATTENTION`）、`job_id?`、`data jsonb`、`by?`。主键 `id`。`ATTENTION` 每个原因单独一行，各自按自己的规则去掉（Q315）：`unique (printer_id, flag, reason, coalesce(job_id, '00000000-0000-0000-0000-000000000000'))`，同一个原因在同一个任务上不重复挂；其他标记 `unique (printer_id, flag) where flag <> 'ATTENTION'`。界面上合成一个"等待处理"，这台打印机所有 `ATTENTION` 行都没了才消失。
 
 `data` 的内容：
 
 | 标记 | `data` |
 | --- | --- |
-| `ATTENTION` | `{ jobId?, errorId? }`，对账不一致时 `{ lastKnown, reported }`。`jobId` 是挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉 `ERROR`、`RUNOUT`，`LATE_START` 在迟到的任务结束时去掉（文档 1 §4A，Q226） |
+| `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }`。任务 ID 在 `job_id` 列：挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉这个任务的 `ERROR`、`RUNOUT` 行，`LATE_START` 在迟到的任务结束时去掉，别的原因的行不动（文档 1 §4A，Q226、Q315） |
 | `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
 
@@ -242,7 +241,8 @@
 
 - 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
 - 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
-- 订单进终态后过了保留期删文件，写 `purged_at`；预览图和元数据留着（R-FIL-01）。
+- 过期按订单算（E-ORD `files_expired_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
+- 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
 
 ### E-CHK `file_checks`
@@ -284,7 +284,7 @@
 | `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
 | `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
 | `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；管理员撤销时三列一起清空（R-PRT-19）。只在失败时有值 |
-| `files_purged_at` | timestamptz? | 文件已删除；之后不能重打（R-PRT-10） |
+| `files_expired_at` | timestamptz? | 这张订单的文件过期了（R-FIL-01、R-FIL-02）；之后不能下载、不能重打（R-PRT-10）。文件对象是否真删看 E-FILE（Q314） |
 
 约束：
 

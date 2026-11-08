@@ -962,12 +962,12 @@ paths:
               type: object
               properties:
                 expectedStatus: {type: string, enum: [PRINTING]}
-                expectedJobId: {type: string, format: uuid, description: 防止跳到重打后的新任务上（R-SKP-07）}
+                expectedJobId: {type: string, format: uuid, description: 防止跳到重打后的新任务上；对不上 409 job_mismatch（R-SKP-07，Q313）}
                 partIds:
                   type: array
                   items: {type: integer}
                   minItems: 1
-              required: [expectedStatus, partIds]
+              required: [expectedStatus, expectedJobId, partIds]
               additionalProperties: false
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
@@ -1463,9 +1463,10 @@ paths:
               type: object
               properties:
                 expectedState: {$ref: '#/components/schemas/PrinterState'}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）}
                 reason: {type: string, minLength: 1}
                 reasonVisible: {type: boolean, default: true}
-              required: [expectedState, reason]
+              required: [expectedState, expectedJobId, reason]
               additionalProperties: false
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
@@ -2841,8 +2842,9 @@ components:
         fileAvailable: {type: boolean, description: 文件没过保留期}
       required: [id, n, kind, state, plate, counted, modelSwitch, createdAt, fileAvailable]
       additionalProperties: false
-    OrderSummary:
+    OrderSummaryFields:
       type: object
+      description: OrderSummary 和 OrderDetail 共用的字段，本身不封闭；封闭在组合外层用 unevaluatedProperties（Q312）
       properties:
         id: {type: string, format: uuid}
         number: {type: integer}
@@ -2889,7 +2891,10 @@ components:
           required: [percent, remainingSeconds]
           additionalProperties: false
       required: [id, number, status, frozen, owner, isMine, plate, colourPref, submittedAt]
-      additionalProperties: false
+    OrderSummary:
+      allOf:
+      - {$ref: '#/components/schemas/OrderSummaryFields'}
+      unevaluatedProperties: false
     TimelineNode:
       type: object
       properties:
@@ -2900,8 +2905,9 @@ components:
       required: [node, state, label, note]
       additionalProperties: false
     OrderDetail:
+      unevaluatedProperties: false
       allOf:
-      - {$ref: '#/components/schemas/OrderSummary'}
+      - {$ref: '#/components/schemas/OrderSummaryFields'}
       - type: object
         properties:
           activeVersion: {$ref: '#/components/schemas/OrderVersion'}
@@ -2992,7 +2998,6 @@ components:
             required: [at, by, reason]
             additionalProperties: false
         required: [activeVersion, versions, revisions, nodes, actions]
-        additionalProperties: false
     OrderRecord:
       type: object
       properties:
@@ -3177,8 +3182,9 @@ components:
         enabled: {type: boolean, description: 按 IF-ADP-05 算出的此刻能不能点}
       required: [action, category, args, destructive, enabled]
       additionalProperties: false
-    PrinterCard:
+    PrinterCardFields:
       type: object
+      description: PrinterCard 和 PrinterDetail 共用的字段，本身不封闭（Q312）
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -3230,10 +3236,14 @@ components:
           description: 卡片平时显示抓拍，点播放才申请实况（R-CAM-05）
         openable: {type: boolean, description: 能不能点开详情（R-VIS-04）}
       required: [id, name, state, stateSince, flags, starred, openToApplicants, camera, openable]
-      additionalProperties: false
-    PrinterDetail:
+    PrinterCard:
       allOf:
-      - {$ref: '#/components/schemas/PrinterCard'}
+      - {$ref: '#/components/schemas/PrinterCardFields'}
+      unevaluatedProperties: false
+    PrinterDetail:
+      unevaluatedProperties: false
+      allOf:
+      - {$ref: '#/components/schemas/PrinterCardFields'}
       - type: object
         properties:
           brand: {type: string}
@@ -3267,6 +3277,17 @@ components:
                 freeBytes: {type: [integer, 'null']}
               required: [medium, present, writable, freeBytes]
               additionalProperties: false
+          attention:
+            type: array
+            description: 等待处理的全部原因，每个原因一条；界面合成一个标记，点开列出（Q315）
+            items:
+              type: object
+              properties:
+                reason: {type: string, enum: [ERROR, RUNOUT, START_FAILED, RECONCILE_MISMATCH, LATE_START, UNCLEARED_START]}
+                since: {type: string, format: date-time}
+                jobId: {type: [string, 'null'], format: uuid}
+              required: [reason, since, jobId]
+              additionalProperties: false
           activeErrors:
             type: array
             items: {$ref: '#/components/schemas/ActiveError'}
@@ -3285,8 +3306,7 @@ components:
           currentDispatchId: {type: [string, 'null'], format: uuid}
           version: {type: integer}
           lastReportAt: {type: [string, 'null'], format: date-time}
-        required: [brand, serial, host, daemon, nozzles, trays, storage, activeErrors, controls, accessCode, version]
-        additionalProperties: false
+        required: [brand, serial, host, daemon, nozzles, trays, storage, activeErrors, attention, controls, accessCode, version]
     DiscoveredPrinter:
       type: object
       properties:

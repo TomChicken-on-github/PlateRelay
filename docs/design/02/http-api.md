@@ -71,6 +71,7 @@
 | 403 | `origin_rejected` | CSRF 检查没过（API-AUTH-02） |
 | 404 | `not_found` | 不存在或看不到 |
 | 409 | `state_conflict` | 预期状态对不上（API-CONC-02），`params.current` 是当前状态 |
+| 409 | `job_mismatch` | 停止、跳过零件带的 `expectedJobId` 不是现在的当前任务（Q313），`params.currentJobId` |
 | 409 | `version_conflict` | 版本号对不上（API-CONC-01），`params.currentVersion` |
 | 409 | `idempotency_key_reused` | 同一个幂等键带了不同的请求体（API-IDEM-04） |
 | 409 | `idempotency_in_progress` | 同一个幂等键的上一个请求还没处理完 |
@@ -106,7 +107,7 @@
 | 编号 | 约定 |
 | --- | --- |
 | API-CONC-01 | **编辑冲突**（Q139）：可编辑的资源（E-GEN-04）在响应里带 `version`，保存时请求体必须带上读到的 `version`；不一致返回 409 `version_conflict`，响应里带当前版本的完整内容，前端提示"已被别人修改"。 |
-| API-CONC-02 | **状态转换**（Q138）：订单和打印机的转换接口，请求体必须带 `expectedStatus`（订单）或 `expectedState`（打印机），就是界面上看到的状态。服务端加行锁后比较，不一致返回 409 `state_conflict`。这样两个人同时点"通过"和"驳回"，后到的那个会失败，而不是覆盖。 |
+| API-CONC-02 | **状态转换**（Q138）：订单和打印机的转换接口，请求体必须带 `expectedStatus`（订单）或 `expectedState`（打印机），就是界面上看到的状态。服务端加行锁后比较，不一致返回 409 `state_conflict`。这样两个人同时点"通过"和"驳回"，后到的那个会失败，而不是覆盖。针对某一次打印的命令（停止、跳过零件）还要带 `expectedJobId`，锁行后和状态一起比较，对不上返回 409 `job_mismatch`，免得晚到的请求落到下一单上（Q313）。 |
 | API-CONC-03 | 每个转换接口在 openapi.yaml 里用 `x-transitions` 列出它可能触发的文档 1 转换编号（如 `[S-ORD-T02]`），测试按这张表核对。 |
 | API-CONC-04 | 队列相关的写操作（审核通过、派单、拖拽、修改后退、重打）在同一把排队锁下执行，保证排序值不打架。 |
 
