@@ -227,3 +227,55 @@ def test_discover_loopback():
     threading.Thread(target=send).start()
     found = srv.discover(1.0, ports=(port,))
     assert [p["serial"] for p in found] == ["20P6BJTEST0001"]
+
+
+class FakeKeyring:
+    def __init__(self):
+        self.store = {}
+
+    def get_password(self, service, key):
+        return self.store.get((service, key))
+
+    def set_password(self, service, key, value):
+        self.store[(service, key)] = value
+
+    def delete_password(self, service, key):
+        del self.store[(service, key)]
+
+
+def test_save_same_serial_replaces_old_entry(monkeypatch):
+    kr = FakeKeyring()
+    monkeypatch.setattr(srv, "_keyring", lambda: kr)
+    srv.save_printer("a", "10.0.0.1", "SN1", "c1")
+    srv.save_printer("other", "10.0.0.9", "SN2", "c2")
+    srv.save_printer("b", "10.0.0.2", "SN1", "c3")  # 同一台机器换了名字和 IP
+    assert srv.list_printers() == ["b", "other"]
+    assert srv.load_printer("b")[1] == {"host": "10.0.0.2", "serial": "SN1", "access_code": "c3"}
+    assert kr.get_password(srv.KEYRING_SERVICE, "a") is None
+    srv.save_printer("b", "10.0.0.3", "SN1", "c4")  # 同名更新
+    assert srv.list_printers() == ["b", "other"]
+    assert srv.find_by_serial("SN2") == "other"
+    assert srv.find_by_serial("SN9") is None
+
+
+def test_conn_rebuilds_when_config_changes(monkeypatch):
+    made = []
+
+    class FakeConn:
+        def __init__(self, name, cfg):
+            self.host, self.serial, self._code = cfg["host"], cfg["serial"], cfg["access_code"]
+            self._client = type("C", (), {"loop_stop": lambda s: None, "disconnect": lambda s: None})()
+            made.append(self)
+
+        def wait_ready(self):
+            pass
+
+    cfg = {"host": "10.0.0.1", "serial": "SN1", "access_code": "c1"}
+    monkeypatch.setattr(srv, "load_printer", lambda p: ("p", dict(cfg)))
+    monkeypatch.setattr(srv, "PrinterConnection", FakeConn)
+    monkeypatch.setattr(srv, "_connections", {})
+    a = srv.conn(None)
+    assert srv.conn(None) is a
+    cfg["host"] = "10.0.0.2"
+    b = srv.conn(None)
+    assert b is not a and b.host == "10.0.0.2" and len(made) == 2
