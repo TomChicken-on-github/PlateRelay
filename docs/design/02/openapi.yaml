@@ -931,7 +931,7 @@ paths:
             schema:
               type: object
               properties:
-                expectedStatus: {type: string, enum: [PRINTING]}
+                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账（S-ORD-T13、T14，Q318）}
                 outcome: {type: string, enum: [FAILED, PRINTED]}
                 note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
               required: [expectedStatus, outcome]

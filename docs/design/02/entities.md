@@ -343,6 +343,7 @@
 | `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。R-PRT-16 自动判的 → `SEND_FAILED`。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID，以打印机上报为准（R-SKP-04）；重打是新任务，从空开始（R-SKP-07） |
+| `skip_inflight` | jsonb，`[{ commandId, partIds }]`：已经通过检查、发出了但打印机还没上报的跳过请求。检查"至少留一件"时和 `skipped_parts`、这次请求一起算，都在这一行的锁里做（R-SKP-02，Q316）；命令被拒绝或确定没执行时去掉，打印机上报后去掉已上报的零件。不是命令锁 |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 | `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
 

@@ -56,9 +56,9 @@ platerelay_daemon/
 | 编号 | 约定 |
 | --- | --- |
 | DAE-STO-01 | 一个 SQLite 文件，Python 自带的 sqlite3，WAL，`synchronous=FULL`（Q252）。 |
-| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、文件缓存索引（DAE-STO-05）、面板地址和 `daemonId`。 |
-| DAE-STO-03 | 要么都写、要么都不写的放进一个事务：任务结束时的结束记录 + 发件箱里的结束事件 + 清单里"这个 3mf 待删"；收到命令时的命令 ID + 必要的"不再开打"标记，**在执行之前提交**。 |
-| DAE-STO-04 | 不进 SQLite：私钥照 MSG-ENR 步骤 3 单独存（Linux / Docker 0600 文件，Windows DPAPI）；访问码只在内存（INV-07）；快照只在内存留最新一份；抓拍不落盘。 |
+| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、结束照片待上传记录到面板回 `201`（MSG-HTTP-05，Q319）、文件缓存索引（DAE-STO-05）、面板地址和 `daemonId`。 |
+| DAE-STO-03 | 要么都写、要么都不写的放进一个事务：任务结束时的结束记录 + 发件箱里的结束事件 + 清单里"这个 3mf 待删" + 结束照片待上传记录（`jobRef`、拍摄时间、文件路径、sha256；拍照失败也记一条，标明没拍到）。照片 JPEG 在提交事务之前先写到本机目录（写临时文件、fsync、改名），所以重启后要么两样都在、要么都不在。收到 MSG-HTTP-05 的 `201` 才删照片和记录，结束事件被 `ack` 不算（Q319）；收到命令时的命令 ID + 必要的"不再开打"标记，**在执行之前提交**。 |
+| DAE-STO-04 | 不进 SQLite：私钥照 MSG-ENR 步骤 3 单独存（Linux / Docker 0600 文件，Windows DPAPI）；访问码只在内存（INV-07）；快照只在内存留最新一份；抓拍不落盘（结束照片除外，见 DAE-STO-03）。 |
 | DAE-STO-05 | 打印文件缓存：按 sha256 存，总量上限 CFG-CMD-07（默认 2 GB），满了删最久没用过的；正在用的不删；每次用之前重新核对 sha256（Q255）。**不预取**：v1 不预分配打印机（Q249），排队的单不知道派给谁，还可能被修改或取消。 |
 
 ## 5. 传文件排队（DAE-XFER）

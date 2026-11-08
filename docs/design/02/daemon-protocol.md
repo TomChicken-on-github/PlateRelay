@@ -242,7 +242,7 @@ daemon                                  面板
 - daemon 收到 `job.start`、进了下载队列就回 `accepted`。同时下载的个数受 CFG-CMD-06 限制（默认 2），本机缓存里有同一 sha256 的文件就跳过下载（CFG-CMD-07，DAE-XFER、DAE-STO-05）；文件放到打印机上、开打指令已发出后发 `job.staged`。
 - 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发），从真正开始传起算，排队时间不算。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
-- 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
+- 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。面板结束任务时打印机状态跟最新上报走：在跑外部任务就进外部占用（S-PRN-T17），空闲才回空闲，不无条件写成空闲（Q317）。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
 - 传文件期间（开打指令还没发）收到这个 `jobRef` 的 `job.stop`：daemon 中止下载或上传，删掉自己传了一半的文件（INV-15），把"这个 `jobRef` 不再发开打"和命令 ID 一样先写进硬盘（R-CMD-08），然后回 `job.cancelled { commandId, beforeStart: true }`。面板把任务结束为 `STOPPED_BEFORE_START`，订单回原位。开打指令只有 daemon 发，所以这里以 daemon 为准，不用等打印机（Q223）。
 - 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。进度用 `command.result.data.step`：`queued` → `download` → `upload`，前端据此显示"排队中"。
 
@@ -297,7 +297,7 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 | MSG-HTTP-02 | `GET /daemon/v1/files/{fileId}?jobRef=` | 下载要打印的文件。只有派给这个 daemon 的打印机、还没结束的任务能下载。daemon 下完核对 SHA-256 |
 | MSG-HTTP-03 | `PUT /daemon/v1/snapshots/{printerId}` | 上传最新一张抓拍（`image/jpeg`），请求头 `X-Captured-At`。频率和错峰见 MSG-SNAP。面板只留内存里最新一张（R-CAM-03） |
 | MSG-HTTP-04 | `PUT /daemon/v1/timelapses/{jobRef}/{part}` | 上传延时摄影。请求头带 `X-Content-SHA256`；面板写进对象存储、核对大小和哈希，成功才返回 `201`，daemon 收到 `201` 才删打印机里的原文件（F-PRT-10） |
-| MSG-HTTP-05 | `PUT /daemon/v1/end-photos/{jobRef}` | 上传结束照片（`image/jpeg`，请求头 `X-Captured-At`）。daemon 在发 `job.finished`、`job.failed`、`job.cancelled` 时自己立刻拍，不等面板命令（R-CAM-11）；不走抓拍的替换队列，失败按退避重试，直到面板返回 `201` |
+| MSG-HTTP-05 | `PUT /daemon/v1/end-photos/{jobRef}` | 上传结束照片（`image/jpeg`，请求头 `X-Captured-At`）。daemon 在发 `job.finished`、`job.failed`、`job.cancelled` 时自己立刻拍，不等面板命令（R-CAM-11）；不走抓拍的替换队列，失败按退避重试，直到面板返回 `201`。照片和待上传记录跟结束记录一起落盘（DAE-STO-03），收到 `201` 才删；结束事件的 `ack` 不算（Q319） |
 
 ## 11. 媒体通道（MSG-MEDIA）
 
