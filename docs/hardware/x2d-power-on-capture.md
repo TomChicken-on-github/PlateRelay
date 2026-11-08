@@ -178,6 +178,28 @@ DevCap.bambu.com: 1
 - **人工停止落到 `FAILED`**，但 `print_error` 会变成 `0300_400C`，看起来是「任务被取消」的专用码（【推断】，要对照 HMS 资料确认）。如果确认，driver 就能区分「被人停止」和「真失败」，不用只靠记住自己发过的 `stop`。注意 `fail_reason` 在头 7 秒里还残留着上一次异物报错的值，判断要以 `print_error` 为准，并且等上报稳定几秒。
 - 报错时的自动抓拍可行：从收到报错到存好第一张图约 2 秒（大部分时间花在建立 RTSP 连接上），画面能看清板上的异物。
 
+### 10. 查资料补齐（2026-11-08）
+
+**报错码含义**：拓竹把各机型的报错文案放在 Bambu Studio 仓库的 `resources/hms/` 下，按序列号前 3 位分文件。X2D 的序列号以 `20P` 开头，对应 `hms_en_20P.json`、`hms_zh-cn_20P.json`（版本 `202511162200`），里面分 `device_error`（对应 `print_error`，8 位）和 `device_hms`（对应 `hms` 的 `attr` + `code`，16 位）两张表。今天遇到的三个码：
+
+| 码 | 来源字段 | 官方文案（英文表） | 实测场景 |
+| --- | --- | --- | --- |
+| `0500806E` | `print_error` | Foreign objects detected on heatbed; please check and clean up the heatbed. | §9 板上留异物 |
+| `0300400C` | `print_error` | The task was canceled. | §9 屏幕上停止。**确认是「任务被取消」专用码** |
+| `0500_0100_0003_0004` | `hms` | Not enough space on the USB flash drive. Video recording and timelapse recording cannot be performed. Please clear some space. | §8 打印结束后出现，正好对上 `tl_external_free_kb` 变成负数 |
+
+所以 §8 里那个变成负数的 `tl_external_free_kb` 就是 U 盘给录像留的空间不够了，打印机报了「U 盘空间不足，录像和延时摄影无法进行」。但这次延时摄影的 mp4 还是生成了（1.7 MB），可能是录到一半停了，要再确认。driver 应该把 `tl_external_free_kb < 0` 或这条 HMS 报成存储告警。
+
+**报错的处理选项**：同一目录下的 `hms_action_20P.json` 给每个 `ecode` 列出可用的按钮 ID（`actions`），这就是驱动草稿 §11 第 6 条要找的文件，**随 Bambu Studio 开源发布，可以离线用**。`0500806E` 对应的是 `[21]`，但 Bambu Studio 的 `DeviceErrorDialog.hpp` 里没有定义 21，说明这个按钮只在打印机屏幕上有。实测用户在屏幕上处理后，打印机发出的是 `ignore` 命令回执。
+
+**打印机时钟**：拓竹论坛里多位用户反映，局域网模式下打印机不能指定本地 NTP 服务器，也不认 DHCP 下发的 NTP 选项，屏幕上不能手动设时间。打印机靠联网访问外部时间服务器对时，有人观察到它不是开机就对时，而是按周期对时。所以只要它能出网，时间最终会对上；被路由器拦了出网，时间就会一直错。这些都是用户报告，不是官方说明。驱动草稿 §5.5 已定以 daemon 时钟为准。
+
+来源：[Bambu Studio `resources/hms`](https://github.com/bambulab/BambuStudio/tree/master/resources/hms)、[`DeviceErrorDialog.hpp`](https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/DeviceErrorDialog.hpp)、[论坛：LAN mode system time no NTP](https://forum.bambulab.com/t/lan-mode-system-time-no-ntp/212547)、[论坛：Printer in LAN Mode connects to Internet](https://forum.bambulab.com/t/printer-in-lan-mode-connects-to-internet/139125)。
+
+## 原始记录
+
+脱敏后的原始报文、抓包摘要和报错照片在 [`x2d-2026-11-08/`](x2d-2026-11-08/README.md)。
+
 ## 后续可做
 
 - 再断电一次，录 `ams.version`、`upgrade_state.idx2` 开机后的值，确认 boot marker。
