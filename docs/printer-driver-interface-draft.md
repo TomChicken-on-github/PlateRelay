@@ -1,6 +1,8 @@
-# 打印机 Driver 抽象层 · 接口草稿 v0.5
+# 打印机 Driver 抽象层 · 接口草稿 v0.6
 
 > 除标 **【已定】** 的条目外，设计内容均为 **【建议】**，尚未经用户确认。§1–§8 的类型用 TypeScript 风格表述，仅作示意；实现语言已定为 Python，见 §9。
+>
+> **v0.6 改动**：【已定】driver 要处理打印机 IP 变动（X2D 上电实测 DHCP 地址会漂，见 [上电抓包记录](hardware/x2d-power-on-capture.md)）。新增 §5.3，`DriverEvent` 加 `address_changed`，§11 加一条实测项。
 >
 > **v0.5 改动**：①【已定】存储按机型声明，新增能力 `storage` 和遥测 `StorageStatus`（来自 X2D 只读探测）；②【已定】摄像头画面对选手公开，改写 §10.1；③ §11 加一条存储实测项。
 >
@@ -258,6 +260,8 @@ type DriverEvent =
   | { type: "error_raised"; error: ActiveError }     // 见 §6
   | { type: "error_cleared"; errorId: string;
       clearedBy: "panel" | "device" | "unknown" }     // device = 有人在打印机屏幕上点掉了
+  | { type: "address_changed"; serial: string; oldHost: string; newHost: string;
+      source: "discovery" | "manual" }               // 见 §5.3
   | { type: "alert"; severity: "info" | "warn"; code: string; message: string };
 // 每个事件都带 printerId、seq（单台设备内单调递增）、ts
 ```
@@ -302,6 +306,19 @@ interface PrinterDriver {
   subscribe(handler: (e: DriverEvent) => void): Unsubscribe;
 }
 ```
+
+### 5.3 地址变动
+
+【已定】要处理。X2D 走 DHCP，实测同一台机器先后拿到过 .106、.103、.104，局域网上能被动拿到新地址的只有它的 SSDP 广播。以下做法是【建议】：
+
+1. **按序列号认打印机，不按 IP。** `printerId` 绑定序列号，IP 只是一个会过期的缓存。
+2. **daemon 一直被动监听发现广播。** 拓竹是 UDP 2021 上发往 `255.255.255.255` 的 SSDP NOTIFY（X2D 约 5 秒一次），`USN` 是序列号、`Location` 是当前 IP。只听不发，和 F-PRT-12 的自动发现共用同一个监听器。
+3. **序列号对上、IP 不同时**：更新地址、发 `address_changed` 事件（daemon 记审计），然后 driver 断开旧连接、按新地址重连。不需要人确认，因为序列号和访问码都没变。
+4. **断线时两边一起等**：按退避重试旧 IP，同时等发现广播；哪边先成功用哪边。
+5. **一直收不到广播**（跨网段、AP 拦广播）：保持「失联」，面板提示人手动改 IP，手动改的也发 `address_changed`（`source: "manual"`）。
+6. **防冒充**：广播是明文、谁都能发。换地址后第一次连接必须用原来的访问码登录成功，并且上报里的序列号一致，才算换成功；否则退回旧地址并告警。
+
+部署建议：在路由器上按 MAC 给打印机做 DHCP 地址保留，平时 IP 就不会变，上面的自动更新只是兜底。
 
 ---
 
@@ -539,6 +556,7 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 12. 下发多盘 `.gcode.3mf` 时，如何指定只打其中某一盘（命令里的参数格式）。
 13. 各机型上报里，存储介质是否在位、可写、剩余空间分别由哪些字段表达（X2D：内置存储 + U 盘；P1：SD 卡）；P1 拔卡后下发任务会怎样。
 14. `skip_objects`：`obj_list` 是只带这次要跳的 id 还是要带上全部已跳过的；`s_obj` 什么时候更新；暂停中能不能跳；首层没打完时能不能跳（这是控制命令，实测前要用户同意）。
+15. 打印中途 IP 变了（比如 DHCP 续约换地址、路由器重启）：打印会不会受影响，MQTT 多久能按新地址重连上，重连后状态和报错是否完整。
 
 ---
 
