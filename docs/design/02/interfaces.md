@@ -46,7 +46,8 @@ class ModelDescription:
 class ControlSpec:
     action: str                                          # "light.set" / "fan.set" / "temp.set" / "speed.set" /
                                                          # "filament.load" / "filament.unload" / "dry.start" /
-                                                         # "dry.stop" / "job.pause" / "job.resume" / "axis.move" / "axis.home"
+                                                         # "dry.stop" / "job.pause" / "job.resume" / "axis.move" / "axis.home" /
+                                                         # "tray.set"（非 RFID 料位的材料类型、子类型、颜色，R-DSP-14；可选，机型不支持就不声明，Q349）
     category: ControlCategory                            # 面板按类别套通用状态规则（IF-ADP-05）
     args: dict                                           # 参数的 JSON Schema（范围受 limits 约束）
     destructive: bool                                    # 界面上要二次确认
@@ -132,6 +133,7 @@ class Discovery(Protocol):
 | `resume` | 暂停中，或准备中且在准备阶段暂停（Q240、Q310），而且原因是 `USER`；恢复后准备阶段回准备中，不提前算开打；报错和断料的继续走"处理报错"（R-PRT-14） |
 | `filament`、`dry` | 空闲、待清板、维护中 |
 | `motion`（移轴、回零） | 空闲、待清板、维护中（R-ARB-07） |
+| `tray`（改料位耗材信息，设定值） | 离线以外的所有状态；准备中、打印中、暂停中时，当前任务正在用的料位不行；RFID 料位和空料位不行（R-DSP-14，Q348） |
 
 失联时所有命令都发不出去，全部置灰。除此之外按钮只看打印机**上报的**状态，不看"预计会变成"的状态，也没有命令锁（INV-16，Q243）：这张表就是所有机型共用的那一张。点完按钮转圈，直到上报状态变了或最多 10 秒（前端常量，R-CMD-01）。
 

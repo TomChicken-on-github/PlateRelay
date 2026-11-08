@@ -1513,7 +1513,7 @@ paths:
       tags: [printers]
       summary: 设备控制
       x-permission: printer:control
-      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08]
+      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08, R-DSP-14]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -3212,7 +3212,7 @@ components:
         action: {type: string}
         category:
           type: string
-          enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion]
+          enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion, tray]
         args: {type: object, additionalProperties: true, description: 参数的 JSON Schema}
         destructive: {type: boolean}
         enabled: {type: boolean, description: 按 IF-ADP-05 算出的此刻能不能点}
