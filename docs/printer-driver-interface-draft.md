@@ -436,7 +436,7 @@ Klipper 没有逐报错的选项表，按状态给通用选项（`errorActions: 
 
 ### 6.5 面板侧的处理规则【建议】
 
-> X2D 全部官方报错按「下发前可避免、系统可处理、必须人处理、安全告警」的分类见 [X2D 报错分类](hardware/x2d-error-classification.md)。
+> 拓竹全部机型的官方报错，按「下发前可避免、系统可处理、必须人处理、安全告警」的分类见 [打印机报错分类](hardware/bambu-error-classification.md)，逐条在 [CSV](hardware/bambu-error-classification.csv)；Klipper 的思路也在同一份文档 §6。
 
 1. **按钮受权限控制**：每个标准动作对应一个权限节点，如 `printer:error:resume`、`printer:error:stop`。例如志愿者能 `ACKNOWLEDGE`、`RESUME`，只有 Builder 能 `STOP`、`IGNORE_PERMANENTLY`。
 2. **`requiresOnSite` 的按钮要二次确认**："我已在现场处理"，并记录是谁。远程直接点"问题已解决，继续"，在喷嘴堵塞、热床温度异常这类报错上是危险的。
