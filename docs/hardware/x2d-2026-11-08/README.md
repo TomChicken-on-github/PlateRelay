@@ -8,6 +8,8 @@
 | `2-idle-usb-reboot.jsonl.gz` | 空闲时只订阅：U 盘拔插、断电重启、重连 | §6 |
 | `3-print1-belt-clamp.jsonl.gz` | 第一次打印全程：下发、准备阶段、人工暂停、打印中拉流、FINISH、结束时的 HMS | §8 |
 | `4-print2-foreign-object-refresh-stop.jsonl.gz` | 第二次打印：异物报错暂停、屏幕处理、打印中刷新访问码（中间有约 49 秒断线）、人工停止 | §9 |
+| `5-print3-belt-clamp-20261109.jsonl.gz` | 2026-11-09 第三次打印全程，正常完成，含下发前的空闲状态 | §11 |
+| `pcap-print3-printer-non-mqtt.tsv` | 第三次打印时打印机的非 MQTT 流量（SSDP、ARP、FTPS 控制连接和各连接的建立、关闭） | §11 |
 | `pcap-boot-printer-packets.tsv` | 上电抓包里打印机（MAC `50:31:23:d8:82:08`）相关的包，只有时间、地址、协议和摘要 | §1 |
 | `pcap-refresh-tcp-open-close.tsv` | 刷新访问码那次抓包里 8883 端口的 SYN、FIN、RST | §5 |
 | `photos/` | 第二次打印前的板面，以及异物报错后 2、8、20 秒自动抓的画面 | §9 |

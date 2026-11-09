@@ -196,6 +196,21 @@ DevCap.bambu.com: 1
 
 来源：[Bambu Studio `resources/hms`](https://github.com/bambulab/BambuStudio/tree/master/resources/hms)、[`DeviceErrorDialog.hpp`](https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/DeviceErrorDialog.hpp)、[论坛：LAN mode system time no NTP](https://forum.bambulab.com/t/lan-mode-system-time-no-ntp/212547)、[论坛：Printer in LAN Mode connects to Internet](https://forum.bambulab.com/t/printer-in-lan-mode-connects-to-internet/139125)。
 
+### 11. 第三次打印：正常完成，全程抓包（2026-11-09 21:09 到 21:47）
+
+用户在本对话里明确要求后，用同一个文件、同样的参数再打一次。U 盘已被用户清空，所以先重新上传（`226`），再下发 `project_file`。PC 同时抓打印机的全部流量（加广播、组播），MQTT 只订阅。
+
+**和第一次对比**：准备阶段的 `stg_cur` 顺序完全一样（29 → 13 → 74 → 11 → 73 → 4 → 8 → 14 → 54 → 1 → 3 → 39 → 51 → 0），准备用了 7 分钟（21:09:21 到 21:16:27），打印 31 分钟，21:47:38 进入 FINISH。全程没有报错，也没有 HMS。
+
+- `ipcam.timelapse` 在 `stg_cur = 0` 之后 20 秒变成 `enable`，FINISH 后 11 秒变回 `disable`。
+- U 盘空间够（开始时 `tl_external_free_kb` 约 12 GB），所以这次没有出现 §8 的「U 盘空间不足」。一次打印下来 `tl_external_free_kb` 少了约 1.18 GB。延时摄影本身只有几 MB，大头是打印机默认开着的连续录像（`ipcam.ipcam_record = enable`，写到 U 盘的 `/ipcam/`）。**派单前要检查 U 盘余量，或者在部署时关掉连续录像**，否则跑几单就会满。
+- 整包推送 3025 条，平均间隔 1.17 秒，最长 2.5 秒。
+
+**抓包结论**：
+- 一条 MQTT 会话 59 分钟传了 69 MB（打印机发往 PC），约 **20 KB/s，每小时约 70 MB**。daemon 按台数估带宽要算上这个，每多一个订阅客户端就再多一份。
+- 打印机在局域网上的非 MQTT 流量只有 SSDP（699 条，约 5 秒一次）和 ARP（118 条）。没有 mDNS、IGMP、LLMNR。
+- FTPS 上传走 990 控制连接，数据连接是被动模式的高位端口（这次是 50057、50084）。daemon 所在机器的防火墙要放行。
+
 ## 原始记录
 
 脱敏后的原始报文、抓包摘要和报错照片在 [`x2d-2026-11-08/`](x2d-2026-11-08/README.md)。
