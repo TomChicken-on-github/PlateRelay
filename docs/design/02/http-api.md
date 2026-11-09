@@ -49,14 +49,13 @@
   "status": 409,
   "code": "state_conflict",
   "detail": "order is QUEUED, expected PENDING_REVIEW",
-  "rule": "S-ORD-T02",
   "params": { "current": "QUEUED" },
   "requestId": "0192f3c1-…"
 }
 ```
 
 - `code`：英文错误码，前端靠它查文案。
-- `rule`：调试用，违反的是哪条规则，填文档 0 / 1 的编号（如 `R-VER-09`）；和具体规则无关时不带。和 `detail` 一样只给日志和开发者看，前端不显示，也不得按它分支；编号以后可能拆分或重排，不在兼容承诺内（Q358）。前端要区分的情况一律给单独的 `code`。
+- 响应里没有规则编号字段（Q358）：文档编号只用来在文档之间互相引用，不进代码、不进接口。前端要区分的情况一律给单独的 `code`；排查时看 `detail` 和 `requestId`。
 - `params`：显示文案要用的参数。
 - `detail`：给开发者看的英文说明，前端不显示。
 - 参数校验失败时多一个 `errors: [{ path, code, params }]`。
@@ -90,13 +89,13 @@
 | 422 | `reprint_not_allowed` | 失败订单不能重打（R-PRT-09），`params.reason`：`ARCHIVED` 归档过、`DECLINED` 已标为不重打、`ACCOUNT_DISABLED` 申请者账户已停用 |
 | 422 | `skip_all_parts` | 跳完没有剩下的零件（全跳等于停止） |
 | 422 | `archive_blocked` | 还有已派单或打印中的订单，不能归档（R-ARC-01），`params.orderIds` |
-| 422 | `rule_violation` | 其他违反业务规则、前端不需要单独文案的情况，带 `rule` 供排查 |
+| 422 | `rule_violation` | 其他违反业务规则、前端不需要单独文案的情况，`detail` 写明是哪条限制 |
 | 428 | `idempotency_key_required` | 写请求没带幂等键 |
 | 429 | `rate_limited` | 限频，带 `Retry-After` |
 | 500 | `internal` | 服务端错误，只带 `requestId` |
 | 503 | `maintenance` | 正在升级迁移 |
 
-新增错误码不算破坏兼容；改已有错误码的含义算。`rule` 的取值不算接口的一部分（Q358）。
+新增错误码不算破坏兼容；改已有错误码的含义算。
 
 ## 5. 幂等（Q138）
 

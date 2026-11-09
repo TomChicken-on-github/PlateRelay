@@ -2679,7 +2679,6 @@ components:
         status: {type: integer}
         code: {type: string, description: 错误码，见 http-api.md §4.2}
         detail: {type: string}
-        rule: {type: string, description: 调试用的文档 0 / 1 规则编号，如 R-VER-09。和 detail 一样前端不显示、不得按它分支，取值不在兼容承诺内；要区分的情况看 code（http-api.md §4，Q358）}
         params: {type: object, additionalProperties: true}
         requestId: {type: string}
         errors:
