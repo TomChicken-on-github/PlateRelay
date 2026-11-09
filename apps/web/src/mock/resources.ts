@@ -6,6 +6,7 @@ export const reported: ResourcesView = {
   show: true,
   bulletin: "",
   colourMissing: "warn",
+  bedMissing: "warn",
   models: [
     { modelId: "N6", model: "X2D", count: 2, idle: 1, nozzles: [0.4], dual: true, bedTypes: ["Textured PEI Plate"], wait: "30m-1h", waitManual: false, note: "", hidden: false },
     { modelId: "O1D", model: "H2D", count: 1, idle: 0, nozzles: [0.4], dual: true, bedTypes: ["Textured PEI Plate"], wait: "1h-2h", waitManual: false, note: "", hidden: false },

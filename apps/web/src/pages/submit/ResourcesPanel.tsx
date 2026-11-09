@@ -87,7 +87,7 @@ export function ResourcesPanel({ view, fit, used, open, onOpen, tab, onTab }: { 
                 >
                   <div className="flex flex-wrap gap-1.5">
                     {!!m.nozzles.length && <StatusChip className="bg-sc text-on-surface">{m.nozzles.join(" / ")} mm {m.dual ? "双" : "单"}喷嘴</StatusChip>}
-                    {m.bedTypes.map((b) => <StatusChip key={b} className="bg-sc text-on-surface">{BED_TYPE_LABEL[b] ?? b}</StatusChip>)}
+                    {!!m.bedTypes.length && <span className="inline-flex items-center text-body-s text-on-variant">打印板：{m.bedTypes.map((b) => BED_TYPE_LABEL[b] ?? b).join(" · ")}</span>}
                   </div>
                   {m.note && <div className="text-body-s text-on-variant">{m.note}</div>}
                 </Item>

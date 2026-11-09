@@ -143,10 +143,15 @@ export interface ResourceSettings {
   showWait: boolean;
   /** 颜色要求「一致」但本场没有该颜色: warn and let it through, or block the plate. */
   colourMissing: "warn" | "block";
+  /** 切片用的打印板本场没有 (CFG-SUB-09, R-SUB-15): warn, block the plate, or don't check. */
+  bedMissing: "warn" | "block" | "off";
   /** 顶部说明. */
   bulletin: string;
-  /** Per printer model id: hidden, note, manual wait range, sort order. */
-  models: Record<string, { hidden?: boolean; note?: string; wait?: WaitBucket | null; order?: number }>;
+  /**
+   * Per printer model id: hidden, note, manual wait range, sort order, and the bed types (slicer names,
+   * e.g. "Textured PEI Plate") this event has for it (打印板目录, E-BED; unset = what the printers report).
+   */
+  models: Record<string, { hidden?: boolean; note?: string; wait?: WaitBucket | null; order?: number; bedTypes?: string[] }>;
   /** Per material type: hidden, note, sort order. */
   materials: Record<string, { hidden?: boolean; note?: string; order?: number }>;
   /** 库存耗材: on hand but not loaded; the plate is printed after a spool change. */
@@ -157,6 +162,7 @@ export const DEFAULT_RESOURCE_SETTINGS: ResourceSettings = {
   show: true,
   showWait: true,
   colourMissing: "warn",
+  bedMissing: "warn",
   bulletin: "",
   models: {},
   materials: {},
@@ -168,6 +174,7 @@ export interface ResourcesView {
   show: boolean;
   bulletin: string;
   colourMissing: ResourceSettings["colourMissing"];
+  bedMissing: ResourceSettings["bedMissing"];
   models: {
     modelId: string;
     model: string;
@@ -176,6 +183,7 @@ export interface ResourcesView {
     /** Nozzle diameters on offer, e.g. [0.4]. */
     nozzles: number[];
     dual: boolean;
+    /** Bed types on offer for this model (slicer names). */
     bedTypes: string[];
     /** null when hidden from this viewer. */
     wait: WaitBucket | null;
@@ -196,4 +204,6 @@ export interface PlateCheck {
   block: string[];
   /** Colours (#RRGGBB) of the plate that no spool on offer has; matters when 颜色要求 is 一致. */
   missingColours: string[];
+  /** Set when the plate's bed type is not on offer for its model and 切片用的打印板本场没有 is "warn" (R-SUB-15). */
+  bedMissing?: string;
 }

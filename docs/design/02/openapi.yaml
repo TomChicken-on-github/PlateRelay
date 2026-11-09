@@ -1,0 +1,3720 @@
+# 设计层文档 2 · 接口契约。由人维护；改接口先改这里（Q150）。
+openapi: 3.1.0
+info:
+  title: PlateRelay API
+  version: 1.0.0-draft
+  description: |-
+    设计层文档 2 的接口契约，设计先行、手写，是接口的唯一来源（Q150）。
+
+    - 通用约定（认证、错误、幂等、并发、分页、实时推送）见 http-api.md，这里不重复。
+    - `x-permission`：文档 1 §2.2 的权限节点，或 public / guest / authenticated（API-PERM）。数组表示满足任意一个；`order:submit` 出现在需要"本人"的操作上时，服务端还会检查订单所有者。
+    - `x-transitions`：可能触发的文档 1 状态转换（API-CONC-03）。
+    - `x-rules`：相关的文档 0 / 1 / 2 编号。
+    - `x-requires`：字段级权限裁剪，没权限时字段不出现（API-PERM-04）。
+    - 重写时实体结构挪到 packages/shared/schema/，这里改成 $ref（README.md）。
+  license: {name: GPL-3.0-only, identifier: GPL-3.0-only}
+servers:
+- {url: /api/v1}
+tags:
+- {name: auth}
+- {name: me}
+- {name: files}
+- {name: orders}
+- {name: queue}
+- {name: printers}
+- {name: pickup}
+- {name: overview}
+- {name: catalog}
+- {name: admin}
+- {name: notifications}
+- {name: stream}
+paths:
+  /auth/methods:
+    get:
+      operationId: getAuthMethods
+      tags: [auth]
+      summary: 可用的注册和登录方式
+      x-permission: public
+      x-rules: [R-ACC-01]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthMethods'}
+        default: {$ref: '#/components/responses/Problem'}
+  /setup:
+    post:
+      operationId: setup
+      tags: [auth]
+      summary: 初始化向导：创建第一个管理员
+      x-permission: public
+      description: 只在系统里还没有用户时可用，之后返回 404（F-ACC-04）。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string, minLength: 8}
+                displayName: {type: string}
+                orgName: {type: string}
+                timezone: {type: string}
+              required: [username, password, displayName, orgName, timezone]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: 用户名密码登录
+      x-permission: public
+      x-rules: [R-ACC-04, API-RATE-01, API-AUTH-06]
+      description: 成功时设置会话 Cookie（API-AUTH-01）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string}
+                captcha:
+                  type: object
+                  properties:
+                    challengeId: {type: string}
+                    answer: {type: string}
+                  required: [challengeId, answer]
+                  additionalProperties: false
+              required: [username, password]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: 退出登录
+      x-permission: authenticated
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/captcha:
+    post:
+      operationId: issueCaptcha
+      tags: [auth]
+      summary: 领一个人机验证挑战
+      x-permission: public
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challengeId: {type: string}
+                  payload: {}
+                required: [challengeId, payload]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/otp:
+    post:
+      operationId: sendOtp
+      tags: [auth]
+      summary: 发送短信或邮件验证码
+      x-permission: public
+      x-rules: [R-ACC-02, R-ACC-03, API-RATE-02]
+      description: 短信一律要 captcha；邮件按 CFG-ACC-03，需要而没带时返回 422 captcha_required。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel: {type: string, enum: [SMS, EMAIL]}
+                target: {type: string}
+                purpose: {type: string, enum: [REGISTER, VERIFY_EMAIL, RESET_PASSWORD]}
+                captcha:
+                  type: object
+                  properties:
+                    challengeId: {type: string}
+                    answer: {type: string}
+                  required: [challengeId, answer]
+                  additionalProperties: false
+              required: [channel, target, purpose]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: 注册
+      x-permission: public
+      x-rules: [R-ACC-01]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method: {type: string, enum: [OPEN, INVITE, PHONE]}
+                username: {type: string}
+                password: {type: string, minLength: 8}
+                displayName: {type: string}
+                email: {type: string}
+                inviteCode: {type: string}
+                phone: {type: string}
+                otp: {type: string}
+              required: [method, username, displayName]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/oidc/{provider}/start:
+    get:
+      operationId: oidcStart
+      tags: [auth]
+      summary: 跳转到外部登录
+      x-permission: public
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '302': {description: 跳到提供方}
+        default: {$ref: '#/components/responses/Problem'}
+  /auth/oidc/{provider}/callback:
+    get:
+      operationId: oidcCallback
+      tags: [auth]
+      summary: 外部登录回调
+      x-permission: public
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: {type: string}
+      - name: code
+        in: query
+        schema: {type: string}
+      - name: state
+        in: query
+        schema: {type: string}
+      responses:
+        '302': {description: 登录完成，跳回界面}
+        default: {$ref: '#/components/responses/Problem'}
+  /me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: 当前用户和权限
+      x-permission: authenticated
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+    patch:
+      operationId: updateMe
+      tags: [me]
+      summary: 改显示名、界面语言
+      x-permission: authenticated
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                displayName: {type: string}
+                locale: {type: string, enum: [zh-CN, en]}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+  /me/password:
+    put:
+      operationId: changePassword
+      tags: [me]
+      summary: 改密码
+      x-permission: authenticated
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current: {type: string}
+                next: {type: string, minLength: 8}
+              required: [current, next]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /me/avatar:
+    put:
+      operationId: setAvatar
+      tags: [me]
+      summary: 换头像
+      x-permission: authenticated
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, contentMediaType: image/*}
+              required: [file]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Me'}
+        default: {$ref: '#/components/responses/Problem'}
+  /me/notification-prefs:
+    get:
+      operationId: getNotificationPrefs
+      tags: [me]
+      summary: 个人通知设置
+      x-permission: authenticated
+      x-rules: [R-NTF-02]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/NotificationPref'}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: setNotificationPrefs
+      tags: [me]
+      summary: 保存个人通知设置
+      x-permission: authenticated
+      x-rules: [R-NTF-02]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prefs:
+                  type: array
+                  items: {$ref: '#/components/schemas/NotificationPref'}
+              required: [prefs]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/NotificationPref'}
+        default: {$ref: '#/components/responses/Problem'}
+  /files:
+    post:
+      operationId: uploadFile
+      tags: [files]
+      summary: 上传 .gcode.3mf
+      x-permission: order:submit
+      x-rules: [R-SUB-01, R-SUB-02, R-SUB-10, R-SUB-13, API-FILE-01]
+      description: 返回时校验通常还没完成，等 file.checked 推送或轮询。这个人手上已有 CFG-SUB-08 − 1 个没提交的文件（校验被拒的和已提交的不算）时要带 captcha（先调 issueCaptcha），没带返回 422 captcha_required，和登录一样（R-SUB-13，Q236）。没提交的文件过了 CFG-SUB-07 自动删除，没有删除接口。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, contentMediaType: application/octet-stream}
+                captchaChallengeId: {type: string}
+                captchaAnswer: {type: string}
+              required: [file]
+              additionalProperties: false
+      responses:
+        '202':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileCheck'}
+        default: {$ref: '#/components/responses/Problem'}
+  /files/{fileId}/check:
+    get:
+      operationId: getFileCheck
+      tags: [files]
+      summary: 解析和校验结果
+      x-permission: order:submit
+      description: 只能查自己上传的。
+      parameters:
+      - name: fileId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FileCheck'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders:
+    post:
+      operationId: submitOrders
+      tags: [orders]
+      summary: 提交：每盘一个订单
+      x-permission: order:submit
+      x-transitions: [S-ORD-T01]
+      x-rules: [R-SUB-02, R-SUB-05, R-SUB-06, R-SUB-07, R-SUB-08, R-SUB-09, R-ARB-05]
+      description: 多盘一次提交，超过排队上限整次拒绝（R-ARB-05）。表单版本不是最新时返回 409 version_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fileId: {type: string, format: uuid}
+                plates:
+                  type: array
+                  items: {type: integer, minimum: 1}
+                  minItems: 1
+                colourPref: {$ref: '#/components/schemas/ColourPref'}
+                bedType: {type: [string, 'null']}
+                formVersionId: {type: string, format: uuid}
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fieldId: {type: string}
+                      value: {}
+                    required: [fieldId, value]
+                    additionalProperties: false
+              required: [fileId, plates, colourPref, formVersionId, answers]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: {$ref: '#/components/schemas/OrderSummary'}
+                required: [orders]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: 全部订单（订单管理）
+      x-permission: order:view:any
+      description: 按提交时间倒序（Q99）。
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: status
+        in: query
+        schema: {type: string}
+      - name: ownerId
+        in: query
+        schema: {type: string, format: uuid}
+      - name: printerId
+        in: query
+        schema: {type: string, format: uuid}
+      - name: number
+        in: query
+        schema: {type: integer}
+      - name: q
+        in: query
+        schema: {type: string}
+        description: 搜文件名、申请者
+      - name: submittedFrom
+        in: query
+        schema: {type: string, format: date-time}
+      - name: submittedTo
+        in: query
+        schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/OrderSummary'}
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/mine:
+    get:
+      operationId: listMyOrders
+      tags: [orders]
+      summary: 我的订单
+      x-permission: order:submit
+      description: 按提交时间倒序。
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: status
+        in: query
+        schema: {type: string}
+        description: 逗号分隔的状态
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/OrderSummary'}
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: 订单详情
+      x-permission: ['order:submit', 'order:view:any']
+      description: 本人或 order:view:any；看不到返回 404（API-PERM-05）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/records:
+    get:
+      operationId: listOrderRecords
+      tags: [orders]
+      summary: 订单时间线记录
+      x-permission: ['order:submit', 'order:view:any']
+      x-rules: [R-NTE-01, R-NTE-02, R-VIS-07]
+      description: 按时间正序。申请者只收到选手可见的备注。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/OrderRecord'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: addDeviceStopNote
+      tags: [orders]
+      summary: 给"在设备端停止"补一条备注
+      x-permission: printer:operate
+      x-rules: [R-NTE-01, R-NTE-03]
+      description: 只能指向 kind=print.stopped_on_device 的记录。记录只追加（E-GEN-10），所以备注是一条新记录 note.added，data.refRecordId 指向原记录，归在"打印"节点下（Q217）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refRecordId: {type: string, format: uuid}
+                note: {type: string, minLength: 1, maxLength: 2000}
+                noteVisible: {type: boolean, default: false}
+              required: [refRecordId, note]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderRecord'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/versions/{n}/file:
+    get:
+      operationId: downloadVersionFile
+      tags: [orders]
+      summary: 下载某个版本的文件
+      x-permission: ['order:submit', 'order:view:any']
+      x-rules: [R-FIL-01]
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/VersionN'}
+      responses:
+        '302': {description: 跳到签名链接（API-FILE-02）}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/parts:
+    get:
+      operationId: getOrderParts
+      tags: [orders]
+      summary: 零件列表和图（跳过零件用）
+      x-permission: ['order:skip-parts:own', 'order:skip-parts:any']
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  parts:
+                    type: array
+                    items: {$ref: '#/components/schemas/Part'}
+                  topUrl: {type: [string, 'null'], format: uri}
+                  pickUrl: {type: [string, 'null'], format: uri}
+                  skipped:
+                    type: array
+                    items: {type: integer}
+                required: [parts, topUrl, pickUrl, skipped]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/approve:
+    post:
+      operationId: approveOrder
+      tags: [orders]
+      summary: 审核通过
+      x-permission: order:review
+      x-transitions: [S-ORD-T02]
+      x-rules: [R-REV-01, R-REV-04, R-REV-05]
+      description: versionId 是审核人看到的那个待审版本，防止审了一个版本却通过了另一个。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                versionId: {type: string, format: uuid}
+                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
+              required: [expectedStatus, versionId]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/reject:
+    post:
+      operationId: rejectOrder
+      tags: [orders]
+      summary: 驳回（新提交或修改）
+      x-permission: order:review
+      x-transitions: [S-ORD-T03, S-ORD-T04]
+      x-rules: [R-REV-02, R-REV-03]
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                versionId: {type: string, format: uuid}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+                reasonVisible: {type: boolean, default: true}
+              required: [expectedStatus, versionId, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/versions:
+    post:
+      operationId: reviseOrder
+      tags: [orders]
+      summary: 修改文件（上传新版本）
+      x-permission: order:submit
+      x-transitions: [S-ORD-T06]
+      x-rules: [R-VER-01, R-VER-02, R-VER-04, R-VER-07, R-VER-08, R-VER-09, R-VER-10, CFG-REV-01]
+      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单及之后不能修改，返回 422 rule_violation（R-VER-04、R-VER-08，Q207）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                fileId: {type: string, format: uuid}
+                plate: {type: integer, minimum: 1}
+              required: [expectedStatus, fileId, plate]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/versions/withdraw:
+    post:
+      operationId: withdrawRevision
+      tags: [orders]
+      summary: 撤回修改
+      x-permission: order:submit
+      x-transitions: [S-ORD-T05]
+      x-rules: [R-VER-05]
+      description: 只限本人。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                versionId: {type: string, format: uuid}
+              required: [expectedStatus, versionId]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/versions/{n}/restore:
+    post:
+      operationId: restoreVersion
+      tags: [orders]
+      summary: 恢复旧版本
+      x-permission: order:submit
+      x-transitions: [S-ORD-T07]
+      x-rules: [R-VER-06, R-VER-07, R-VER-09]
+      description: 只限本人。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/VersionN'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+              required: [expectedStatus]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [orders]
+      summary: 取消订单
+      x-permission: ['order:cancel:own', 'order:cancel:any']
+      x-transitions: [S-ORD-T18]
+      x-rules: [R-CAN-01, R-CAN-02, R-CAN-03, R-CAN-04, R-CAN-05]
+      description: 只有待审核、排队中能取消。已派单返回 422 rule_violation（R-CAN-03，请现场人员先停止）；打印中、失败、打完的单也是 422（R-CAN-04）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+                reasonVisible: {type: boolean, default: true}
+              required: [expectedStatus, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/reprint:
+    post:
+      operationId: reprintOrder
+      tags: [orders]
+      summary: 重打
+      x-permission: order:reprint
+      x-transitions: [S-ORD-T15]
+      x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
+      description: 文件过期返回 410 file_expired；归档过、被标为不重打（R-PRT-18）或申请者账户已停用（Q341）的失败订单返回 422 rule_violation（R-PRT-09）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [FAILED]}
+                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
+              required: [expectedStatus]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/decline-reprint:
+    post:
+      operationId: declineReprint
+      tags: [orders]
+      summary: 不重打，请选手重新提交
+      x-permission: order:reprint
+      x-rules: [R-PRT-18, F-PRT-07]
+      description: 只用于选手模型本身的问题（Q224）。订单仍是失败，记下不重打，重打按钮隐藏，移出现场人员待办，通知申请者并带原因。时间线记 reprint.declined，挂在打印节点下，原因默认选手可见。归档过或已经标过返回 409 state_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [FAILED]}
+                reason: {type: string, minLength: 1, maxLength: 2000}
+                reasonVisible: {type: boolean, default: true}
+              required: [expectedStatus, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: revokeReprintDecline
+      tags: [orders]
+      summary: 撤销不重打
+      x-permission: order:reprint:restore
+      x-rules: [R-PRT-19]
+      description: 只有管理员。清掉不重打标记，重打按钮恢复，订单回现场人员待办；时间线记 reprint.decline_revoked，记审计。没标过或归档过返回 409 state_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/reconcile:
+    post:
+      operationId: reconcileOrder
+      tags: [orders]
+      summary: 对账不一致时判失败或判打完
+      x-permission: printer:operate
+      x-transitions: [S-ORD-T13, S-ORD-T14]
+      x-rules: [R-PRT-08]
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账（S-ORD-T13、T14，Q318）}
+                outcome: {type: string, enum: [FAILED, PRINTED]}
+                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
+              required: [expectedStatus, outcome]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/skip-parts:
+    post:
+      operationId: skipParts
+      tags: [orders]
+      summary: 跳过零件
+      x-permission: ['order:skip-parts:own', 'order:skip-parts:any']
+      x-rules: [F-SUB-07, R-SKP-01, R-SKP-02, R-SKP-03, R-SKP-06]
+      description: 只在任务打印中或暂停中可用（准备中 409 state_conflict）；跳完至少剩一个没跳的零件，否则 422 rule_violation（全跳等于停止，NG-11）。不能撤回，前端先二次确认。是控制命令，没有命令锁（Q243）。已跳过列表以打印机上报为准写进 E-JOB skipped_parts；时间线打印节点记 parts.skipped，默认选手可见，现场人员只显示角色（R-SKP-06）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [PRINTING]}
+                expectedJobId: {type: string, format: uuid, description: 防止跳到重打后的新任务上；对不上 409 job_mismatch（R-SKP-07，Q313）}
+                partIds:
+                  type: array
+                  items: {type: integer}
+                  minItems: 1
+              required: [expectedStatus, expectedJobId, partIds]
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/store:
+    post:
+      operationId: storeOrder
+      tags: [orders]
+      summary: 铲件入库
+      x-permission: order:store
+      x-transitions: [S-ORD-T16, S-PRN-T11]
+      x-rules: [R-PCK-01, INV-12]
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [PRINTED]}
+                slot: {type: string, minLength: 1}
+                bedCleared: {type: string, enum: ['true']}
+                photo: {type: string, contentMediaType: image/jpeg}
+              required: [expectedStatus, slot, bedCleared, photo]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/dispose:
+    post:
+      operationId: disposeOrder
+      tags: [orders]
+      summary: 标为已处置
+      x-permission: order:dispose
+      x-transitions: [S-ORD-T21]
+      x-rules: [R-PCK-05]
+      description: Q160。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+                reason: {type: string, minLength: 1}
+                reasonVisible: {type: boolean, default: false}
+              required: [expectedStatus, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/pickup-code:
+    post:
+      operationId: issuePickupCode
+      tags: [pickup]
+      summary: 签发取件码
+      x-permission: order:submit
+      x-rules: [R-PCK-04, API-RATE-05]
+      description: 只限本人。新码作废旧码。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [READY]}
+              required: [expectedStatus]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PickupCode'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/timelapses:
+    get:
+      operationId: listTimelapses
+      tags: [orders]
+      summary: 延时摄影列表
+      x-permission: ['order:submit', 'order:view:any']
+      x-rules: [R-VIS-06]
+      description: 本人、现场人员、管理员。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Timelapse'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/timelapses/{timelapseId}:
+    get:
+      operationId: viewTimelapse
+      tags: [orders]
+      summary: 看延时摄影
+      x-permission: ['order:submit', 'order:view:any']
+      x-rules: [R-VIS-06, R-CAM-04]
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - name: timelapseId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '302': {description: 跳到签名链接；每次记审计（API-FILE-03）}
+        default: {$ref: '#/components/responses/Problem'}
+  /queue:
+    get:
+      operationId: getQueue
+      tags: [queue]
+      summary: 完整队列（含冻结的）
+      x-permission: order:view:any
+      x-rules: [R-QUE-01, INV-10]
+      description: 按排序值升序，不分页（API-PAGE-04）。申请者看自己的排位用 /orders/mine。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/QueueEntry'}
+        default: {$ref: '#/components/responses/Problem'}
+  /queue/reorder:
+    post:
+      operationId: reorderQueue
+      tags: [queue]
+      summary: 拖拽调整顺序
+      x-permission: order:reorder
+      x-rules: [R-QUE-02]
+      description: afterOrderId 为 null 表示放到队首。不填备注，只记审计。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId: {type: string, format: uuid}
+                afterOrderId: {type: [string, 'null'], format: uuid}
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+              required: [orderId, afterOrderId, expectedStatus]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/QueueEntry'}
+        default: {$ref: '#/components/responses/Problem'}
+  /queue/suggestions:
+    get:
+      operationId: getDispatchSuggestions
+      tags: [queue]
+      summary: 派单建议
+      x-permission: order:dispatch
+      x-rules: [R-DSP-01]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Suggestion'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/dispatch-options:
+    get:
+      operationId: getDispatchOptions
+      tags: [queue]
+      summary: 某单派到某台的可行性和映射建议
+      x-permission: order:dispatch
+      x-rules: [R-DSP-03, R-DSP-04, R-DSP-05, R-DSP-06, R-DSP-07, R-DSP-09, R-DSP-10, R-DSP-12, R-DSP-15]
+      description: 打印机挂了阻止派单的标记（文档 1 §4.2，所有标记都阻止）、在维护中或已停用时返回 409 printer_flagged，params.flags 列出原因（R-DSP-15，Q233）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: orderId
+        in: query
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DispatchOptions'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/dispatch:
+    post:
+      operationId: dispatchOrder
+      tags: [queue]
+      summary: 派单
+      x-permission: order:dispatch
+      x-transitions: [S-ORD-T08, S-PRN-T03]
+      x-rules: [R-DSP-02, R-DSP-03, R-DSP-04, R-DSP-06, R-DSP-07, R-DSP-08, R-DSP-09, R-DSP-11, R-DSP-13, R-DSP-15, R-ARB-10]
+      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机挂了任何标记、在维护中或已停用返回 409 printer_flagged（params.flags），手动派单也一样（R-DSP-15，Q233）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId: {type: string, format: uuid}
+                expectedStatus: {type: string, enum: [QUEUED]}
+                expectedState: {type: string, enum: [IDLE]}
+                bedType: {type: [string, 'null']}
+                bedTypeMismatchConfirmed: {type: boolean, default: false}
+                mapping:
+                  type: array
+                  items: {$ref: '#/components/schemas/MappingEntry'}
+              required: [orderId, expectedStatus, expectedState, mapping]
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers:
+    get:
+      operationId: listPrinters
+      tags: [printers]
+      summary: 打印机列表（带详情）
+      x-permission: printer:operate
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createPrinter
+      tags: [printers]
+      summary: 添加打印机
+      x-permission: printer:manage
+      x-rules: [INV-08, INV-09, F-PRT-12]
+      description: 新加的默认不开放给选手。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                daemonId: {type: string, format: uuid}
+                brand: {type: string}
+                serial: {type: string}
+                host: {type: string}
+                name: {type: string}
+                accessCodeCipher: {type: string, description: 浏览器用 daemon 公钥加密（INV-07）}
+                keyFingerprint: {type: string}
+              required: [daemonId, brand, serial, host, name, accessCodeCipher, keyFingerprint]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}:
+    get:
+      operationId: getPrinter
+      tags: [printers]
+      summary: 打印机详情
+      x-permission: printer:operate
+      x-rules: [R-VIS-04]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    patch:
+      operationId: updatePrinter
+      tags: [printers]
+      summary: 编辑打印机
+      x-permission: printer:manage
+      x-rules: [INV-09, F-PRT-12, R-PRT-20]
+      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码；新 daemon 按 MSG-ASSIGN 的 currentJobRef 认领还在打的系统任务（Q228）。disabled=true 停用、false 重新启用（R-PRT-20，Q229）：只在空闲、离线或维护中且没有当前任务时能停用，否则 409 state_conflict；停用后概况页和派单都不显示，记录保留。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                name: {type: string}
+                host: {type: string}
+                daemonId: {type: string, format: uuid}
+                accessCodeCipher: {type: string}
+                keyFingerprint: {type: string}
+                disabled: {type: boolean}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deletePrinter
+      tags: [printers]
+      summary: 删除打印机
+      x-permission: printer:manage
+      description: 只能删从没派过单的；派过单的返回 422（E-GEN-06）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/open:
+    put:
+      operationId: setPrinterOpen
+      tags: [printers]
+      summary: 开放给选手
+      x-permission: resource:configure
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                open: {type: boolean}
+              required: [version, open]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/star:
+    put:
+      operationId: setPrinterStar
+      tags: [printers]
+      summary: 概况页置顶
+      x-permission: printer:operate
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                starred: {type: boolean}
+              required: [starred]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterCard'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/maintenance/enter:
+    post:
+      operationId: enterMaintenance
+      tags: [printers]
+      summary: 进维护模式
+      x-permission: printer:maintenance
+      x-transitions: [S-PRN-T12]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedState: {type: string, enum: [IDLE, OFFLINE]}
+                reason: {type: string, minLength: 1}
+              required: [expectedState, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/maintenance/exit:
+    post:
+      operationId: exitMaintenance
+      tags: [printers]
+      summary: 关维护模式
+      x-permission: printer:maintenance
+      x-transitions: [S-PRN-T13]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedState: {type: string, enum: [MAINTENANCE]}
+                bedCleared:
+                  type: boolean
+                  const: true
+                  description: 对话框里勾"热床已清理"，必须为 true 才能关维护（S-PRN-T13，INV-01，Q305）
+              required: [expectedState, bedCleared]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/stop:
+    post:
+      operationId: stopPrint
+      tags: [printers]
+      summary: 停止打印
+      x-permission: printer:stop
+      x-transitions: [S-ORD-T09, S-ORD-T13]
+      x-rules: [R-PRT-04, R-PRT-05, R-CMD-04, R-CMD-05, P-01]
+      description: 前端先让人选原因并二次确认。准备中（含任务还在传文件，daemon 中止传输并确认没开打，Q223）、打印中、暂停中都发 job.stop（Q203），不挂标记、没有命令锁；打印机还报打印中或暂停中时可以再点（R-CMD-05，Q243）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹后才回原位（R-CMD-04），没有单独的"判为没到"接口（Q220）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedState: {$ref: '#/components/schemas/PrinterState'}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部占用时不带（Q326）}
+                reason: {type: string, minLength: 1}
+                reasonVisible: {type: boolean, default: true}
+              required: [expectedState, reason]
+              if:
+                properties:
+                  expectedState: {const: EXTERNAL}
+              then:
+                not: {required: [expectedJobId]}
+              else:
+                required: [expectedJobId]
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/errors/{errorId}/resolve:
+    post:
+      operationId: resolveError
+      tags: [printers]
+      summary: 处理报错
+      x-permission: printer:operate
+      x-rules: [R-PRT-14]
+      description: 同一条报错只接受第一个处理动作，后到的返回 409。requiresOnSite 的选项要 onSiteConfirmed=true。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: errorId
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: {type: string, description: 必须是这条报错的 actions 之一}
+                onSiteConfirmed: {type: boolean, default: false}
+              required: [action]
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/control:
+    post:
+      operationId: controlPrinter
+      tags: [printers]
+      summary: 设备控制
+      x-permission: printer:control
+      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: {type: string}
+                args: {type: object, additionalProperties: true}
+              required: [action, args]
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/refresh:
+    post:
+      operationId: refreshPrinter
+      tags: [printers]
+      summary: 刷新机器状态（只读）
+      x-permission: printer:refresh
+      x-rules: [R-PRT-12, API-RATE-03]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        '202': {$ref: '#/components/responses/Accepted'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/storage:
+    get:
+      operationId: getPrinterStorage
+      tags: [printers]
+      summary: 打印机存储（只读）
+      x-permission: printer:operate
+      x-rules: [R-PRT-22, F-PRT-11]
+      description: 面板向 daemon 发一次 storage.list，等结果（最多 10 秒）再返回。daemon 不在线或超时返回 503。只读，没有删除和下载。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      responses:
+        '200':
+          description: 用量和文件列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [media, files]
+                properties:
+                  media:
+                    type: array
+                    items:
+                      type: object
+                      required: [medium, present]
+                      properties:
+                        medium: {type: string, examples: [internal, sd]}
+                        present: {type: boolean}
+                        freeBytes: {type: integer}
+                        totalBytes: {type: integer}
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, system]
+                      properties:
+                        medium: {type: string}
+                        name: {type: string, description: 打印机上的路径}
+                        sizeBytes: {type: integer}
+                        modifiedAt: {type: string, format: date-time}
+                        system: {type: boolean, description: 是否系统文件（MSG-JOBREF-02）}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/attention/dismiss:
+    post:
+      operationId: dismissAttention
+      tags: [printers]
+      summary: 等待处理标记已处理
+      x-permission: printer:operate
+      x-rules: [R-PRT-24, S-FLG-ATTENTION]
+      description: 只能去掉 START_FAILED、UNCLEARED_START、LATE_START 三种原因（Q325、Q340）；其他原因返回 422。写审计。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, enum: [START_FAILED, UNCLEARED_START, LATE_START]}
+                jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时是结束的任务，LATE_START 时是那个迟到的任务）}
+              required: [reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/clear-bed:
+    post:
+      operationId: confirmBedCleared
+      tags: [printers]
+      summary: 确认清板
+      x-permission: order:store
+      x-transitions: [S-PRN-T11]
+      x-rules: [R-PCK-02, INV-01]
+      description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。同一个事务里去掉等待处理的 START_FAILED、UNCLEARED_START 原因（Q325）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedState: {type: string, enum: [CLEARING_REQUIRED]}
+              required: [expectedState]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/errors:
+    get:
+      operationId: listPrinterErrors
+      tags: [printers]
+      summary: 报错历史
+      x-permission: printer:operate
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        error: {$ref: '#/components/schemas/ActiveError'}
+                        clearedAt: {type: [string, 'null'], format: date-time}
+                        clearedBy: {type: [string, 'null'], enum: [PANEL, DEVICE, UNKNOWN]}
+                        resolvedAction: {type: [string, 'null']}
+                        resolvedBy:
+                          oneOf:
+                          - {$ref: '#/components/schemas/Person'}
+                          - {type: 'null'}
+                      required: [error, clearedAt, clearedBy, resolvedAction, resolvedBy]
+                      additionalProperties: false
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/presence:
+    put:
+      operationId: putPrinterPresence
+      tags: [printers]
+      summary: 打印机详情页在场心跳
+      x-permission: printer:operate
+      x-rules: [R-VIS-10, R-CMD-10, API-RT-07]
+      description: 详情页打开时每 20 秒调一次，45 秒没续上就算离开。只在内存里记，不进数据库（Q245）。只是提示，不挡任何操作。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                streamId: {type: string, description: 这个浏览器 SSE 连接的 ID，用来区分同一个人开的多个页面}
+              required: [streamId]
+              additionalProperties: false
+      responses:
+        '204': {description: 已记下}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deletePrinterPresence
+      tags: [printers]
+      summary: 离开打印机详情页
+      x-permission: printer:operate
+      x-rules: [R-VIS-10, API-RT-07]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: streamId
+        in: query
+        required: true
+        schema: {type: string}
+      responses:
+        '204': {description: 已去掉}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/jobs:
+    get:
+      operationId: listPrinterJobs
+      tags: [printers]
+      summary: 打印机的打印记录
+      x-permission: printer:operate
+      x-rules: [R-VIS-04, R-CAM-11]
+      description: 打印机详情里的"打印记录"：这台打印机的打印任务，最新派的在前（按 dispatchedAt 倒序），游标翻页。任务不单独成页，也没有跨打印机的任务列表（文档 1 §4A，Q221）。每条点开进订单详情。申请者按通常的可见性规则返回（R-VIS）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        jobId: {type: string, format: uuid}
+                        attempt: {type: integer, minimum: 1, description: 这个订单的第 N 次}
+                        orderId: {type: string, format: uuid}
+                        orderNumber: {type: integer}
+                        owner:
+                          oneOf:
+                          - {$ref: '#/components/schemas/Person'}
+                          - {type: 'null'}
+                        phase: {type: string, enum: [TRANSFERRING, PREPARING, PRINTING, PAUSED, ENDED]}
+                        outcome:
+                          type: ['string', 'null']
+                          enum: [SEND_FAILED, START_FAILED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
+                        dispatchedAt: {type: string, format: date-time}
+                        startedAt: {type: [string, 'null'], format: date-time}
+                        endedAt: {type: [string, 'null'], format: date-time}
+                        endPhoto:
+                          type: [object, 'null']
+                          properties:
+                            capturedAt: {type: string, format: date-time}
+                            url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                          required: [capturedAt, url]
+                          additionalProperties: false
+                      required: [jobId, attempt, orderId, orderNumber, owner, phase, outcome, dispatchedAt, startedAt, endedAt, endPhoto]
+                      additionalProperties: false
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/camera/session:
+    post:
+      operationId: openCameraSession
+      tags: [printers]
+      summary: 申请看实况
+      x-permission: [guest, 'printer:camera:stream']
+      x-rules: [R-CAM-01, R-CAM-02, R-CAM-06, R-CAM-07, API-CAM-01, API-CAM-02]
+      description: 没登录的访客要 CFG-UI-01 和 CFG-CAM-01 都开，否则 401（Q323）。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    kind: {type: string, enum: [video]}
+                    whepUrl: {type: [string, 'null'], format: uri}
+                    hlsUrl: {type: [string, 'null'], format: uri}
+                    prefer: {type: string, enum: [webrtc, llhls]}
+                    token: {type: string}
+                    expiresAt: {type: string, format: date-time}
+                    transport: {type: [string, 'null'], enum: [srt, rtsps]}
+                  required: [kind, whepUrl, hlsUrl, prefer, token, expiresAt, transport]
+                  additionalProperties: false
+                  description: 按 CFG-CAM-11 给出一个或两个地址；自动 = 两个都给，prefer=webrtc
+                - type: object
+                  properties:
+                    kind: {type: string, enum: [jpeg-frames]}
+                    wsUrl: {type: string, format: uri}
+                    expiresAt: {type: string, format: date-time}
+                  required: [kind, wsUrl, expiresAt]
+                  additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/camera/snapshot:
+    get:
+      operationId: cameraSnapshot
+      tags: [printers]
+      summary: 最新一张抓拍
+      x-permission: [guest, 'printer:camera:snapshot']
+      x-rules: [R-CAM-02, R-CAM-03, API-CAM-03]
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: If-None-Match
+        in: header
+        schema: {type: string}
+      responses:
+        '304': {description: 没变}
+        '200':
+          description: 内存里最新一张 JPEG（R-CAM-03）
+          headers:
+            X-Captured-At:
+              schema: {type: string, format: date-time}
+            ETag:
+              schema: {type: string}
+          content:
+            image/jpeg:
+              schema: {type: string, contentMediaType: image/jpeg}
+        default: {$ref: '#/components/responses/Problem'}
+  /pickup/redemptions:
+    get:
+      operationId: listRedemptions
+      tags: [pickup]
+      summary: 最近核销记录
+      x-permission: order:redeem
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        order: {$ref: '#/components/schemas/OrderSummary'}
+                        redeemedAt: {type: string, format: date-time}
+                        redeemedBy: {$ref: '#/components/schemas/Person'}
+                      required: [order, redeemedAt, redeemedBy]
+                      additionalProperties: false
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /pickup/{code}:
+    get:
+      operationId: lookupPickup
+      tags: [pickup]
+      summary: 扫码查单
+      x-permission: order:redeem
+      x-rules: [R-PCK-03]
+      description: 码无效、过期、已作废都返回 404。
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PickupLookup'}
+        default: {$ref: '#/components/responses/Problem'}
+  /pickup/{code}/redeem:
+    post:
+      operationId: redeemPickup
+      tags: [pickup]
+      summary: 核销
+      x-permission: order:redeem
+      x-transitions: [S-ORD-T17]
+      x-rules: [R-PCK-03, INV-05]
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [READY]}
+              required: [expectedStatus]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderSummary'}
+        default: {$ref: '#/components/responses/Problem'}
+  /overview:
+    get:
+      operationId: getOverview
+      tags: [overview]
+      summary: 概况页
+      x-permission: [guest, 'overview:view']
+      x-rules: [F-UI-01, R-VIS-02, R-VIS-03, R-VIS-04]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Overview'}
+        default: {$ref: '#/components/responses/Problem'}
+  /resources:
+    get:
+      operationId: getResources
+      tags: [overview]
+      summary: 提交页可用资源
+      x-permission: resource:view
+      x-rules: [R-SUB-11, R-QUE-04, CFG-SUB-04, CFG-SUB-05]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Resources'}
+        default: {$ref: '#/components/responses/Problem'}
+  /todo:
+    get:
+      operationId: getTodo
+      tags: [overview]
+      summary: 待办
+      x-permission: ['order:review', 'printer:operate']
+      description: 按权限过滤：管理员看到待审核，现场人员看到打印机相关的。从状态实时算（entities.md §3）。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TodoItem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /catalog:
+    get:
+      operationId: getCatalog
+      tags: [catalog]
+      summary: 耗材目录（含隐藏的）
+      x-permission: filament:catalog
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CatalogRow'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createStockRow
+      tags: [catalog]
+      summary: 加库存行
+      x-permission: filament:catalog
+      x-rules: [R-SUB-12]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                modelIds:
+                  type: array
+                  items: {type: string}
+                material: {type: string}
+                subType: {type: [string, 'null']}
+                colour: {type: string, pattern: '^#[0-9A-F]{6}$'}
+                colourName: {type: [string, 'null']}
+                note: {type: [string, 'null']}
+                sort: {type: integer}
+              required: [modelIds, material, colour]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CatalogRow'}
+        default: {$ref: '#/components/responses/Problem'}
+  /catalog/{rowId}:
+    patch:
+      operationId: updateCatalogRow
+      tags: [catalog]
+      summary: 改库存行或自动行设置
+      x-permission: filament:catalog
+      parameters:
+      - name: rowId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                modelIds:
+                  type: array
+                  items: {type: string}
+                material: {type: string}
+                subType: {type: [string, 'null']}
+                colour: {type: string}
+                colourName: {type: [string, 'null']}
+                hidden: {type: boolean}
+                sort: {type: integer}
+                note: {type: [string, 'null']}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CatalogRow'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deleteCatalogRow
+      tags: [catalog]
+      summary: 删库存行
+      x-permission: filament:catalog
+      parameters:
+      - name: rowId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /catalog/auto/{autoKey}:
+    put:
+      operationId: setAutoRow
+      tags: [catalog]
+      summary: 设置某个自动行（隐藏、排序、备注）
+      x-permission: filament:catalog
+      description: 第一次设置时 version 传 null。
+      parameters:
+      - name: autoKey
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: [integer, 'null']}
+                hidden: {type: boolean}
+                sort: {type: integer}
+                note: {type: [string, 'null']}
+              required: [version, hidden, sort]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CatalogRow'}
+        default: {$ref: '#/components/responses/Problem'}
+  /catalog/models/{modelId}/bed-types:
+    put:
+      operationId: setModelBedTypes
+      tags: [catalog]
+      summary: 设置某个机型本场能用的板型（整组替换）
+      x-permission: filament:catalog
+      x-rules: [R-SUB-11]
+      parameters:
+      - name: modelId
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bedTypes:
+                  type: array
+                  items: {type: string}
+                  uniqueItems: true
+              required: [bedTypes]
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /users:
+    get:
+      operationId: listUsers
+      tags: [admin]
+      summary: 用户列表
+      x-permission: user:manage
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: q
+        in: query
+        schema: {type: string}
+      - name: role
+        in: query
+        schema: {$ref: '#/components/schemas/Role'}
+      - name: disabled
+        in: query
+        schema: {type: boolean}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/User'}
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /users/{userId}:
+    patch:
+      operationId: updateUser
+      tags: [admin]
+      summary: 改角色、停用
+      x-permission: user:manage
+      x-rules: [INV-13, API-AUTH-04, R-ACC-05]
+      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。待审核、排队中的同一个事务里取消，原因"账户停用"；已派单、打印中的照常打完，之后按 R-PCK-05 处理；失败的保持失败。
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                role: {$ref: '#/components/schemas/Role'}
+                disabled: {type: boolean}
+                reason: {type: [string, 'null']}
+              required: [version]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        default: {$ref: '#/components/responses/Problem'}
+  /invites:
+    get:
+      operationId: listInvites
+      tags: [admin]
+      summary: 邀请码
+      x-permission: user:manage
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Invite'}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createInvite
+      tags: [admin]
+      summary: 新建邀请码
+      x-permission: user:manage
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: {type: string}
+                maxUses: {type: integer, minimum: 0}
+                expiresAt: {type: [string, 'null'], format: date-time}
+              required: [label, maxUses, expiresAt]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Invite'}
+        default: {$ref: '#/components/responses/Problem'}
+  /invites/{inviteId}:
+    delete:
+      operationId: revokeInvite
+      tags: [admin]
+      summary: 作废邀请码
+      x-permission: user:manage
+      parameters:
+      - name: inviteId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons:
+    get:
+      operationId: listDaemons
+      tags: [admin]
+      summary: daemon 列表
+      x-permission: daemon:manage
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Daemon'}
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons/enrollments:
+    post:
+      operationId: createEnrollment
+      tags: [admin]
+      summary: 生成安装命令
+      x-permission: daemon:manage
+      x-rules: [F-DMN-01]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+              required: [name]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Enrollment'}
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons/{daemonId}:
+    patch:
+      operationId: updateDaemon
+      tags: [admin]
+      summary: 改名字
+      x-permission: daemon:manage
+      parameters:
+      - name: daemonId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                name: {type: string}
+              required: [version, name]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Daemon'}
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons/{daemonId}/revoke:
+    post:
+      operationId: revokeDaemon
+      tags: [admin]
+      summary: 吊销
+      x-permission: daemon:manage
+      description: 立刻断开它的连接；它名下的打印机挂失联，要管理员移到别的 daemon（INV-09）。
+      parameters:
+      - name: daemonId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                reason: {type: string, minLength: 1}
+              required: [version, reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Daemon'}
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons/{daemonId}/public-key:
+    get:
+      operationId: getDaemonPublicKey
+      tags: [admin]
+      summary: daemon 公钥（浏览器加密访问码用）
+      x-permission: printer:manage
+      parameters:
+      - name: daemonId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicKey: {type: string, description: SPKI DER base64}
+                  keyFingerprint: {type: string}
+                required: [publicKey, keyFingerprint]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /daemons/{daemonId}/discovered:
+    get:
+      operationId: listDiscovered
+      tags: [admin]
+      summary: 这个 daemon 听到的打印机
+      x-permission: printer:manage
+      x-rules: [F-PRT-12]
+      parameters:
+      - name: daemonId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DiscoveredPrinter'}
+        default: {$ref: '#/components/responses/Problem'}
+  /form:
+    get:
+      operationId: getForm
+      tags: [admin]
+      summary: 当前申请表单
+      x-permission: ['order:submit', 'form:configure']
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Form'}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: saveForm
+      tags: [admin]
+      summary: 保存申请表单（新版本）
+      x-permission: form:configure
+      description: basedOnVersionId 不是最新版本时返回 409 version_conflict（E-FORM）。
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                basedOnVersionId: {type: string, format: uuid}
+                fields:
+                  type: array
+                  items: {$ref: '#/components/schemas/FormField'}
+              required: [basedOnVersionId, fields]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Form'}
+        default: {$ref: '#/components/responses/Problem'}
+  /settings/public:
+    get:
+      operationId: getPublicSettings
+      tags: [admin]
+      summary: 界面需要的公开设置
+      x-permission: public
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublicSettings'}
+        default: {$ref: '#/components/responses/Problem'}
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [admin]
+      summary: 系统设置（全部分区）
+      x-permission: ['settings:manage', 'resource:configure']
+      description: 只有 resource:configure 的人只收到 mapping 分区。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/SettingsSection'}
+        default: {$ref: '#/components/responses/Problem'}
+  /settings/{section}:
+    put:
+      operationId: saveSettingsSection
+      tags: [admin]
+      summary: 按分区保存
+      x-permission: ['settings:manage', 'resource:configure']
+      x-rules: [F-OPS-06, P-04]
+      description: mapping 分区要 resource:configure，其他要 settings:manage。范围和关联校验失败返回 422。
+      parameters:
+      - name: section
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: {type: integer}
+                values: {type: object, additionalProperties: true}
+                confirm: {type: string, enum: ['true'], description: 前端已显示改前改后并经确认（F-OPS-06）}
+              required: [version, values, confirm]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SettingsSection'}
+        default: {$ref: '#/components/responses/Problem'}
+  /audit:
+    get:
+      operationId: listAudit
+      tags: [admin]
+      summary: 审计日志
+      x-permission: audit:view
+      description: 按时间倒序。
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: action
+        in: query
+        schema: {type: string}
+      - name: actorId
+        in: query
+        schema: {type: string, format: uuid}
+      - name: targetType
+        in: query
+        schema: {type: string}
+      - name: targetId
+        in: query
+        schema: {type: string}
+      - name: from
+        in: query
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/AuditEntry'}
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /archive:
+    post:
+      operationId: archivePeriod
+      tags: [admin]
+      summary: 归档本期
+      x-permission: settings:manage
+      x-transitions: [S-ORD-T21, S-ORD-T22]
+      x-rules: [R-ARC-01, R-ARC-02, R-ARB-01, R-ARB-02]
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirm: {type: string, enum: ['true']}
+                export: {type: boolean}
+              required: [confirm, export]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  archiveId: {type: string, format: uuid}
+                  cancelled: {type: integer}
+                  disposed: {type: integer}
+                  exportUrl: {type: [string, 'null'], format: uri}
+                required: [archiveId, cancelled, disposed, exportUrl]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: 我的通知
+      x-permission: authenticated
+      parameters:
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: unread
+        in: query
+        schema: {type: boolean}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Notification'}
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /notifications/read:
+    post:
+      operationId: markNotificationsRead
+      tags: [notifications]
+      summary: 标为已读
+      x-permission: authenticated
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: {type: string, format: uuid}
+                all: {type: boolean}
+              additionalProperties: false
+      responses:
+        '204': {$ref: '#/components/responses/NoContent'}
+        default: {$ref: '#/components/responses/Problem'}
+  /stream:
+    get:
+      operationId: stream
+      tags: [stream]
+      summary: 实时推送（SSE）
+      x-permission: [guest, authenticated]
+      x-rules: [API-RT-01, API-RT-04, API-RT-06]
+      parameters:
+      - name: Last-Event-ID
+        in: header
+        schema: {type: string}
+      responses:
+        '200':
+          description: text/event-stream；事件见 http-api.md §9
+          content:
+            text/event-stream:
+              schema: {type: string}
+        default: {$ref: '#/components/responses/Problem'}
+components:
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        code: {type: string, description: 错误码，见 http-api.md §4.2}
+        detail: {type: string}
+        rule: {type: string, description: 违反的文档 1 规则编号，如 R-VER-09}
+        params: {type: object, additionalProperties: true}
+        requestId: {type: string}
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path: {type: string}
+              code: {type: string}
+              params: {type: object, additionalProperties: true}
+            required: [path, code]
+            additionalProperties: false
+      required: [type, title, status, code, requestId]
+      additionalProperties: false
+    CommandAccepted:
+      type: object
+      properties:
+        commandId: {type: string, format: uuid}
+        printerId: {type: string, format: uuid}
+        flag:
+          oneOf:
+          - {$ref: '#/components/schemas/PrinterFlag'}
+          - {type: 'null'}
+      required: [commandId, printerId, flag]
+      additionalProperties: false
+      description: API-ASYNC-01：命令已记下并发出。结果通过实时推送到达。
+    Person:
+      type: object
+      properties:
+        id: {type: [string, 'null'], format: uuid}
+        name: {type: string}
+        avatarUrl: {type: [string, 'null'], format: uri}
+      required: [id, name, avatarUrl]
+      additionalProperties: false
+      description: 显示名和头像（order:submitter-name:view-others）。系统动作时 id 为 null。
+    Role: {type: string, enum: [APPLICANT, STAFF, ADMIN]}
+    OrderStatus:
+      type: string
+      enum:
+      - PENDING_REVIEW
+      - REJECTED
+      - QUEUED
+      - DISPATCHED
+      - PRINTING
+      - FAILED
+      - PRINTED
+      - READY
+      - COMPLETED
+      - CANCELLED
+      - DISPOSED
+      description: entities.md §2.1。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算（文档 1 S-ORD-DISPATCHED，Q248）
+    PrinterState:
+      type: string
+      enum: [OFFLINE, IDLE, PREPARING, PRINTING, PAUSED, CLEARING_REQUIRED, EXTERNAL, MAINTENANCE]
+      description: entities.md §2.2
+    PrinterFlag:
+      type: string
+      enum: [ATTENTION, LOST, STORAGE_LOW, DAEMON_UPGRADE]
+    PauseReason: {type: string, enum: [USER, ERROR, RUNOUT]}
+    ColourPref: {type: string, enum: [EXACT, SIMILAR, ANY]}
+    ProcessNode: {type: string, enum: [SUBMIT, REVIEW, QUEUE, PRINT, STORE, PICKUP]}
+    NodeState: {type: string, enum: [NOT_REACHED, ACTIVE, DONE, PROBLEM]}
+    VersionKind: {type: string, enum: [SUBMIT, REPLACE, REVISION, RESTORE]}
+    VersionState: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN, REPLACED]}
+    Permission: {type: string, description: 文档 1 §2.2 的权限节点}
+    Nozzle:
+      type: object
+      properties:
+        extruder: {type: integer, minimum: 1}
+        side: {type: [string, 'null'], enum: [LEFT, RIGHT]}
+        diameterMm: {type: number}
+        flow: {type: [string, 'null'], enum: [STANDARD, HIGH]}
+      required: [extruder, side, diameterMm, flow]
+      additionalProperties: false
+    SliceFilament:
+      type: object
+      properties:
+        slot: {type: integer, minimum: 1}
+        extruder: {type: [integer, 'null']}
+        material: {type: string}
+        subType: {type: [string, 'null']}
+        colour: {type: string, pattern: '^#[0-9A-F]{6}$'}
+        usedGrams: {type: number}
+      required: [slot, extruder, material, subType, colour, usedGrams]
+      additionalProperties: false
+    Part:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+      required: [id, name]
+      additionalProperties: false
+    Plate:
+      type: object
+      properties:
+        index: {type: integer, minimum: 1}
+        name: {type: string}
+        modelId: {type: string}
+        modelName: {type: [string, 'null']}
+        nozzles:
+          type: array
+          items: {$ref: '#/components/schemas/Nozzle'}
+        filaments:
+          type: array
+          items: {$ref: '#/components/schemas/SliceFilament'}
+        printSeconds: {type: integer, minimum: 0}
+        weightGrams: {type: number}
+        thumbnailUrl: {type: [string, 'null'], format: uri}
+        parts:
+          type: array
+          items: {$ref: '#/components/schemas/Part'}
+        submittable: {type: boolean, description: 机型、喷嘴能对上开放的打印机（R-SUB-05）}
+        hints:
+          type: array
+          items:
+            type: object
+            properties:
+              code: {type: string}
+              params: {type: object, additionalProperties: true}
+            required: [code, params]
+            additionalProperties: false
+          description: 提交页提示：耗材不在目录（R-SUB-06）、颜色缺失（R-SUB-07）、双喷头只用一个……
+      required:
+      - index
+      - name
+      - modelId
+      - modelName
+      - nozzles
+      - filaments
+      - printSeconds
+      - weightGrams
+      - thumbnailUrl
+      - parts
+      - submittable
+      - hints
+      additionalProperties: false
+    Finding:
+      type: object
+      properties:
+        check: {type: string, enum: [structure, consistency, bounds, dangerous]}
+        code: {type: string}
+        severity: {type: string, enum: [REJECT, WARN]}
+        plate: {type: [integer, 'null']}
+        detail: {type: object, additionalProperties: true}
+      required: [check, code, severity, plate, detail]
+      additionalProperties: false
+    FileCheck:
+      type: object
+      properties:
+        fileId: {type: string, format: uuid}
+        fileName: {type: string}
+        sizeBytes: {type: integer}
+        status: {type: string, enum: [QUEUED, RUNNING, DONE, ERROR]}
+        verdict: {type: [string, 'null'], enum: [PASS, WARN, REJECT]}
+        plates:
+          type: array
+          items: {$ref: '#/components/schemas/Plate'}
+        findings:
+          type: array
+          items: {$ref: '#/components/schemas/Finding'}
+          description: 申请者只看到拒收项；警告项只给审核人（R-VIS-08）
+      required: [fileId, fileName, sizeBytes, status, verdict, plates, findings]
+      additionalProperties: false
+    Answer:
+      type: object
+      properties:
+        fieldId: {type: string}
+        label: {type: string}
+        type: {$ref: '#/components/schemas/FormFieldType'}
+        value:
+          oneOf:
+          - {type: string}
+          - type: array
+            items: {type: string}
+          - {type: number}
+          - {type: 'null'}
+      required: [fieldId, label, type, value]
+      additionalProperties: false
+    OrderVersion:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        n: {type: integer, minimum: 1}
+        kind: {$ref: '#/components/schemas/VersionKind'}
+        state: {$ref: '#/components/schemas/VersionState'}
+        restoredFromN: {type: [integer, 'null']}
+        plate: {$ref: '#/components/schemas/Plate'}
+        fileName: {type: string, x-requires: 'order:view:any'}
+        deltaSeconds: {type: [integer, 'null']}
+        placesBack: {type: [integer, 'null'], description: -1 = 队尾}
+        counted: {type: boolean}
+        modelSwitch: {type: boolean}
+        createdAt: {type: string, format: date-time}
+        decidedAt: {type: [string, 'null'], format: date-time}
+        reason: {type: [string, 'null']}
+        fileAvailable: {type: boolean, description: 文件没过保留期}
+      required: [id, n, kind, state, plate, counted, modelSwitch, createdAt, fileAvailable]
+      additionalProperties: false
+    OrderSummaryFields:
+      type: object
+      description: OrderSummary 和 OrderDetail 共用的字段，本身不封闭；封闭在组合外层用 unevaluatedProperties（Q312）
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: integer}
+        status: {$ref: '#/components/schemas/OrderStatus'}
+        frozen: {type: boolean}
+        owner: {$ref: '#/components/schemas/Person'}
+        isMine: {type: boolean}
+        fileName: {type: string, description: 'x-requires: order:view:any，本人也能看'}
+        plate: {$ref: '#/components/schemas/Plate'}
+        colourPref: {$ref: '#/components/schemas/ColourPref'}
+        bedType: {type: [string, 'null']}
+        submittedAt: {type: string, format: date-time}
+        queue:
+          type: [object, 'null']
+          properties:
+            position: {type: integer}
+            ahead: {type: integer}
+            wait:
+              type: [object, 'null']
+              properties:
+                minSeconds: {type: integer, minimum: 0}
+                maxSeconds: {type: integer, minimum: 0}
+              required: [minSeconds, maxSeconds]
+              additionalProperties: false
+          required: [position, ahead, wait]
+          additionalProperties: false
+          description: 申请者只看到自己的排位和前面几单（R-VIS-01）；wait 受 queue:wait:view
+        printer:
+          type: [object, 'null']
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            state: {$ref: '#/components/schemas/PrinterState'}
+            flags:
+              type: array
+              items: {$ref: '#/components/schemas/PrinterFlag'}
+          required: [id, name, state, flags]
+          additionalProperties: false
+        progress:
+          type: [object, 'null']
+          properties:
+            percent: {type: integer}
+            remainingSeconds: {type: [integer, 'null'], minimum: 0}
+          required: [percent, remainingSeconds]
+          additionalProperties: false
+      required: [id, number, status, frozen, owner, isMine, plate, colourPref, submittedAt]
+    OrderSummary:
+      allOf:
+      - {$ref: '#/components/schemas/OrderSummaryFields'}
+      unevaluatedProperties: false
+    TimelineNode:
+      type: object
+      properties:
+        node: {$ref: '#/components/schemas/ProcessNode'}
+        state: {$ref: '#/components/schemas/NodeState'}
+        label: {type: [string, 'null'], description: 审核节点：第 N 版 · 状态}
+        note: {type: [string, 'null']}
+      required: [node, state, label, note]
+      additionalProperties: false
+    OrderDetail:
+      unevaluatedProperties: false
+      allOf:
+      - {$ref: '#/components/schemas/OrderSummaryFields'}
+      - type: object
+        properties:
+          activeVersion: {$ref: '#/components/schemas/OrderVersion'}
+          pendingVersion:
+            oneOf:
+            - {$ref: '#/components/schemas/OrderVersion'}
+            - {type: 'null'}
+          versions:
+            type: array
+            items: {$ref: '#/components/schemas/OrderVersion'}
+          answers:
+            type: array
+            items: {$ref: '#/components/schemas/Answer'}
+            description: 本人、审核人、管理员可见（R-VIS-05）
+          revisions:
+            type: object
+            properties:
+              used: {type: integer}
+              max: {type: integer}
+              modelSwitches: {type: integer}
+              maxModelSwitches: {type: integer}
+            required: [used, max, modelSwitches, maxModelSwitches]
+            additionalProperties: false
+          nodes:
+            type: array
+            items: {$ref: '#/components/schemas/TimelineNode'}
+            description: 6 个流程节点（R-NTE-02）
+          findings:
+            type: array
+            items: {$ref: '#/components/schemas/Finding'}
+            description: 'x-requires: order:review（R-VIS-08）'
+          storage:
+            type: [object, 'null']
+            description: 入库信息。入库照片订单本人也能看，前端放在入库节点下（R-VIS-09）
+            properties:
+              slot: {type: string}
+              photoUrl: {type: [string, 'null'], format: uri, description: 短期签名链接（API-FILE-02），本人、现场人员、管理员可见（R-VIS-09）}
+            required: [slot, photoUrl]
+            additionalProperties: false
+          parts:
+            type: [object, 'null']
+            properties:
+              total: {type: integer}
+              skipped:
+                type: array
+                items: {type: integer}
+              canSkip: {type: boolean}
+            required: [total, skipped, canSkip]
+            additionalProperties: false
+          actions:
+            type: array
+            items: {type: string}
+            description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
+          printJobs:
+            type: array
+            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下；默认只展开最新一次，之前的折叠（R-VIS-09、Q222）
+            items:
+              type: object
+              properties:
+                jobId: {type: string, format: uuid}
+                attempt: {type: integer, minimum: 1, description: 第 N 次}
+                printerName: {type: string}
+                startedAt: {type: [string, 'null'], format: date-time}
+                endedAt: {type: [string, 'null'], format: date-time}
+                outcome:
+                  type: ['string', 'null']
+                  enum: [SEND_FAILED, START_FAILED, STOPPED_BEFORE_START, FAILED, FINISHED, null]
+                endPhoto:
+                  type: [object, 'null']
+                  properties:
+                    capturedAt: {type: string, format: date-time}
+                    url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                  required: [capturedAt, url]
+                  additionalProperties: false
+              required: [jobId, attempt, printerName, startedAt, endedAt, outcome, endPhoto]
+              additionalProperties: false
+          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）、declined（R-PRT-18）}
+          reprintDeclined:
+            type: [object, 'null']
+            description: 现场人员点了不重打（R-PRT-18）。reason 按 reasonVisible 对申请者裁剪（R-VIS-07）
+            properties:
+              at: {type: string, format: date-time}
+              by:
+                oneOf:
+                - {$ref: '#/components/schemas/Person'}
+                - {type: 'null'}
+              reason: {type: [string, 'null']}
+            required: [at, by, reason]
+            additionalProperties: false
+        required: [activeVersion, versions, revisions, nodes, actions]
+    OrderRecord:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        at: {type: string, format: date-time}
+        node: {$ref: '#/components/schemas/ProcessNode'}
+        kind: {type: string, description: 如 order.approved，见 E-REC}
+        actor:
+          oneOf:
+          - {$ref: '#/components/schemas/Person'}
+          - {type: 'null'}
+        fromStatus:
+          oneOf:
+          - {$ref: '#/components/schemas/OrderStatus'}
+          - {type: 'null'}
+        toStatus:
+          oneOf:
+          - {$ref: '#/components/schemas/OrderStatus'}
+          - {type: 'null'}
+        versionN: {type: [integer, 'null']}
+        note: {type: [string, 'null']}
+        noteVisible: {type: boolean, description: 申请者只收到 noteVisible=true 的备注（R-VIS-07）}
+        data: {type: object, additionalProperties: true}
+      required: [id, at, node, kind, noteVisible, data]
+      additionalProperties: false
+    Timelapse:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        part: {type: integer}
+        sizeBytes: {type: integer}
+        createdAt: {type: string, format: date-time}
+      required: [id, part, sizeBytes, createdAt]
+      additionalProperties: false
+    QueueEntry:
+      type: object
+      properties:
+        order: {$ref: '#/components/schemas/OrderSummary'}
+        sortKey: {type: string}
+        frozen: {type: boolean}
+        bypassedSince: {type: [string, 'null'], format: date-time}
+      required: [order, sortKey, frozen, bypassedSince]
+      additionalProperties: false
+    Suggestion:
+      type: object
+      properties:
+        printerId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+      required: [printerId, orderId]
+      additionalProperties: false
+    TrayRef:
+      type: object
+      properties:
+        unit: {type: integer, description: AMS 编号；外挂料 = -1}
+        slot: {type: integer}
+      required: [unit, slot]
+      additionalProperties: false
+    Tray:
+      type: object
+      properties:
+        unit: {type: integer}
+        slot: {type: integer}
+        label: {type: string}
+        material: {type: [string, 'null']}
+        subType: {type: [string, 'null']}
+        colour: {type: [string, 'null']}
+        remainingPercent: {type: [integer, 'null']}
+        extruders:
+          type: array
+          items: {type: integer}
+      required: [unit, slot, label, extruders]
+      additionalProperties: false
+    MappingCheck:
+      type: object
+      properties:
+        rule:
+          type: string
+          enum: [REACH, EMPTY, NOZZLE, DUPLICATE, MATERIAL, SUB_TYPE, COLOUR, REMAINING]
+        result: {type: string, enum: [OK, WARN, BLOCK]}
+        deltaE: {type: [number, 'null']}
+      required: [rule, result]
+      additionalProperties: false
+      description: BLOCK = 物理约束（R-DSP-06）或配置为拦下（R-DSP-07）；物理约束没有放行
+    MappingEntry:
+      type: object
+      properties:
+        sliceSlot: {type: integer}
+        extruder: {type: [integer, 'null']}
+        tray: {$ref: '#/components/schemas/TrayRef'}
+        mismatchReason: {type: [string, 'null'], description: CFG-MAP-05 里的一项；有 WARN 时必选}
+        reasonVisibleToApplicant: {type: boolean, default: true}
+      required: [sliceSlot, tray]
+      additionalProperties: false
+    DispatchOptions:
+      type: object
+      properties:
+        printerId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        feasible: {type: boolean}
+        blockers:
+          type: array
+          items:
+            type: object
+            properties:
+              code: {type: string}
+              rule: {type: string}
+            required: [code, rule]
+            additionalProperties: false
+          description: 不能派的原因
+        bedType:
+          type: object
+          properties:
+            reported: {type: [string, 'null']}
+            required: {type: [string, 'null']}
+            needsConfirmation: {type: boolean}
+          required: [reported, required, needsConfirmation]
+          additionalProperties: false
+          description: R-DSP-09
+        trays:
+          type: array
+          items: {$ref: '#/components/schemas/Tray'}
+        proposal:
+          type: array
+          items:
+            type: object
+            properties:
+              entry: {$ref: '#/components/schemas/MappingEntry'}
+              checks:
+                type: array
+                items: {$ref: '#/components/schemas/MappingCheck'}
+            required: [entry, checks]
+            additionalProperties: false
+        safety:
+          type: object
+          properties:
+            verdict: {type: string, enum: [PASS, WARN, REJECT]}
+            findings:
+              type: array
+              items: {$ref: '#/components/schemas/Finding'}
+          required: [verdict, findings]
+          additionalProperties: false
+          description: 按当前限值复核（R-DSP-04）
+        bypasses:
+          type: array
+          items: {type: string, format: uuid}
+          description: 派这一单会越过的排队中订单（R-DSP-02）
+      required: [printerId, orderId, feasible, blockers, bedType, trays, proposal, safety, bypasses]
+      additionalProperties: false
+    ActiveError:
+      type: object
+      properties:
+        errorId: {type: string}
+        vendorCode: {type: string}
+        channel: {type: string}
+        severity: {type: string, enum: [fatal, error, warning, info]}
+        module: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+        helpUrl: {type: [string, 'null']}
+        actions:
+          type: array
+          items:
+            type: object
+            properties:
+              action: {type: string}
+              label: {type: string}
+              requiresOnSite: {type: boolean}
+              destructive: {type: boolean}
+            required: [action, label, requiresOnSite, destructive]
+            additionalProperties: false
+        raisedAt: {type: string, format: date-time}
+      required: [errorId, vendorCode, channel, severity, actions, raisedAt]
+      additionalProperties: false
+    ControlSpec:
+      type: object
+      properties:
+        action: {type: string}
+        category:
+          type: string
+          enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion]
+        args: {type: object, additionalProperties: true, description: 参数的 JSON Schema}
+        destructive: {type: boolean}
+        enabled: {type: boolean, description: 按 IF-ADP-05 算出的此刻能不能点}
+      required: [action, category, args, destructive, enabled]
+      additionalProperties: false
+    PrinterCardFields:
+      type: object
+      description: PrinterCard 和 PrinterDetail 共用的字段，本身不封闭（Q312）
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        modelName: {type: [string, 'null']}
+        state: {$ref: '#/components/schemas/PrinterState'}
+        stateSince: {type: string, format: date-time}
+        pauseReason:
+          oneOf:
+          - {$ref: '#/components/schemas/PauseReason'}
+          - {type: 'null'}
+        flags:
+          type: array
+          items: {$ref: '#/components/schemas/PrinterFlag'}
+        starred: {type: boolean}
+        openToApplicants: {type: boolean}
+        job:
+          type: [object, 'null']
+          properties:
+            orderId: {type: [string, 'null'], format: uuid}
+            orderNumber: {type: [integer, 'null']}
+            owner:
+              oneOf:
+              - {$ref: '#/components/schemas/Person'}
+              - {type: 'null'}
+            fileName: {type: string, description: 'x-requires: overview:filename:view（访客看 CFG-UI-02）。本系统派的任务 = 选手上传时的原文件名，不是打印机上的 pr-<jobRef 后 12 位> 文件名；external 为 true 时是打印机上报的文件名，只给 order:view:any（R-VIS-02，Q246）'}
+            external: {type: boolean}
+            percent: {type: [integer, 'null']}
+            remainingSeconds: {type: [integer, 'null'], minimum: 0}
+            layer: {type: [integer, 'null']}
+            totalLayers: {type: [integer, 'null']}
+          required: [orderId, orderNumber, owner, external, percent, remainingSeconds]
+          additionalProperties: false
+        temps:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              current: {type: number}
+              target: {type: [number, 'null']}
+            required: [current]
+            additionalProperties: false
+        camera:
+          type: object
+          properties:
+            stream: {type: string, enum: [video, jpeg-frames, none]}
+            snapshotAt: {type: [string, 'null'], format: date-time}
+          required: [stream, snapshotAt]
+          additionalProperties: false
+          description: 卡片平时显示抓拍，点播放才申请实况（R-CAM-05）
+        openable: {type: boolean, description: 能不能点开详情（R-VIS-04）}
+      required: [id, name, state, stateSince, flags, starred, openToApplicants, camera, openable]
+    PrinterCard:
+      allOf:
+      - {$ref: '#/components/schemas/PrinterCardFields'}
+      unevaluatedProperties: false
+    PrinterDetail:
+      unevaluatedProperties: false
+      allOf:
+      - {$ref: '#/components/schemas/PrinterCardFields'}
+      - type: object
+        properties:
+          brand: {type: string}
+          serial: {type: string}
+          host: {type: string}
+          daemon:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              name: {type: string}
+              online: {type: boolean}
+            required: [id, name, online]
+            additionalProperties: false
+          disabledAt: {type: [string, 'null'], format: date-time, description: 停用时间（R-PRT-20）}
+          modelId: {type: [string, 'null']}
+          nozzles:
+            type: array
+            items: {$ref: '#/components/schemas/Nozzle'}
+          trays:
+            type: array
+            items: {$ref: '#/components/schemas/Tray'}
+          bedType: {type: [string, 'null']}
+          storage:
+            type: array
+            items:
+              type: object
+              properties:
+                medium: {type: string, enum: [internal, sd, usb]}
+                present: {type: boolean}
+                writable: {type: boolean}
+                freeBytes: {type: [integer, 'null']}
+              required: [medium, present, writable, freeBytes]
+              additionalProperties: false
+          attention:
+            type: array
+            description: 等待处理的全部原因，每个原因一条；界面合成一个标记，点开列出（Q315）
+            items:
+              type: object
+              properties:
+                reason: {type: string, enum: [ERROR, RUNOUT, START_FAILED, RECONCILE_MISMATCH, LATE_START, UNCLEARED_START]}
+                since: {type: string, format: date-time}
+                jobId: {type: [string, 'null'], format: uuid}
+              required: [reason, since, jobId]
+              additionalProperties: false
+          activeErrors:
+            type: array
+            items: {$ref: '#/components/schemas/ActiveError'}
+          controls:
+            type: array
+            items: {$ref: '#/components/schemas/ControlSpec'}
+          maintenanceReason: {type: [string, 'null']}
+          accessCode:
+            type: object
+            properties:
+              set: {type: boolean}
+              keyMatches: {type: boolean}
+            required: [set, keyMatches]
+            additionalProperties: false
+            description: 只说有没有，永远不返回访问码（INV-07）
+          currentDispatchId: {type: [string, 'null'], format: uuid}
+          version: {type: integer}
+          lastReportAt: {type: [string, 'null'], format: date-time}
+        required: [brand, serial, host, daemon, nozzles, trays, storage, activeErrors, attention, controls, accessCode, version]
+    DiscoveredPrinter:
+      type: object
+      properties:
+        brand: {type: string}
+        serial: {type: string}
+        host: {type: string}
+        modelId: {type: [string, 'null']}
+        name: {type: [string, 'null']}
+        lastSeenAt: {type: string, format: date-time}
+        claimedBy:
+          type: [object, 'null']
+          properties:
+            daemonId: {type: string, format: uuid}
+            printerId: {type: string, format: uuid}
+          required: [daemonId, printerId]
+          additionalProperties: false
+      required: [brand, serial, host, modelId, name, lastSeenAt, claimedBy]
+      additionalProperties: false
+    PickupCode:
+      type: object
+      properties:
+        code: {type: string, description: 只在签发时返回一次（E-PCK）}
+        expiresAt: {type: string, format: date-time}
+      required: [code, expiresAt]
+      additionalProperties: false
+    PickupLookup:
+      type: object
+      properties:
+        order: {$ref: '#/components/schemas/OrderSummary'}
+        storageSlot: {type: string}
+        photoUrl: {type: [string, 'null'], format: uri}
+        codeExpiresAt: {type: string, format: date-time}
+      required: [order, storageSlot, photoUrl, codeExpiresAt]
+      additionalProperties: false
+    Overview:
+      type: object
+      properties:
+        printers:
+          type: array
+          items: {$ref: '#/components/schemas/PrinterCard'}
+        queue:
+          type: object
+          properties:
+            waiting: {type: integer}
+            pendingReview: {type: integer, description: 'x-requires: order:review'}
+            restoredTo: {type: [string, 'null'], format: date-time, description: 'x-requires: settings:manage。数据恢复到的时间，有值时管理员看到横幅"数据已恢复到 <时间>，之后提交的订单需要选手重新提交"（R-OPS-01，Q237）'}
+          required: [waiting]
+          additionalProperties: false
+      required: [printers, queue]
+      additionalProperties: false
+    CatalogRow:
+      type: object
+      properties:
+        id: {type: [string, 'null'], format: uuid}
+        source: {type: string, enum: [AUTO, STOCK]}
+        autoKey: {type: [string, 'null']}
+        modelIds:
+          type: array
+          items: {type: string}
+        material: {type: string}
+        subType: {type: [string, 'null']}
+        colour: {type: string}
+        colourName: {type: [string, 'null']}
+        loaded: {type: boolean, description: 已装上 / 需要换料（R-SUB-11）}
+        hidden: {type: boolean}
+        sort: {type: integer}
+        note: {type: [string, 'null']}
+        version: {type: [integer, 'null']}
+      required: [id, source, autoKey, modelIds, material, subType, colour, colourName, loaded, hidden, sort, note, version]
+      additionalProperties: false
+    Resources:
+      type: object
+      properties:
+        printers:
+          type: array
+          items:
+            type: object
+            properties:
+              modelId: {type: string}
+              modelName: {type: string}
+              nozzles:
+                type: array
+                items: {$ref: '#/components/schemas/Nozzle'}
+              count: {type: integer}
+              available: {type: integer}
+              bedTypes:
+                type: array
+                items: {type: string}
+                description: 这个机型本场能用的板型（E-BED，R-SUB-11）
+            required: [modelId, modelName, nozzles, count, available, bedTypes]
+            additionalProperties: false
+        catalog:
+          type: array
+          items: {$ref: '#/components/schemas/CatalogRow'}
+        wait:
+          type: [object, 'null']
+          properties:
+            minSeconds: {type: integer, minimum: 0}
+            maxSeconds: {type: integer, minimum: 0}
+          required: [minSeconds, maxSeconds]
+          additionalProperties: false
+        bedTypes:
+          type: [array, 'null']
+          items: {type: string}
+          description: 自选板打开时为各机型板型的并集；提交页按选中各盘的机型取交集（CFG-QUE-09、R-SUB-09）
+      required: [printers, catalog, wait, bedTypes]
+      additionalProperties: false
+    TodoItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - REVIEW
+          - STORE
+          - ATTENTION
+          - PAUSED_TOO_LONG
+          - STOP_UNCONFIRMED
+          - LOST
+          - STORAGE_LOW
+          - DAEMON_UPGRADE
+          - BYPASSED
+          - UNCLAIMED
+          - CLEAR_BED
+        since: {type: string, format: date-time}
+        orderId: {type: [string, 'null'], format: uuid}
+        printerId: {type: [string, 'null'], format: uuid}
+        data: {type: object, additionalProperties: true}
+      required: [kind, since, orderId, printerId, data]
+      additionalProperties: false
+    User:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        displayName: {type: string}
+        email: {type: [string, 'null']}
+        phone: {type: [string, 'null']}
+        role: {$ref: '#/components/schemas/Role'}
+        avatarUrl: {type: [string, 'null'], format: uri}
+        disabled: {type: boolean}
+        createdAt: {type: string, format: date-time}
+        version: {type: integer}
+      required: [id, username, displayName, email, phone, role, avatarUrl, disabled, createdAt, version]
+      additionalProperties: false
+    Me:
+      type: object
+      properties:
+        user: {$ref: '#/components/schemas/User'}
+        locale: {type: string}
+        permissions:
+          type: array
+          items: {$ref: '#/components/schemas/Permission'}
+          description: 按文档 1 §2.2 和开关算好的
+      required: [user, locale, permissions]
+      additionalProperties: false
+    AuthMethods:
+      type: object
+      properties:
+        register:
+          type: array
+          items: {type: string, enum: [OIDC, OPEN, INVITE, PHONE]}
+        oidc:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              displayName: {type: string}
+            required: [id, displayName]
+            additionalProperties: false
+        emailDomains:
+          type: [array, 'null']
+          items: {type: string}
+        setupRequired: {type: boolean}
+      required: [register, oidc, emailDomains, setupRequired]
+      additionalProperties: false
+    Invite:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        maxUses: {type: integer}
+        usedCount: {type: integer}
+        expiresAt: {type: [string, 'null'], format: date-time}
+        revokedAt: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
+        code: {type: string, description: 只在创建时返回一次}
+      required: [id, label, maxUses, usedCount, expiresAt, revokedAt, createdAt]
+      additionalProperties: false
+    Daemon:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        online: {type: boolean}
+        daemonVersion: {type: [string, 'null']}
+        protocolVersion: {type: [string, 'null']}
+        platform: {type: [string, 'null']}
+        lastSeenAt: {type: [string, 'null'], format: date-time}
+        revokedAt: {type: [string, 'null'], format: date-time}
+        keyAlertAt: {type: [string, 'null'], format: date-time, description: 疑似私钥泄露告警（R-OPS-02），不自动吊销}
+        keyFingerprint: {type: string}
+        printerCount: {type: integer}
+        needsUpgrade: {type: boolean}
+        version: {type: integer}
+      required:
+      - id
+      - name
+      - online
+      - daemonVersion
+      - protocolVersion
+      - platform
+      - lastSeenAt
+      - revokedAt
+      - keyFingerprint
+      - printerCount
+      - needsUpgrade
+      - version
+      additionalProperties: false
+    Enrollment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        expiresAt: {type: string, format: date-time}
+        commands:
+          type: object
+          properties:
+            linux: {type: string}
+            windows: {type: string}
+            docker: {type: string}
+          required: [linux, windows, docker]
+          additionalProperties: false
+          description: 一次性令牌放在环境变量里（MSG-ENR）；只在创建时返回
+      required: [id, expiresAt, commands]
+      additionalProperties: false
+    FormFieldType: {type: string, enum: [text, textarea, single, multi, number]}
+    FormField:
+      type: object
+      properties:
+        id: {type: string}
+        label: {type: string}
+        type: {$ref: '#/components/schemas/FormFieldType'}
+        required: {type: boolean}
+        options:
+          type: array
+          items: {type: string}
+      required: [id, label, type, required]
+      additionalProperties: false
+    Form:
+      type: object
+      properties:
+        versionId: {type: string, format: uuid}
+        fields:
+          type: array
+          items: {$ref: '#/components/schemas/FormField'}
+        createdAt: {type: string, format: date-time}
+      required: [versionId, fields, createdAt]
+      additionalProperties: false
+    SettingsSection:
+      type: object
+      properties:
+        section:
+          type: string
+          enum: [general, ui, camera, submit, queue, revision, mapping, printing, pickup, files, accounts, notifications,
+            ops]
+        values: {type: object, additionalProperties: true, description: 键是 CFG 参数的英文名；定义表见代码，和文档 1 §6 一一对应}
+        defaults: {type: object, additionalProperties: true}
+        version: {type: integer}
+        updatedAt: {type: [string, 'null'], format: date-time}
+        updatedBy:
+          oneOf:
+          - {$ref: '#/components/schemas/Person'}
+          - {type: 'null'}
+      required: [section, values, defaults, version, updatedAt, updatedBy]
+      additionalProperties: false
+    PublicSettings:
+      type: object
+      properties:
+        orgName: {type: string}
+        timezone: {type: string}
+        defaultLocale: {type: string}
+        overviewPublic: {type: boolean}
+        guestStream: {type: boolean}
+      required: [orgName, timezone, defaultLocale, overviewPublic, guestStream]
+      additionalProperties: false
+    AuditEntry:
+      type: object
+      properties:
+        id: {type: integer}
+        at: {type: string, format: date-time}
+        actorType: {type: string, enum: [USER, SYSTEM, DAEMON, PRINTER]}
+        actor:
+          oneOf:
+          - {$ref: '#/components/schemas/Person'}
+          - {type: 'null'}
+        action: {type: string}
+        targetType: {type: [string, 'null']}
+        targetId: {type: [string, 'null']}
+        before: {}
+        after: {}
+        reason: {type: [string, 'null']}
+        result: {type: string, enum: [OK, FAILED, DENIED]}
+        requestId: {type: [string, 'null']}
+        ip: {type: [string, 'null']}
+      required: [id, at, actorType, actor, action, targetType, targetId, before, after, reason, result, requestId, ip]
+      additionalProperties: false
+    Notification:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        event: {type: string}
+        orderId: {type: [string, 'null'], format: uuid}
+        printerId: {type: [string, 'null'], format: uuid}
+        data: {type: object, additionalProperties: true}
+        createdAt: {type: string, format: date-time}
+        readAt: {type: [string, 'null'], format: date-time}
+      required: [id, event, orderId, printerId, data, createdAt, readAt]
+      additionalProperties: false
+    NotificationPref:
+      type: object
+      properties:
+        event: {type: string}
+        channel: {type: string, enum: [IN_APP, EMAIL, FEISHU]}
+        enabled: {type: boolean}
+        locked: {type: boolean, description: 驳回、可取件的站内通知关不掉（R-NTF-02）}
+      required: [event, channel, enabled]
+      additionalProperties: false
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    PrinterId:
+      name: printerId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    VersionN:
+      name: n
+      in: path
+      required: true
+      schema: {type: integer, minimum: 1}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: API-IDEM
+      schema: {type: string, minLength: 8, maxLength: 128}
+  responses:
+    Problem:
+      description: 错误（http-api.md §4）
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Accepted:
+      description: 命令已发出（API-ASYNC）
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CommandAccepted'}
+    NoContent: {description: 成功}
+  securitySchemes:
+    session: {type: apiKey, in: cookie, name: pr_session}
+security:
+- {session: []}
+- {}
