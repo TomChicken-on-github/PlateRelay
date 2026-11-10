@@ -32,6 +32,8 @@ export interface Report {
   states: number;
   edges: number;
   complete: boolean;
+  /** Reachable steps in which a person has to judge a job's outcome: a measure of how much is left to people. */
+  judgements: number;
   problems: Problem[];
 }
 
@@ -52,6 +54,7 @@ export function explore(cfg: Config, maxStates = 3_000_000): Report {
   let frontier: State[] = [init];
   let frontierIds = [0];
   let edges = 0;
+  let judgements = 0;
   let complete = true;
 
   const traceTo = (id: number) => {
@@ -77,6 +80,7 @@ export function explore(cfg: Config, maxStates = 3_000_000): Report {
       for (const v of quiescentMismatch(st)) report("panelDisagreesWithPrinterAtRest", v.replace(/\d+/g, "N"), id);
       for (const step of successors(st)) {
         edges++;
+        if (step.label.startsWith("staff judge")) judgements++;
         for (const fd of step.findings as Finding[]) report(fd.kind, fd.detail.replace(/\d+/g, "N"), id, step.label);
         const k = key(step.next);
         let to = index.get(k);
@@ -134,7 +138,7 @@ export function explore(cfg: Config, maxStates = 3_000_000): Report {
       }
     }
   }
-  return { states: index.size, edges, complete, problems: [...problems.values()] };
+  return { states: index.size, edges, complete, judgements, problems: [...problems.values()] };
 }
 
 /** Groups stuck states by what the panel shows, ignoring ids and queue lengths. */

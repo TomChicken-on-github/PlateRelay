@@ -235,7 +235,31 @@ export interface RuleFixes {
   failedStateBeforeSeenPrintingNeedsStaff: boolean;
   /** After reconciling against a reconnect snapshot, older printer events resent from the daemon's outbox are dropped. */
   dropPrinterEventsOlderThanSnapshot: boolean;
+  /**
+   * "It never started" is concluded automatically only when the daemon can show the printer ran nothing since
+   * the dispatch (its run counter is unchanged). Otherwise staff judge. A current job found while the printer
+   * runs something else is concluded automatically only if the daemon still holds its start unsent.
+   */
+  notStartedNeedsUnchangedRunCount: boolean;
+  /** The printer reporting the current job's end is a fact whatever phase the panel had reached, online as on reconnect. */
+  printerEndAppliesFromAnyPhase: boolean;
+  /** Stop is offered in maintenance too while the printer reports something running or paused. */
+  maintenanceAllowsStop: boolean;
 }
+
+/**
+ * Candidate simplifications: automatic conclusions that could be handed to staff instead.
+ * All off = the current rules.
+ */
+export interface Cuts {
+  /** "No trace of the job on the printer" is never concluded automatically as "start never arrived": staff judge. */
+  noTraceGoesToStaff: boolean;
+  /** An ended job running again is simply an external job: no separate attention reason. */
+  lateStartIsJustExternal: boolean;
+  /** A reboot while away gets no row of its own: the other rows apply, and whatever they can't match goes to staff. */
+  noRebootRow: boolean;
+}
+export const NO_CUTS: Cuts = { noTraceGoesToStaff: false, lateStartIsJustExternal: false, noRebootRow: false };
 
 export const BEFORE_FIXES: RuleFixes = {
   noTraceWaitsForStartDelivery: false,
@@ -249,6 +273,9 @@ export const BEFORE_FIXES: RuleFixes = {
   reconcileCoversExternalJobs: false,
   failedStateBeforeSeenPrintingNeedsStaff: false,
   dropPrinterEventsOlderThanSnapshot: false,
+  notStartedNeedsUnchangedRunCount: false,
+  printerEndAppliesFromAnyPhase: false,
+  maintenanceAllowsStop: false,
 };
 
 export const CURRENT_RULES: RuleFixes = {
@@ -263,10 +290,14 @@ export const CURRENT_RULES: RuleFixes = {
   reconcileCoversExternalJobs: true,
   failedStateBeforeSeenPrintingNeedsStaff: true,
   dropPrinterEventsOlderThanSnapshot: true,
+  notStartedNeedsUnchangedRunCount: true,
+  printerEndAppliesFromAnyPhase: true,
+  maintenanceAllowsStop: true,
 };
 
 export interface State {
   fixes: RuleFixes;
+  cuts: Cuts;
   orders: Order[];
   jobs: Job[];
   printers: Printer[];
@@ -325,6 +356,7 @@ export interface Config {
   orders: number;
   budget: Budget;
   fixes?: RuleFixes;
+  cuts?: Cuts;
 }
 
 export const NO_FAULTS: Budget = {
@@ -369,6 +401,7 @@ export function initialState(cfg: Config): State {
   }));
   const st: State = {
     fixes: { ...(cfg.fixes ?? CURRENT_RULES) },
+    cuts: { ...(cfg.cuts ?? NO_CUTS) },
     orders: Array.from({ length: cfg.orders }, () => ({
       s: "PENDING_REVIEW",
       hasSortValue: false,
@@ -514,7 +547,7 @@ function lateStart(c: Ctx, p: number, j: number, fromOldEvent = false) {
     c.find("staleEventTakenForLateStart", "an old event for a job that already ended was taken for the printer starting it again");
   }
   pr.lateRun = j;
-  raise(pr, "LATE_START", j);
+  if (!c.st.cuts.lateStartIsJustExternal) raise(pr, "LATE_START", j);
   if (pr.job === null && (pr.s === "IDLE" || pr.s === "CLEARING_REQUIRED")) c.setPrinter(p, "externalJobStarted");
 }
 
@@ -632,7 +665,7 @@ function handle(c: Ctx, m: Msg) {
     case "failed":
     case "cancelled":
       if (job) {
-        if (m.kind === "finished" && job.phase !== "PRINTING" && job.phase !== "PAUSED") {
+        if (!st.fixes.printerEndAppliesFromAnyPhase && m.kind === "finished" && job.phase !== "PRINTING" && job.phase !== "PAUSED") {
           c.find("eventNotCoveredByRules", `online "finished" for a job still ${job.phase} (only allowed on reconnect)`);
         }
         endFromEvent(c, j!, m.kind, !!m.beforeStart, `event ${m.kind}`);
@@ -701,7 +734,7 @@ function reconcile(c: Ctx, p: number, v: View, knownRuns = v.runs) {
   };
 
   // 1. The printer rebooted while we were away: never conclude automatically.
-  if (active && bootChanged) {
+  if (active && bootChanged && !st.cuts.noRebootRow) {
     raise(pr, "RECONCILE_MISMATCH", j);
     if (!st.truth.printed.includes(j!)) {
       if (!st.fixes.staffCanJudgeNotStarted) c.find("staffJudgementHasNoCorrectOption", "reboot while away; job never started, but staff can only judge failed or finished");
@@ -736,7 +769,11 @@ function reconcile(c: Ctx, p: number, v: View, knownRuns = v.runs) {
     }
     if (st.fixes.reconcileCoversExternalJobs && running(v.s) && v.job !== j) {
       // the printer is busy with something else.
-      if (job.phase === "TRANSFERRING") endJob(c, j, "SEND_FAILED", "reconcile: printer runs another job, our start was never sent");
+      if (st.fixes.notStartedNeedsUnchangedRunCount) {
+        // Still held by the daemon: the start was certainly never sent (and the daemon will refuse it). Otherwise nobody can tell.
+        if (v.pendingStarts.includes(j)) endJob(c, j, "SEND_FAILED", "reconcile: printer runs another job, the daemon still holds our start");
+        else raise(pr, "RECONCILE_MISMATCH", j);
+      } else if (job.phase === "TRANSFERRING") endJob(c, j, "SEND_FAILED", "reconcile: printer runs another job, our start was never sent");
       else raise(pr, "RECONCILE_MISMATCH", j);
       return done();
     }
@@ -745,7 +782,8 @@ function reconcile(c: Ctx, p: number, v: View, knownRuns = v.runs) {
     if (st.fixes.noTraceWaitsForStartDelivery && dispatched && !job.startAccepted && (job.startDeliveredIn === null || job.startDeliveredIn === st.daemon.epoch)) return done();
     // 7. Never prepared and no trace at all: the start never arrived.
     if (dispatched && !job.prepared && !running(v.s) && !trace(v, j)) {
-      endJob(c, j, "SEND_FAILED", "reconcile: no trace");
+      if (st.cuts.noTraceGoesToStaff || (st.fixes.notStartedNeedsUnchangedRunCount && v.runs !== job.seenRuns)) raise(pr, "RECONCILE_MISMATCH", j);
+      else endJob(c, j, "SEND_FAILED", "reconcile: no trace");
       return done();
     }
     // 8. The printer's last job is this one and it stopped at finished or failed.
@@ -762,7 +800,9 @@ function reconcile(c: Ctx, p: number, v: View, knownRuns = v.runs) {
       }
       return done();
     }
-    c.find("reconcileNoRowMatched", `panel ${pr.s}/job ${job.phase}, printer ${v.s} running ${v.job === j ? "this job" : v.job === null ? "nothing" : "another job"}`);
+    // 10. Anything else that doesn't add up goes to staff as well.
+    if (st.fixes.notStartedNeedsUnchangedRunCount) raise(pr, "RECONCILE_MISMATCH", j);
+    else c.find("reconcileNoRowMatched", `panel ${pr.s}/job ${job.phase}, printer ${v.s} running ${v.job === j ? "this job" : v.job === null ? "nothing" : "another job"}`);
     return done();
   }
   // No current job.
@@ -965,7 +1005,8 @@ function actions(st: State): Act[] {
         c.st.daemon.inbox.push({ p, kind: "stop", job: j, expired: false });
       });
     }
-    if (pr.s === "EXTERNAL_JOB" && !st.daemon.inbox.some((c) => c.p === p && c.kind === "stopExternal")) {
+    const stoppable = pr.s === "EXTERNAL_JOB" || (st.fixes.maintenanceAllowsStop && pr.s === "MAINTENANCE" && pr.connected && running(pr.last.s));
+    if (stoppable && !st.daemon.inbox.some((c) => c.p === p && c.kind === "stopExternal")) {
       A(`stop external job on printer ${p}`, "human", (c) => void c.st.daemon.inbox.push({ p, kind: "stopExternal", expired: false }));
     }
     if (job && j !== null && job.phase === "PAUSED" && !pending("resume")) {
@@ -983,7 +1024,7 @@ function actions(st: State): Act[] {
         const v = view(s, p);
         s.printers[p]!.last = v;
         if (running(v.s)) return;
-        if (!trace(v, j)) endJob(c, j, "SEND_FAILED", "refresh after stop: no trace");
+        if (!trace(v, j) && !s.cuts.noTraceGoesToStaff && !(s.fixes.notStartedNeedsUnchangedRunCount && v.runs !== s.jobs[j]!.seenRuns)) endJob(c, j, "SEND_FAILED", "refresh after stop: no trace");
         else if (!s.printers[p]!.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) {
           raise(s.printers[p]!, "RECONCILE_MISMATCH", j);
           if (!s.truth.printed.includes(j)) {

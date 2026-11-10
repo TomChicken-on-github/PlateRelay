@@ -46,6 +46,11 @@ const SCENARIOS: Record<string, Faults> = {
   "print stopped on the printer while the panel link is down": { linkDrops: 1, screenStops: 1, dispatches: 1 },
   "external job after a start that never arrived": { externalStarts: 1, lostStarts: 1, dispatches: 1 },
   "panel link and LAN both drop": { linkDrops: 1, lanDrops: 1, dispatches: 1 },
+  "daemon loses its state and an external job overwrites the last evidence": { daemonWipes: 1, externalStarts: 1, dispatches: 1 },
+  "printer reboots unseen and the panel misses the start": { linkDrops: 1, lanDrops: 1, reboots: 1, dispatches: 1 },
+  "a misjudged job pauses while the printer is in maintenance": { linkDrops: 1, daemonWipes: 1, pauses: 1, dispatches: 1 },
+  "an administrator reclaims a printer while a link is down": { linkDrops: 1, reclaims: 1, dispatches: 1 },
+  "an administrator reclaims a printer that is off the LAN": { lanDrops: 1, reclaims: 1, dispatches: 1 },
 };
 
 const run = (faults: Faults, current: boolean) =>
@@ -63,20 +68,19 @@ describe("under the current rules nothing gets stuck or misjudged", () => {
     });
   }
 
-  // Known limit, not fixable by rules: once the daemon has lost its local state and someone has
-  // already run another job on the printer, nothing is left to tell what happened to ours.
-  it("except when the daemon loses its state and an external job overwrites the last evidence", { timeout: 120_000 }, () => {
-    const r = run({ daemonWipes: 1, externalStarts: 1, dispatches: 1 }, true);
-    expect([...new Set(r.problems.map((p) => p.kind))]).toEqual(["outcomeContradictsPrinter"]);
+  // Too many states to finish; the first 300 000 (breadth-first, so every short path) must be clean.
+  it("the job runs unseen while both links are down, then an external job starts", { timeout: 300_000 }, () => {
+    const budget = { ...NO_FAULTS, linkDrops: 1, lanDrops: 1, externalStarts: 1, dispatches: 1 };
+    expect(summary(explore({ printers: 1, orders: 1, budget, fixes: CURRENT_RULES }, 300_000).problems)).toBe("");
   });
 
-  it("two printers, two orders, every other kind of fault at once (random walks)", { timeout: 300_000 }, () => {
+  it("two printers, two orders, every kind of fault at once (random walks)", { timeout: 300_000 }, () => {
     const budget: Budget = {
       ...NO_FAULTS,
       linkDrops: 2,
       lanDrops: 2,
       reboots: 1,
-      daemonWipes: 0,
+      daemonWipes: 1,
       externalStarts: 2,
       screenStops: 2,
       screenResumes: 1,
@@ -91,7 +95,7 @@ describe("under the current rules nothing gets stuck or misjudged", () => {
       revisions: 1,
       archives: 1,
       deactivations: 1,
-      reclaims: 0,
+      reclaims: 1,
     };
     const problems = randomWalks({ printers: 2, orders: 2, budget, fixes: CURRENT_RULES }, 1500, 150, 20261109);
     expect(summary(problems)).toBe("");
@@ -145,5 +149,21 @@ describe("without the later fixes", () => {
     const k = kinds({ lanDrops: 1, externalStarts: 1, dispatches: 1 });
     expect(k).toContain("reconcileNoRowMatched");
     expect(k).toContain("stuck");
+  });
+
+  // Later fixes, switched off one at a time.
+  const without = (fix: keyof typeof CURRENT_RULES, faults: Faults, maxStates?: number) =>
+    new Set(explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, ...faults }, fixes: { ...CURRENT_RULES, [fix]: false } }, maxStates).problems.map((p) => p.kind));
+
+  it("gap: a job that ran unseen is taken for one that never started once another job hides it", { timeout: 300_000 }, () => {
+    expect(without("notStartedNeedsUnchangedRunCount", { daemonWipes: 1, externalStarts: 1, dispatches: 1 })).toContain("outcomeContradictsPrinter");
+  });
+
+  it("gap: the printer reports the end of a job the panel never saw start", { timeout: 300_000 }, () => {
+    expect(without("printerEndAppliesFromAnyPhase", { linkDrops: 1, lanDrops: 1, reboots: 1, dispatches: 1 })).toContain("eventNotCoveredByRules");
+  });
+
+  it("gap: a print paused on a printer in maintenance can't be stopped from the panel", { timeout: 300_000 }, () => {
+    expect(without("maintenanceAllowsStop", { linkDrops: 1, daemonWipes: 1, pauses: 1, dispatches: 1 })).toContain("stuck");
   });
 });
