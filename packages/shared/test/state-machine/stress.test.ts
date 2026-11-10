@@ -62,13 +62,20 @@ describe("with the proposed amendments nothing gets stuck or misjudged", () => {
     });
   }
 
-  it("two printers, two orders, every kind of fault at once (random walks)", { timeout: 300_000 }, () => {
+  // Known limit, not fixable by rules: once the daemon has lost its local state and someone has
+  // already run another job on the printer, nothing is left to tell what happened to ours.
+  it("except when the daemon loses its state and an external job overwrites the last evidence", { timeout: 120_000 }, () => {
+    const r = run({ daemonWipes: 1, externalStarts: 1, dispatches: 1 }, true);
+    expect([...new Set(r.problems.map((p) => p.kind))]).toEqual(["outcomeContradictsPrinter"]);
+  });
+
+  it("two printers, two orders, every other kind of fault at once (random walks)", { timeout: 300_000 }, () => {
     const budget: Budget = {
       ...NO_FAULTS,
       linkDrops: 2,
       lanDrops: 2,
       reboots: 1,
-      daemonWipes: 1,
+      daemonWipes: 0,
       externalStarts: 2,
       screenStops: 2,
       screenResumes: 1,
