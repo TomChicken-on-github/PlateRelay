@@ -1311,6 +1311,35 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PrinterDetail'}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/trays/{unit}/{slot}/grams:
+    put:
+      operationId: setTrayGrams
+      tags: [printers]
+      summary: 改槽位剩余克数
+      description: 人改过即去掉"待确认"；记审计，不写回打印机。RFID 卷也可以改
+      x-permission: filament:catalog
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {name: unit, in: path, required: true, schema: {type: integer}, description: AMS 编号；外挂料 = -1}
+      - {name: slot, in: path, required: true, schema: {type: integer}}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grams: {type: integer, minimum: 0, maximum: 10000}
+              required: [grams]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tray'}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/star:
     put:
       operationId: setPrinterStar
@@ -3042,11 +3071,12 @@ components:
         material: {type: [string, 'null']}
         subType: {type: [string, 'null']}
         colour: {type: [string, 'null']}
-        remainingPercent: {type: [integer, 'null']}
+        remainingGrams: {type: integer, description: 面板记的槽位克数，不是打印机估的余量}
+        gramsUnconfirmed: {type: boolean, description: 换料后重置为默认净重、还没人确认}
         extruders:
           type: array
           items: {type: integer}
-      required: [unit, slot, label, extruders]
+      required: [unit, slot, label, remainingGrams, gramsUnconfirmed, extruders]
       additionalProperties: false
     MappingCheck:
       type: object
@@ -3405,6 +3435,7 @@ components:
           - BYPASSED
           - UNCLAIMED
           - CLEAR_BED
+          - LOW_FILAMENT
         since: {type: string, format: date-time}
         orderId: {type: [string, 'null'], format: uuid}
         printerId: {type: [string, 'null'], format: uuid}

@@ -112,7 +112,7 @@ daemon                                  面板
   "pendingStarts": [{ "jobRef": "0193…", "stage": "DOWNLOADING" }],
   "temps": { "nozzle1": { "current": 220, "target": 220 }, "bed": { "current": 55, "target": 55 }, "chamber": { "current": 31 } },
   "nozzles": [{ "extruder": 1, "diameterMm": 0.4, "flow": "standard" }],
-  "trays": [{ "unit": 0, "slot": 0, "label": "AMS 1 · 1", "material": "PLA", "subType": "PLA Basic", "colour": "#FFFFFF", "remainingPercent": 80, "extruders": [1] }],
+  "trays": [{ "unit": 0, "slot": 0, "label": "AMS 1 · 1", "material": "PLA", "subType": "PLA Basic", "colour": "#FFFFFF", "rfidUid": "…", "remainingPercent": 80, "extruders": [1] }],
   "bedType": "textured_pei",
   "storage": [{ "medium": "internal", "present": true, "writable": true, "freeBytes": 1234567890 }],
   "activeErrors": [],
@@ -129,6 +129,7 @@ daemon                                  面板
 - `job.jobRef` 是这次的打印任务 ID（E-JOB）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
 - `deviceBoot` 是适配器给的"打印机这次开机"的标识（如从运行时长推出的开机时刻），拿不到就省略。第二稿起对账不再用它推断（Q394），只显示在打印机详情和事件日志里。
 - `runSeq` 是 daemon 给这台打印机记的运行序号，写在硬盘上，只增不减：每看到打印机开始一次运行（系统任务或外部任务，进入准备中或打印中）加一；daemon 有一段时间看不到打印机（局域网断开、daemon 自己重启），回来时证明不了这段时间它没跑过东西的，也加一（适配器能证明没跑过时不加，标准等驱动实测定）。第二稿起只用于 daemon 自己的开打前检查和"开打可能没到"时确认没开打（MSG-CMD-START，Q361、Q363），对账不再用它（Q398）。daemon 丢了本地状态时从一个比面板下发的已知值更大的数重新开始。
+- `trays[].rfidUid` 是 RFID 卷的唯一号，非 RFID 卷省略；面板拿它和材质、颜色、有没有料一起判断换料（文档 1 R-DSP-16）。`remainingPercent` 是打印机自己估的余量，照传但面板不用来算（误差太大，Q409）。
 - 拿不到的字段省略，不填假值。
 
 ### MSG-EVT `printer.event`

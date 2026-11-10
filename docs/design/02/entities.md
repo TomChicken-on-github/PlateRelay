@@ -80,6 +80,7 @@
 | E-PRSN | `printer_reasons` | 打印机的异常原因（第二稿取代 E-PFLAG） |
 | E-PEVT | `printer_events` | 打印机事件日志（R-PRT-26） |
 | E-PLIVE | `printer_live` | 最新一份状态快照 |
+| E-TRAY | `tray_grams` | 每个料位的剩余克数（R-DSP-16） |
 | E-PERR | `printer_errors` | 打印机报过的错和处理结果 |
 | E-FILE | `files` | 上传的 `.gcode.3mf` |
 | E-CHK | `file_checks` | 文件解析和安全校验结果 |
@@ -217,6 +218,18 @@
 ### E-PEVT `printer_events`
 
 只追加。`id`、`printer_id`、`job_id?`、`kind`（`printer_event_kind`）、`at`（打印机或 daemon 报的时间）、`data jsonb`（暂停原因、HMS 代码和等级、续料的前后槽位等）。打印机详情的事件日志读这张表（R-PRT-26）；人在面板上的操作照常记 E-AUD，不重复记这里。保留期和订单记录一样永久（E-GEN-10 的触发器同样适用）。
+
+### E-TRAY `tray_grams`
+
+| 列 | 说明 |
+| --- | --- |
+| `printer_id`、`unit`、`slot` | 主键；外挂料 `unit = -1` |
+| `grams` | integer，剩余克数，不小于 0 |
+| `unconfirmed` | boolean，换料后重置为 CFG-MAP-06 时为 true，人改过克数后为 false |
+| `loaded_tag` | jsonb，上次看到的 `{ present, rfidUid?, material?, colour? }`，用来判断换料（R-DSP-16） |
+| `updated_at`、`updated_by?` | `updated_by` 只在人改时填 |
+
+每次快照比对 `loaded_tag`，变了就重置。任务结束的扣减（R-DSP-17）和任务结束在同一个事务里做；断料、续料（E-PEVT `REFILL`）收到时就改。人改克数记 E-AUD，不写回打印机。
 
 ### E-PLIVE `printer_live`
 
