@@ -254,7 +254,7 @@
 
 `id`、`sha256`、`object_key`、`file_name`、`size_bytes`、`uploaded_by`、`uploaded_at`、`submitted_at?`、`purged_at?`。
 
-- 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
+- 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时不提前删（Q415）。
 - 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
 - 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。

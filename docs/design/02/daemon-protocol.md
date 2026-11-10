@@ -255,7 +255,7 @@ daemon                                  面板
 
 ### MSG-CFG `config.update`
 
-面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedPrintingSeconds, watchedOtherSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, downloadConcurrency, discoveryEnabled }`。对应 CFG-CAM-02、03、07 和 CFG-CMD-02。`staggerSeconds`（1 秒）、`uploadKbps`（1000）、`downloadConcurrency`（2）是固定值，照样在消息里下发，方便以后改成参数；`fileCacheBytes` 删除（Q388、Q391）。
+面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, downloadConcurrency, discoveryEnabled }`。对应 CFG-CAM-02、07 和 CFG-CMD-02（CFG-CAM-03 删除，Q416）。`staggerSeconds`（1 秒）、`uploadKbps`（1000）、`downloadConcurrency`（2）是固定值，照样在消息里下发，方便以后改成参数；`fileCacheBytes` 删除（Q388、Q391）。
 
 ### 其他
 
@@ -320,7 +320,7 @@ daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所�
 
 | 编号 | 约定 |
 | --- | --- |
-| MSG-SNAP-01 | 频率（R-CAM-08）：面板用 `snapshot.mode` 告诉 daemon 每台打印机现在有没有人在看（有人开着概况页或这台的详情，靠 SSE 的订阅知道）。有人看：打印中按 `watchedPrintingSeconds`，其他状态按 `watchedOtherSeconds`；没人看：按 `unwatchedSeconds`。 |
+| MSG-SNAP-01 | 频率（R-CAM-08）：面板用 `snapshot.mode` 告诉 daemon 每台打印机现在有没有人在看（有人开着概况页或这台的详情，靠 SSE 的订阅知道）。有人看：按 `watchedSeconds`，不分状态；没人看：按 `unwatchedSeconds`。 |
 | MSG-SNAP-02 | 第一个人打开时面板发 `snapshot.now`，daemon 立刻补拍一张；打印机报错时也发一次（R-CAM-10）。任务结束时 daemon 自己拍结束照片，走 MSG-HTTP-05（R-CAM-11）。 |
 | MSG-SNAP-03 | 正在推流时，daemon 从流里截帧当抓拍，不另外去拍。 |
 | MSG-SNAP-04 | 错峰（R-CAM-09）：daemon 把它名下的打印机按 ID 排序，第 k 台的拍照时间偏移 `k × staggerSeconds`，再加 ±10% 随机抖动；`snapshot.now` 同时来了好几台时，也按这个顺序依次拍。 |

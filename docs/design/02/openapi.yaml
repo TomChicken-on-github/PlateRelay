@@ -813,7 +813,7 @@ paths:
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
       x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过、被标为不重打（R-PRT-18）或申请者账户已停用（Q341）的失败订单返回 422 rule_violation（R-PRT-09）。
+      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 rule_violation（R-PRT-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -2164,7 +2164,7 @@ paths:
       summary: 改角色、停用
       x-permission: user:manage
       x-rules: [INV-13, API-AUTH-04, R-ACC-05]
-      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。待审核、排队中的同一个事务里取消，原因"账户停用"；已派单、打印中的照常打完，之后按 R-PCK-05 处理；失败的保持失败。
+      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。停用只管登录和提交，不连带取消订单，要取消的由管理员另外取消（Q415）。
       parameters:
       - name: userId
         in: path
