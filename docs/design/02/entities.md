@@ -161,7 +161,6 @@
 | `platform` | text | `linux` / `windows` / `docker`（F-DMN-06） |
 | `last_seen_at` | timestamptz? | |
 | `revoked_at` | timestamptz? | 吊销后拒绝连接；它名下的打印机挂联系不上（S-RSN-OFFLINE） |
-| `key_alert_at` | timestamptz? | 疑似私钥泄露告警的时间（R-OPS-02，Q238）：10 分钟内被不同 IP 顶掉 3 次及以上时记下；管理员确认或吊销后清空。被顶掉的记录（时间、新旧 IP）写审计 |
 | `created_by` | uuid | |
 | `created_at` | timestamptz | |
 | `version` | int | |
