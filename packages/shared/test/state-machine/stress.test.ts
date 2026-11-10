@@ -12,13 +12,14 @@
  *     bring every order to rest and every printer back to idle, and a queued
  *     order can still get printed.
  *
- * "As written" pins the gaps found in the current rules, so that they stay
- * visible until the rules change. "Amended" shows the same scenarios pass
- * once the proposed changes (see `Amendments` in model.ts) are applied.
+ * The first group runs the current rules. The second switches off the rules
+ * that were added after this exploration first found gaps (see `RuleFixes` in
+ * model.ts) and checks that each gap is still caught, so the checker itself
+ * can't quietly stop seeing them.
  */
 import { describe, expect, it } from "vitest";
 import { explore, randomWalks } from "./explore.js";
-import { ALL_AMENDMENTS, AS_WRITTEN, type Budget, NO_FAULTS } from "./model.js";
+import { CURRENT_RULES, BEFORE_FIXES, type Budget, NO_FAULTS } from "./model.js";
 
 type Faults = Partial<Budget>;
 
@@ -47,13 +48,13 @@ const SCENARIOS: Record<string, Faults> = {
   "panel link and LAN both drop": { linkDrops: 1, lanDrops: 1, dispatches: 1 },
 };
 
-const run = (faults: Faults, amended: boolean) =>
-  explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, ...faults }, amend: amended ? ALL_AMENDMENTS : AS_WRITTEN });
+const run = (faults: Faults, current: boolean) =>
+  explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, ...faults }, fixes: current ? CURRENT_RULES : BEFORE_FIXES });
 
 const summary = (problems: { kind: string; detail: string; trace: string[] }[]) =>
   problems.map((p) => `${p.kind}: ${p.detail}\n    ${p.trace.join(" → ")}`).join("\n");
 
-describe("with the proposed amendments nothing gets stuck or misjudged", () => {
+describe("under the current rules nothing gets stuck or misjudged", () => {
   for (const [name, faults] of Object.entries(SCENARIOS)) {
     it(name, { timeout: 120_000 }, () => {
       const r = run(faults, true);
@@ -90,16 +91,17 @@ describe("with the proposed amendments nothing gets stuck or misjudged", () => {
       revisions: 1,
       archives: 1,
       deactivations: 1,
+      reclaims: 0,
     };
-    const problems = randomWalks({ printers: 2, orders: 2, budget, amend: ALL_AMENDMENTS }, 1500, 150, 20261109);
+    const problems = randomWalks({ printers: 2, orders: 2, budget, fixes: CURRENT_RULES }, 1500, 150, 20261109);
     expect(summary(problems)).toBe("");
   });
 });
 
-describe("the rules as written", () => {
+describe("without the later fixes", () => {
   const kinds = (faults: Faults) => new Set(run(faults, false).problems.map((p) => p.kind));
 
-  it("hold when nothing goes wrong", () => {
+  it("the rules still hold when nothing goes wrong", () => {
     const r = run({}, false);
     expect(r.complete).toBe(true);
     expect(summary(r.problems)).toBe("");
@@ -113,33 +115,33 @@ describe("the rules as written", () => {
     "file transfer fails",
     "revision, archive, account deactivation, file expiry around a failure",
   ]) {
-    it(`hold when ${name}`, { timeout: 120_000 }, () => {
+    it(`the rules still hold when ${name}`, { timeout: 120_000 }, () => {
       expect(summary(run(SCENARIOS[name]!, false).problems)).toBe("");
     });
   }
 
-  // Known gaps. Each of these should start failing once the rules are fixed.
-  it("known gap: stopping a start that never arrived leaves staff with no correct judgement", () => {
+  // The gaps the fixes closed. Each must still show up with the fixes off.
+  it("gap: stopping a start that never arrived leaves staff with no correct judgement", () => {
     expect(kinds({ lostStarts: 1 })).toContain("staffJudgementHasNoCorrectOption");
   });
 
-  it("known gap: a reconcile mismatch outlives its job and blocks the printer for good", { timeout: 120_000 }, () => {
+  it("gap: a reconcile mismatch outlives its job and blocks the printer for good", { timeout: 120_000 }, () => {
     expect(kinds({ linkDrops: 1 })).toContain("stuck");
   });
 
-  it("known gap: a reconnect snapshot taken before the start command arrived sends the order back while it still prints", { timeout: 120_000 }, () => {
+  it("gap: a reconnect snapshot taken before the start command arrived sends the order back while it still prints", { timeout: 120_000 }, () => {
     expect(kinds({ linkDrops: 1 })).toContain("outcomeContradictsPrinter");
   });
 
-  it("known gap: an external job that ran during the transfer does not stop the start", { timeout: 120_000 }, () => {
+  it("gap: an external job that ran during the transfer does not stop the start", { timeout: 120_000 }, () => {
     expect(kinds({ externalStarts: 1 })).toContain("systemPrintOnUnclearedPlate");
   });
 
-  it("known gap: a printer freed while unreachable is idle and lost at once", { timeout: 120_000 }, () => {
+  it("gap: a printer freed while unreachable is idle and lost at once", { timeout: 120_000 }, () => {
     expect(kinds({ lanDrops: 1 })).toContain("invariant");
   });
 
-  it("known gap: an external job that ended while the printer was unreachable is never noticed", { timeout: 120_000 }, () => {
+  it("gap: an external job that ended while the printer was unreachable is never noticed", { timeout: 120_000 }, () => {
     const k = kinds({ lanDrops: 1, externalStarts: 1, dispatches: 1 });
     expect(k).toContain("reconcileNoRowMatched");
     expect(k).toContain("stuck");

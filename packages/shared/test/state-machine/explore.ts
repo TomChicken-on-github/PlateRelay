@@ -97,7 +97,7 @@ export function explore(cfg: Config, maxStates = 3_000_000): Report {
           next.push(step.next);
           nextIds.push(to);
         }
-        if (step.cls !== "adverse") coop[id]!.push(to);
+        if (step.cls === "human" || step.cls === "benign") coop[id]!.push(to);
       }
     }
     frontier = next;
@@ -165,7 +165,7 @@ export function canComeToRest(st: State, limit = 20_000): boolean | "unknown" {
     for (const s of frontier) {
       if (settled(s)) return true;
       for (const step of successors(s)) {
-        if (step.cls === "adverse") continue;
+        if (step.cls !== "human" && step.cls !== "benign") continue;
         const k = key(step.next);
         if (seen.has(k)) continue;
         if (seen.size >= limit) return "unknown";
