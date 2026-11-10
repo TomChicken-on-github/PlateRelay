@@ -1495,13 +1495,13 @@ paths:
               type: object
               properties:
                 expectedState: {$ref: '#/components/schemas/PrinterState'}
-                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部占用时不带（Q326）}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部占用时不带（Q326）；维护中且打印机上报在运行或暂停时也不带（Q377）}
                 reason: {type: string, minLength: 1}
                 reasonVisible: {type: boolean, default: true}
               required: [expectedState, reason]
               if:
                 properties:
-                  expectedState: {const: EXTERNAL}
+                  expectedState: {enum: [EXTERNAL, MAINTENANCE]}
               then:
                 not: {required: [expectedJobId]}
               else:
@@ -1673,7 +1673,7 @@ paths:
             schema:
               type: object
               properties:
-                expectedState: {type: string, enum: [PREPARING, PRINTING, PAUSED, EXTERNAL_JOB]}
+                expectedState: {type: string, enum: [PREPARING, PRINTING, PAUSED, EXTERNAL]}
                 expectedJobId: {type: [string, 'null'], format: uuid, description: 用户看到的当前任务；对不上 409 job_mismatch}
                 outcome: {type: [string, 'null'], enum: [FAILED, PRINTED, NOT_STARTED, null], description: 当前任务的判定}
                 reason: {type: string, minLength: 1, maxLength: 2000, description: 必填，写进审计}
