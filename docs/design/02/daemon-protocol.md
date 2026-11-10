@@ -155,7 +155,7 @@ daemon                                  面板
 | `external.ended` | `{ result }` | 工作（外部）→ 待清板（S-PRN-T21）；异常时不变，原因去掉后按 T24 进待清板 |
 | `error.raised` | `{ error: ActiveError }` | 记 E-PERR 和事件日志；需要人处理的（暂停类）挂 `ERROR` 原因（R-PRT-03）；信息级 HMS（如存储快满）只显示，不挂原因（Q400） |
 | `error.cleared` | `{ errorId, clearedBy: "PANEL" \| "DEVICE" \| "UNKNOWN" }` | 更新 E-PERR |
-| `filament.refilled` | `{ fromSlot, toSlot }` | 固件自动续料换了槽，只记事件日志，不暂停、不挂原因（Q407，待 Q404–Q408 定） |
+| `filament.refilled` | `{ fromSlot, toSlot }` | 固件自动续料换了槽，只记事件日志，不暂停、不挂原因（R-PRT-28，Q407）。字段等驱动实测（Q408） |
 | `timelapse.ready` | `{ files: [{ name, sizeBytes }] }` | 等 daemon 上传（MSG-HTTP-04） |
 
 `ActiveError` 的结构见[驱动接口草稿 §6.2](../../printer-driver-interface-draft.md)，`actions` 只能是标准动作（R-PRT-14）。
