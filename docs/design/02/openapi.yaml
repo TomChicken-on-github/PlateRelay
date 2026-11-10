@@ -2833,7 +2833,7 @@ components:
         fileName: {type: string, description: 'x-requires: order:view:any，本人也能看'}
         plate: {$ref: '#/components/schemas/Plate'}
         colourPref: {$ref: '#/components/schemas/ColourPref'}
-        bedType: {type: [string, 'null']}
+        bedType: {type: [string, 'null'], description: 切片里的板型（自选板已推后，Q390）}
         submittedAt: {type: string, format: date-time}
         queue:
           type: [object, 'null']

@@ -242,7 +242,6 @@
 `id`、`sha256`、`object_key`、`file_name`、`size_bytes`、`uploaded_by`、`uploaded_at`、`submitted_at?`、`purged_at?`。
 
 - 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
-- 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
 - 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
 - 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
@@ -272,7 +271,6 @@
 | `active_version_id` | uuid | 会被打印的版本 |
 | `pending_version_id` | uuid? | 等重审的版本；只在 `PENDING_REVIEW` 且 `sort_key` 不为空时有值 |
 | `colour_pref` | colour_pref | |
-| `bed_type` | text? | 申请者自选的板型（CFG-QUE-09）；空 = 按切片 |
 | `form_version_id` | uuid | 提交时的表单版本 |
 | `answers` | jsonb | 表单答案快照：`{ fieldId, label, type, value }[]` |
 | `revision_count` | int | 已用修改次数（R-VER-09） |
@@ -466,7 +464,7 @@
 | `model_id` | 机型（适配器报的机型 ID） |
 | `bed_type` | 板型，取切片里的板型名（`curr_bed_type`） |
 
-主键 `(model_id, bed_type)`。管理员在可用资源的机型编辑里勾选，整组替换（R-SUB-11、Q274）。不记块数、不分装没装上（Q265）。R-SUB-15 和自选板选项（R-SUB-09）按这张表算。v1 没有"板系列"，同一块板能上哪些机型留给以后的资源管理。
+主键 `(model_id, bed_type)`。管理员在可用资源的机型编辑里勾选，整组替换（R-SUB-11、Q274）。不记块数、不分装没装上（Q265）。R-SUB-15 按这张表算。v1 没有"板系列"，同一块板能上哪些机型留给以后的资源管理。
 
 ## 8. 通知、审计、幂等、归档
 

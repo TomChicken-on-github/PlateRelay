@@ -81,7 +81,7 @@
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
 | 422 | `validation_failed` | 参数校验失败，带 `errors` |
-| 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04；上传见 R-SUB-13） |
+| 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04） |
 | 422 | `rule_violation` | 违反业务规则，带 `rule`（如超过修改次数 `R-VER-09`、超过排队上限 `R-SUB-08`） |
 | 428 | `idempotency_key_required` | 写请求没带幂等键 |
 | 429 | `rate_limited` | 限频，带 `Retry-After` |
@@ -134,12 +134,12 @@
 | 编号 | 约定 |
 | --- | --- |
 | API-RT-01 | 浏览器用一条 Server-Sent Events 连接：`GET /api/v1/stream`（Q151、Q161）。只需要服务端往下推，SSE 自带断线重连，过代理也简单。 |
-| API-RT-02 | 事件类型：`printer.updated`、`order.updated`、`queue.changed`、`todo.changed`、`notification.created`、`command.updated`、`command.sent`、`printer.presence`、`stream.opened`、`file.checked`、`snapshot.updated`、`resync`。`snapshot.updated` 只带 `{ printerId, capturedAt }`，不带图片。 |
+| API-RT-02 | 事件类型：`printer.updated`、`order.updated`、`queue.changed`、`todo.changed`、`notification.created`、`command.updated`、`command.sent`（发出命令时推给正在看的人，按钮转圈用，R-CMD-01）、`file.checked`、`snapshot.updated`、`resync`。`snapshot.updated` 只带 `{ printerId, capturedAt }`，不带图片。 |
 | API-RT-03 | 事件内容是变化后的那个资源的完整视图（和对应 GET 接口返回的一样，按权限裁剪过），不是差量，前端直接替换。`queue.changed` 和 `todo.changed` 只是提示，前端收到后重新拉列表。 |
 | API-RT-04 | 服务端按连接者的权限过滤：申请者只收到概况、自己的订单和自己的通知；访客只收到概况里的打印机。权限按连接时算；用户被停用或改角色时服务端立刻断开他的连接（API-AUTH-04，Q235）。 |
 | API-RT-05 | 同一台打印机的 `printer.updated` 最多每秒一条（Q142）。 |
 | API-RT-06 | 每个事件带递增的 `id`。断线重连时浏览器带 `Last-Event-ID`，服务端补发最近 5 分钟内的，按重连时的权限过滤（不是断线前的，Q235）；超过了发一个 `resync`，前端重新拉全部数据。 |
-| API-RT-07 | 打印机详情页的在场提示（R-VIS-10、R-CMD-10，Q245）：SSE 连接建立后服务端先发一条 `stream.opened { streamId }`；详情页打开时前端每 20 秒调一次 `putPrinterPresence`，带这个 `streamId`，离开时 `deletePrinterPresence`；45 秒没续上就算离开。在场名单只放在服务端内存，不进数据库，重启清空。名单变了给正在看这台打印机详情的人推 `printer.presence { printerId, viewers: [Person] }`，前端去掉自己的会话后显示"另有 N 人在看"。只有对这台打印机有 `printer:operate` 的人会被计入、会收到。控制或设定值命令发出时给同一批人推 `command.sent { printerId, commandId, kind, actor: Person, at }`，前端显示"<名字> 刚刚点了<命令>"，最多 10 秒。用户被停用或改角色时他的连接被断开（API-AUTH-04），在场记录一起去掉。 |
+| API-RT-07 | 已删除：打印机详情页的在场提示随 R-VIS-10、R-CMD-10 推后（Q384）。 |
 
 ## 10. 文件和摄像头
 
@@ -157,7 +157,7 @@
 | 编号 | 对象 | 限制 |
 | --- | --- | --- |
 | API-RATE-01 | 登录 | 按用户名：连续错 3 次后要人机验证，再错等待时间翻倍，最长 15 分钟（R-ACC-04）。按 IP 只做兜底：每分钟 300 次；带有效设备令牌的不计入（Q182） |
-| API-RATE-02 | 发验证码 | CFG-ACC-02；短信一律先过人机验证（R-ACC-02），邮件按 CFG-ACC-03（R-ACC-03） |
+| API-RATE-02 | 发验证码 | CFG-ACC-02；短信和邮件一律先过人机验证（R-ACC-02、R-ACC-03） |
 | API-RATE-03 | 刷新打印机状态 | 每台打印机 CFG-PRT-03（R-PRT-12） |
 | API-RATE-04 | 上传 | 每人每分钟 10 个 |
 | API-RATE-05 | 签发取件码 | 每单每分钟 3 次 |
