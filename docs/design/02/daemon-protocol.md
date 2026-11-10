@@ -118,7 +118,8 @@ daemon                                  面板
   "activeErrors": [],
   "controls": { "light": "on", "speedLevel": 2 },
   "camera": { "stream": true, "snapshot": true },
-  "deviceBoot": "…"
+  "deviceBoot": "…",
+  "runSeq": 17
 }
 ```
 
@@ -127,6 +128,7 @@ daemon                                  面板
 - `pendingStarts` 是 daemon 手里还没发出开打指令的任务（`stage`：`QUEUED`、`DOWNLOADING`、`UPLOADING`），已经停下（持久化了"不再开打"）的不列。对账靠它区分"还在传"和"下发失败"（MSG-RECON-02、R-PRT-16，Q308）。
 - `job.jobRef` 是这次的打印任务 ID（E-JOB）；`external: true` 表示不是系统下发的（MSG-JOBREF）。
 - `deviceBoot` 是适配器给的"打印机这次开机"的标识（如从运行时长推出的开机时刻），拿不到就省略。面板和上次见到的比，变了 = 断线期间打印机重启过（Q242）。
+- `runSeq` 是 daemon 给这台打印机记的运行序号，写在硬盘上，只增不减：每看到打印机开始一次运行（系统任务或外部任务，进入准备中或打印中）加一；daemon 有一段时间看不到打印机（局域网断开、daemon 自己重启），回来时证明不了这段时间它没跑过东西的，也加一（适配器能证明没跑过时不加，标准等驱动实测定）。面板记下每台打印机最后见到的值，用它判断"我上次看过之后这台打印机有没有被用过"（MSG-CMD-START、MSG-RECON-02，Q363、Q364）。daemon 丢了本地状态时从一个比面板下发的已知值更大的数重新开始。
 - 拿不到的字段省略，不填假值。
 
 ### MSG-EVT `printer.event`
@@ -209,7 +211,7 @@ daemon                                  面板
 
 | `kind` | `params` | 有效期（送达） | 类 | 什么上报算"状态变了"（前端停转圈，R-CMD-01） | 对应 |
 | --- | --- | --- | --- | --- | --- |
-| `job.start` | `{ jobRef, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中、开始打印或报开打前失败；传文件见 MSG-CMD-START | S-ORD-T08 |
+| `job.start` | `{ jobRef, expectedRunSeq, file: { fileId, sha256, sizeBytes }, plateIndex, bedType, mapping: [{ sliceSlot, extruder, unit, slot }], timelapse }` | 60 秒 | 控制 | 打印机进入准备中、开始打印或报开打前失败；传文件见 MSG-CMD-START | S-ORD-T08 |
 | `job.stop` | `{ jobRef }` 或 `{ external: true }` | 60 秒 | 控制 | 打印机上报这个 `jobRef` 的任务结束（`job.cancelled`、`job.failed`、`job.finished`）。`external: true` 是外部占用（含迟到的开打）时的停止，停掉打印机上正在跑的任务，以打印机上报结束为准（Q326）。传文件、准备中和打印中都用它；没有单独的撤回命令（Q203、Q207）。传文件期间收到：见 MSG-CMD-START，daemon 直接回 `job.cancelled { beforeStart: true }`（Q223） | R-PRT-04、R-PRT-05 |
 | `job.skip_parts` | `{ jobRef, partIds }` | 60 秒 | 控制 | 打印机上报的已跳过列表变了 | F-SUB-07 |
 | `error.resolve` | `{ errorId, action }` | 60 秒 | 控制；动作是"停止"时按 `job.stop` 处理 | 这条报错从上报里消失，或打印机状态变了 | R-PRT-14 |
@@ -243,8 +245,9 @@ daemon                                  面板
 - daemon 收到 `job.start`、进了下载队列就回 `accepted`。同时下载的个数受 CFG-CMD-06 限制（默认 2），本机缓存里有同一 sha256 的文件就跳过下载（CFG-CMD-07，DAE-XFER、DAE-STO-05）；文件放到打印机上、开打指令已发出后发 `job.staged`。
 - 下载（MSG-HTTP-02）和 FTPS 上传各自最多试 3 次，间隔 5 秒、15 秒、45 秒；每次尝试的超时是 CFG-CMD-02（默认 3 分钟，经 MSG-CFG 下发），从真正开始传起算，排队时间不算。每次重试覆盖上一次没传完的文件（它在 daemon 的清单里，INV-15），传完核对大小和 SHA-256，对不上也算一次失败。
 - 重试都在同一条 `job.start` 里，不产生新命令；**开打指令发出之后不再重试任何一步**。
-- 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。面板结束任务时打印机状态跟最新上报走：在跑外部任务就进外部占用（S-PRN-T17），空闲才回空闲，不无条件写成空闲（Q317）。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
+- 发开打指令之前，daemon 先确认打印机没在跑任务：空闲，或停在上一次的打完 / 失败 / 已取消（`IDLE` `FINISHED` `FAILED` `CANCELLED`）都可以发；只有准备中、打印中、暂停中（`PREPARING` `PRINTING` `PAUSED`）回 `rejected`（`code: printer_busy`）（Q239），什么都不发，按下发失败处理。`job.start` 带着面板派单时见到的 `expectedRunSeq`：发开打指令前 daemon 的 `runSeq` 已经不是这个值（派单后打印机跑过东西，哪怕现在停在打完），或传文件期间 daemon 有一段时间看不到打印机，同样什么都不发，回 `rejected`（`code: printer_used`），按下发失败处理，免得在没清的板子上开打（Q363）。面板结束任务时打印机状态跟最新上报走：在跑外部任务就进外部占用（S-PRN-T17），否则进待清板（S-PRN-T16），不回空闲（Q317、Q370）。这样"开打可能没到"停止并退回队列（R-CMD-04）后重新派单，也不会让同一台打印机打两次。
 - 传文件期间（开打指令还没发）收到这个 `jobRef` 的 `job.stop`：daemon 中止下载或上传，删掉自己传了一半的文件（INV-15），把"这个 `jobRef` 不再发开打"和命令 ID 一样先写进硬盘（R-CMD-08），然后回 `job.cancelled { commandId, beforeStart: true }`。面板把任务结束为 `STOPPED_BEFORE_START`，订单回原位。开打指令只有 daemon 发，所以这里以 daemon 为准，不用等打印机（Q223）。
+- 开打指令已经发出（`job.staged`）之后收到这个 `jobRef` 的 `job.stop`，而打印机没有在跑它：如果从文件放上打印机起 daemon 一直连着这台打印机，而且 `runSeq` 没变（打印机什么都没跑过），daemon 删掉自己放上去的文件（迟到的开打指令也就打不起来），把"这个 `jobRef` 不再发开打"写进硬盘，回 `job.cancelled { commandId, beforeStart: true }`，同一个 `jobRef` 只回一次。中途断过视线或 `runSeq` 变了的，daemon 不下结论，照常把停止发给打印机，由打印机上报或人判（R-CMD-04、R-PRT-08，Q361）。面板人判没开打或强制收回时发的 `job.stop`（R-PRT-08、R-PRT-25）也按这一条记下不再开打。
 - 重试用完回 `failed`，按下发失败处理（R-DSP-08）。每次尝试记在 `command.result.data.attempts`：`[{ step: "download" | "upload", error, at }]`。进度用 `command.result.data.step`：`queued` → `download` → `upload`，前端据此显示"排队中"。
 
 **MSG-CMD-WL**（INV-14）：daemon 只执行上表里的命令类型，`control` 只执行适配器静态清单里的动作。别的一律 `rejected`。
@@ -270,21 +273,28 @@ daemon                                  面板
 | 面板记录 | 打印机快照 | 处理 |
 | --- | --- | --- |
 | 已派单 / 打印中 | 快照的 `deviceBoot` 和上次见到的不一样（断线期间打印机重启过，比如断电续打） | 不自动结束任务，也不按快照推进；挂等待处理，原因 `RECONCILE_MISMATCH`，现场人员判（R-PRT-07、Q242）。放在第一行，最先检查 |
+| 已派单 / 打印中 | 在跑一个不是这个 `jobRef` 的任务 | 面板从没见过这个任务准备或开打：任务以 `SEND_FAILED` 结束，订单回原位，打印机进外部占用（S-PRN-T17）。见过：不自动结束，挂 `RECONCILE_MISMATCH`，现场人员判；判完打印机按最新上报进外部占用（Q364） |
 | 已派单 | 这个 `jobRef` 准备中 | 只记 `prepared_at`（没记过的话），订单仍是已派单 |
 | 已派单 | 这个 `jobRef` 在打印 | 补一条"开始打印"，S-ORD-T11 |
 | 已派单 / 打印中 | 同一个 `jobRef`，但断线期间状态变了（暂停、报错、断料、继续；准备阶段的暂停也算，Q240） | 按快照经 S-JOB 映射表推进：暂停原因、等待处理、恢复（Q234） |
 | 已派单 / 打印中 | 空闲，daemon 清单里有这个 `jobRef` 的结束记录（清单丢了时按 MSG-JOBREF-02 用面板下发的 `currentJobRef` 认领） | 按结束记录补事件（打完或失败） |
 | 已派单 | 快照 `pendingStarts` 里有这个 `jobRef`（daemon 还在排队、下载或上传） | 仍是已派单，不判下发失败：daemon 传完照样会开打。要退回队列只能发 `job.stop`，等 daemon 回 `job.cancelled { beforeStart: true }`（MSG-CMD-START，Q223、Q308） |
-| 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 任务以 `SEND_FAILED` 结束，订单回原位（R-PRT-16、R-DSP-08） |
-| 已派单 / 打印中 | 打印机最后一个任务就是这个 `jobRef`（任务名或文件后缀对得上），打印机自己停在打完或失败（如拓竹 `gcode_state` = `FINISH` / `FAILED`） | 按打印机这个事实把任务结束为 `FINISHED` 或 `FAILED`，不要人判（P-01、Q234）。先于下一行检查 |
-| 已派单 / 打印中 | 空闲，找不到结束记录，也看不到上一行那种打完 / 失败状态，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判（R-PRT-08） |
-| 打印中 | 还在打这个 `jobRef` | 去掉失联，继续 |
+| 已派单，任务 `prepared_at` 为空 | 空闲，而且找不到这个 `jobRef` 的任何痕迹（最后任务名、`pr-<jobRef 后 12 位>` 文件、打完 / 失败 / 已取消状态） | 这个任务的 `job.start` 已在更早的一次连接里送达，或 daemon 已回应过：任务以 `SEND_FAILED` 结束，订单回原位，打印机进待清板（R-PRT-16、R-DSP-08、Q370）。还没送达，或本次连接里才送达且没回应：快照可能拍在命令之前，不下结论，等后续上报（Q362） |
+| 已派单 / 打印中 | 打印机最后一个任务就是这个 `jobRef`（任务名或文件后缀对得上），打印机自己停在打完或失败（如拓竹 `gcode_state` = `FINISH` / `FAILED`） | 按打印机这个事实把任务结束为 `FINISHED` 或 `FAILED`，不要人判（P-01、Q234）。先于下一行检查。例外：停在失败、但面板从没见过这个任务开打的，它可能是开打前失败的，不自动判，走下一行由人判（Q366） |
+| 已派单 / 打印中 | 空闲，找不到结束记录，也看不到上一行那种打完 / 失败状态，但有痕迹或 `prepared_at` 不为空 | 挂等待处理，原因"对账不一致"，现场人员判失败、打完或没开打（R-PRT-08，Q360） |
+| 打印中 | 还在打这个 `jobRef` | 去掉失联，继续；这个任务上挂着的对账不一致一并去掉（Q359） |
+| 外部占用 | 没在跑任务（空闲，或停在打完 / 失败 / 已取消） | 外部任务在 daemon 看不到的时候结束了：待清板（S-PRN-T10，Q364） |
 | 空闲 / 离线 / 待清板 / 维护中 | 在打一个对不上的任务 | 按 R-PRT-11：外部占用（离线出发是 S-PRN-T14）；待清板另挂 `UNCLEARED_START`；维护中保持维护中 |
 | 离线 | 停在打完 / 失败 / 已取消 | 待清板（S-PRN-T15）。证明不了是断线前已经处理过的那一次打印，任务名一样也不算：离线期间可能有人在屏幕上把同一个文件又打了一遍（Q304、Q309） |
+| 离线 / 空闲 | 空闲，但 `runSeq` 或 `deviceBoot` 和面板上次见到的不一样（这期间跑过东西或重启过） | 待清板（S-PRN-T15，Q364） |
 | 离线 | 其他（空闲） | 空闲（S-PRN-T01） |
 | 这个 `jobRef` 的任务已结束 | 在打这个 `jobRef`（准备中或打印中） | 不挂回订单。打印机没有当前任务 → 外部占用；已有别的当前任务 → 打印机状态不变。都挂等待处理，原因 `LATE_START`（R-PRT-17） |
 
 不只是重连：在线时 `printer.event` 报了一个已结束任务的准备中或开打，面板也按上表最后一行处理（R-PRT-17）。
+
+对完账之后，daemon 发件箱里补发的、`seq` 比这份快照更旧的打印机事件直接丢弃：快照已经是更新的事实，旧的准备中或开打再放一遍会被当成迟到的开打。任务结束记录（`job.finished`、`job.failed`、`job.cancelled`）除外，不论新旧都照常处理（R-PRT-07，Q368）。
+
+任务在对账里以开打前的结局结束时，打印机一律进待清板，正在跑别的任务的进外部占用（文档 1 §4A.2，Q370）。
 
 daemon 在本机记下每个任务的结束事件（直到面板 `ack`），所以"断线期间打完了"大多数时候能对上；只有 daemon 自己也重启丢了状态时才需要人判。
 

@@ -917,10 +917,11 @@ paths:
     post:
       operationId: reconcileOrder
       tags: [orders]
-      summary: 对账不一致时判失败或判打完
+      summary: 对账不一致时判失败、判打完或判没开打
       x-permission: printer:operate
-      x-transitions: [S-ORD-T13, S-ORD-T14]
+      x-transitions: [S-ORD-T13, S-ORD-T14, S-ORD-T09]
       x-rules: [R-PRT-08]
+      description: 打印机上报这个任务正在运行时不能判，返回 409 state_conflict（Q359）。判没开打（NOT_STARTED）：任务以 STOPPED_BEFORE_START 结束，订单回排队原位，打印机进待清板，面板给 daemon 发 job.stop 让它记下不再开打（Q360）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -932,9 +933,40 @@ paths:
               type: object
               properties:
                 expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账（S-ORD-T13、T14，Q318）}
-                outcome: {type: string, enum: [FAILED, PRINTED]}
+                outcome: {type: string, enum: [FAILED, PRINTED, NOT_STARTED]}
                 note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
               required: [expectedStatus, outcome]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/resolve-inconsistency:
+    post:
+      operationId: resolveOrderInconsistency
+      tags: [orders]
+      summary: 处理状态自检列出的订单
+      x-permission: printer:reclaim
+      x-transitions: [S-ORD-T13, S-ORD-T14, S-ORD-T09]
+      x-rules: [R-OPS-03]
+      description: 只能用于状态自检（GET /consistency）当前列出的订单，没列出的返回 409 state_conflict。订单按判定走现有转换，写审计（Q374）。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING]}
+                outcome: {type: string, enum: [FAILED, PRINTED, NOT_STARTED]}
+                reason: {type: string, minLength: 1, maxLength: 2000, description: 必填，写进审计}
+              required: [expectedStatus, outcome, reason]
               additionalProperties: false
       responses:
         '200':
@@ -1614,6 +1646,38 @@ paths:
                 reason: {type: string, enum: [START_FAILED, UNCLEARED_START, LATE_START]}
                 jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时是结束的任务，LATE_START 时是那个迟到的任务）}
               required: [reason]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PrinterDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/reclaim:
+    post:
+      operationId: reclaimPrinter
+      tags: [printers]
+      summary: 强制收回打印机
+      x-permission: printer:reclaim
+      x-transitions: [S-PRN-T18, S-ORD-T13, S-ORD-T14, S-ORD-T09]
+      x-rules: [R-PRT-25]
+      description: 打印机固定进待清板。面板连着这台打印机且它最新上报正在运行时返回 409 state_conflict（Q372）。有当前任务时必须带 expectedJobId 和 outcome，没有当前任务（外部占用）时两者都不带，否则 422。去掉和任务有关的等待处理（RECONCILE_MISMATCH、LATE_START、START_FAILED），给 daemon 发 job.stop 让它记下这个任务不再开打，写审计（Q369、Q373）。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedState: {type: string, enum: [PREPARING, PRINTING, PAUSED, EXTERNAL_JOB]}
+                expectedJobId: {type: [string, 'null'], format: uuid, description: 用户看到的当前任务；对不上 409 job_mismatch}
+                outcome: {type: [string, 'null'], enum: [FAILED, PRINTED, NOT_STARTED, null], description: 当前任务的判定}
+                reason: {type: string, minLength: 1, maxLength: 2000, description: 必填，写进审计}
+              required: [expectedState, reason]
               additionalProperties: false
       responses:
         '200':
@@ -2563,6 +2627,36 @@ paths:
                     items: {$ref: '#/components/schemas/AuditEntry'}
                   nextCursor: {type: [string, 'null']}
                 required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
+  /consistency:
+    get:
+      operationId: getConsistency
+      tags: [admin]
+      summary: 状态自检
+      x-permission: printer:reclaim
+      x-rules: [R-OPS-03]
+      description: 只读。列出订单、打印任务、打印机三者之间不该出现的不一致。正常情况下是空的（Q374）。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: {type: string, enum: [ORDER_WITHOUT_ACTIVE_JOB, PRINTER_WITHOUT_CURRENT_JOB, JOB_STATE_MISMATCH, PRINTER_WITH_SEVERAL_ACTIVE_JOBS]}
+                        orderId: {type: [string, 'null'], format: uuid}
+                        printerId: {type: [string, 'null'], format: uuid}
+                        jobId: {type: [string, 'null'], format: uuid}
+                      required: [kind, orderId, printerId, jobId]
+                      additionalProperties: false
+                required: [items]
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
   /archive:
