@@ -283,7 +283,7 @@
 | `submitted_at` | timestamptz | |
 | `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
 | `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
-| `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；管理员撤销时三列一起清空（R-PRT-19）。只在失败时有值 |
+| `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；没有撤销（Q382）。只在失败时有值 |
 | `files_expire_at` | timestamptz? | 订单进终态或进失败时按当时的 CFG-FIL-01 算好存下（`closed_at` + 保留天数），之后改参数不影响已经算好的（P-04，Q324）；重打时清空。过了这个时间，这张订单的文件就过期，不能下载、不能重打（R-FIL-01、R-FIL-02、R-PRT-10）。文件对象是否真删看 E-FILE（Q314） |
 
 约束：
