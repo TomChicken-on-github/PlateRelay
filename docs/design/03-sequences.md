@@ -108,7 +108,9 @@ sequenceDiagram
 | 3 | 次数用完 | 422 `rule_violation`（R-VER-09） | R-VER-09 |
 | 3 | 已派单、打印中或之后 | 422 `rule_violation`；已派单要请现场人员先停止，回到排队中后再改 | R-VER-04、R-VER-08、Q207 |
 
-换机型按 R-VER-10 单独算次数和位置。恢复旧版本已删除（Q380）。
+换机型按 R-VER-10 单独算次数和位置。
+
+恢复旧版本（restoreVersion）走同一套：生成新版本、算一次修改、自动通过、按时长规则后退（S-ORD-T07、R-VER-06），不经过管理员；只能恢复曾经通过的版本。
 
 ## SEQ-03 派单到开始打印
 
@@ -351,7 +353,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 1 | 文件已过保留期 | 按钮置灰，410 `file_expired`；请申请者重新提交 | R-PRT-10、R-ARB-03 |
 | 1 | 订单归档过 | 按钮置灰，422 `rule_violation` | R-PRT-09、R-ARC-02 |
-| 1 | 已被标为不重打 | 重打按钮隐藏，422 `rule_violation`；没有撤销，申请者重新提交（Q382） | R-PRT-18 |
+| 1 | 已被标为不重打 | 重打按钮隐藏，422 `rule_violation`；管理员 revokeReprintDecline 后恢复 | R-PRT-18、R-PRT-19 |
 | 1 | 不是失败状态 | 409 `state_conflict` | API-CONC-02 |
 
 版本、文件、修改次数都不变（R-VER-11）。申请者没有重打按钮（F-PRT-07）。

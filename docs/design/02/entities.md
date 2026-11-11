@@ -55,7 +55,7 @@
 | `role` | `APPLICANT` `STAFF` `ADMIN` | E-USER（Q95；访客不是角色，是没登录） |
 | `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRN（R-PRT-03） |
 | `printer_event_kind` | `PAUSED` `RESUMED` `ERROR` `HMS` `CONNECTION_DOWN` `CONNECTION_UP` `REFILL` | E-PEVT（R-PRT-26） |
-| `version_kind` | `SUBMIT` `REPLACE` `REVISION` | E-VER（R-VER-01、02；`RESTORE` 随 R-VER-06 删除，Q380） |
+| `version_kind` | `SUBMIT` `REPLACE` `REVISION` `RESTORE` | E-VER（R-VER-01、02、06） |
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
 | `process_node` | `SUBMIT` `REVIEW` `QUEUE` `PRINT` `STORE` `PICKUP` | E-REC（Q146） |
@@ -257,7 +257,7 @@
 
 - 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时不提前删（Q415）。
 - 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
-- 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
+- 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
 - 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
 - 同一个用户上传同一个哈希时复用已有行；不同用户之间不共用，免得能推断出别人传过什么（Q179）。
 
@@ -299,7 +299,7 @@
 | `submitted_at` | timestamptz | |
 | `closed_at` | timestamptz? | 进终态或进失败的时间；文件保留期从这里算（R-FIL-01、R-FIL-02）。重打时清空 |
 | `archived_at` | timestamptz? | 归档本期时留在失败的订单记下归档时间；有值就不能重打（R-ARC-02、R-PRT-09） |
-| `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；没有撤销（Q382）。只在失败时有值 |
+| `reprint_declined_at`、`reprint_declined_by`、`reprint_declined_reason` | timestamptz?、uuid?、text? | 现场人员点了"不重打，请选手重新提交"（R-PRT-18，Q224）。有值时不能重打、不进现场人员待办；管理员撤销时三列一起清空（R-PRT-19）。只在失败时有值 |
 | `files_expire_at` | timestamptz? | 订单进终态或进失败时按当时的 CFG-FIL-01 算好存下（`closed_at` + 保留天数），之后改参数不影响已经算好的（P-04，Q324）；重打时清空。过了这个时间，这张订单的文件就过期，不能下载、不能重打（R-FIL-01、R-FIL-02、R-PRT-10）。文件对象是否真删看 E-FILE（Q314） |
 
 约束：
@@ -319,7 +319,8 @@
 | --- | --- |
 | `id` | |
 | `order_id`、`n` | `n` 从 1 开始；`(order_id, n)` 唯一。界面显示"第 N 版" |
-| `kind` | `SUBMIT` / `REPLACE`（第一次审核前替换，R-VER-01）/ `REVISION` |
+| `kind` | `SUBMIT` / `REPLACE`（第一次审核前替换，R-VER-01）/ `REVISION` / `RESTORE`（R-VER-06） |
+| `restored_from_id?` | `RESTORE` 时指向被恢复的版本；只能是曾经 `APPROVED` 的版本（R-VER-06） |
 | `state` | `PENDING` / `APPROVED` / `REJECTED` / `WITHDRAWN` / `REPLACED` |
 | `file_id`、`plate_index`、`plate_count`、`plate_name` | 一单一盘（INV-03） |
 | `model_id`、`model_name`、`nozzles`、`filaments`、`print_seconds`、`weight_grams` | 从 E-CHK 复制过来，之后不再变 |

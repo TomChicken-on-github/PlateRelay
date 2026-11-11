@@ -775,6 +775,36 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/OrderDetail'}
         default: {$ref: '#/components/responses/Problem'}
+  /orders/{orderId}/versions/{n}/restore:
+    post:
+      operationId: restoreVersion
+      tags: [orders]
+      summary: 恢复旧版本
+      x-permission: order:submit
+      x-transitions: [S-ORD-T07]
+      x-rules: [R-VER-06, R-VER-07, R-VER-09]
+      description: 只限本人。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/VersionN'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
+              required: [expectedStatus]
+              additionalProperties: false
+      responses:
+        '201':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
   /orders/{orderId}/cancel:
     post:
       operationId: cancelOrder
@@ -859,6 +889,23 @@ paths:
                 reasonVisible: {type: boolean, default: true}
               required: [expectedStatus, reason]
               additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderDetail'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: revokeReprintDecline
+      tags: [orders]
+      summary: 撤销不重打
+      x-permission: order:reprint:restore
+      x-rules: [R-PRT-19]
+      description: 只有管理员。清掉不重打标记，重打按钮恢复，订单回现场人员待办；时间线记 reprint.decline_revoked，记审计。没标过或归档过返回 409 state_conflict。
+      parameters:
+      - {$ref: '#/components/parameters/OrderId'}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
       responses:
         '200':
           description: 成功
@@ -2753,7 +2800,7 @@ components:
     ColourPref: {type: string, enum: [EXACT, SIMILAR, ANY]}
     ProcessNode: {type: string, enum: [SUBMIT, REVIEW, QUEUE, PRINT, STORE, PICKUP]}
     NodeState: {type: string, enum: [NOT_REACHED, ACTIVE, DONE, PROBLEM]}
-    VersionKind: {type: string, enum: [SUBMIT, REPLACE, REVISION]}
+    VersionKind: {type: string, enum: [SUBMIT, REPLACE, REVISION, RESTORE]}
     VersionState: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN, REPLACED]}
     Permission: {type: string, description: 文档 1 §2.2 的权限节点}
     Nozzle:
@@ -2876,10 +2923,11 @@ components:
         n: {type: integer, minimum: 1}
         kind: {$ref: '#/components/schemas/VersionKind'}
         state: {$ref: '#/components/schemas/VersionState'}
+        restoredFromN: {type: [integer, 'null']}
         plate: {$ref: '#/components/schemas/Plate'}
         fileName: {type: string, x-requires: 'order:view:any'}
         deltaSeconds: {type: [integer, 'null']}
-        placesBack: {type: [integer, 'null']}
+        placesBack: {type: [integer, 'null'], description: -1 = 队尾}
         counted: {type: boolean}
         modelSwitch: {type: boolean}
         createdAt: {type: string, format: date-time}
