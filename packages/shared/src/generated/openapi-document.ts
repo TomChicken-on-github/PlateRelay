@@ -5194,7 +5194,7 @@ export const openapiDocument: Record<string, unknown> = {
         ],
         "summary": "吊销",
         "x-permission": "daemon:manage",
-        "description": "立刻断开它的连接；它名下的打印机挂失联，要管理员移到别的 daemon。",
+        "description": "立刻断开它的连接；它名下的打印机异常(联系不上)，要管理员移到别的 daemon。",
         "parameters": [
           {
             "name": "daemonId",

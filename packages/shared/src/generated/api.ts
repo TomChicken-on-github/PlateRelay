@@ -1494,7 +1494,7 @@ export interface paths {
         put?: never;
         /**
          * 吊销
-         * @description 立刻断开它的连接；它名下的打印机挂失联，要管理员移到别的 daemon。
+         * @description 立刻断开它的连接；它名下的打印机异常(联系不上)，要管理员移到别的 daemon。
          */
         post: operations["revokeDaemon"];
         delete?: never;
