@@ -87,7 +87,7 @@ daemon 里一条 `job.start` 的流程（Q422）。面板那边的订单、打�
 | DAE-JOB-02 | **发起打印**：开打前检查通过后，先把这条任务的 `startIssuedAt` 写进 SQLite 并提交，然后才发开打指令。它是"开打指令可能已经发出"的分界线。 |
 | DAE-JOB-03 | **重启后收尾**：daemon 启动时逐条检查没结束的 `job.start`。没有 `startIssuedAt` 的，开打指令一定没发过：删掉传了一半的文件（INV-15），写下"不再开打"，回 `command.result { status: "failed", code: "daemon_restarted" }`，任务以 `SEND_FAILED` 结束，订单回原位（R-DSP-08），不用人判。有 `startIssuedAt` 的，说不清发没发出去，不重发、不下结论，照常等打印机上报，对账按 MSG-RECON-02（打印机在跑它 → ①，有结局 → ②，其他 → ③ 人判）。 |
 | DAE-JOB-04 | 重启后不自动接着传、接着打。只有适配器能证明重启期间打印机没跑过东西时，接着打才可能通过 `runSeq` 检查；等驱动实测证明拓竹做得到，再考虑加（Q422）。 |
-| DAE-JOB-05 | 开打指令发出后收到停止、打印机又没在跑它：按 MSG-CMD-START（一直看得到且 `runSeq` 没变 → 删文件、回 `beforeStart`；否则照常发停止）。 |
+| DAE-JOB-05 | 开打指令发出后收到停止、打印机又没在跑它：按 MSG-CMD-START（一直看得到且 `runSeq` 没变 → 删文件、回 `beforeStart`；否则只写下不再开打，不发停止给打印机。带 `jobRef` 的停止只在打印机正在跑这个 `jobRef` 时才发，Q425）。 |
 
 ## 6. 媒体（DAE-MED）
 
