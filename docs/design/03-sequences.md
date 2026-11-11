@@ -2,7 +2,7 @@
 
 > 设计层文档第 3 份，共 4 份。与文档 [0](00-scope-and-principles.md)、[1](01-business-rules.md)、[2](02/README.md) 冲突时以上层为准，并修正本文。
 >
-> 状态：定稿 v1（2026-11-08，含到 Q330 为止的全部决定；初稿 2026-11-05）。骨架来自追问 Q197–Q200，审阅修正见 Q203–Q216。
+> 状态：定稿 v1（2026-11-08，含到 Q330 为止的全部决定，Q359–Q374 补丁 2026-11-10；初稿 2026-11-05）。骨架来自追问 Q197–Q200，审阅修正见 Q203–Q216。
 
 ## 0. 怎么读
 
@@ -134,7 +134,7 @@ sequenceDiagram
   P->>O: 签名读取
   D->>D: 核对 SHA-256
   D->>R: FTPS 上传 pr-{jobRef 后 12 位}.gcode.3mf（面板显示传输进度）
-  D->>D: 确认打印机没在跑任务（空闲或停在打完 / 失败 / 已取消都行；准备中、打印中、暂停中回 rejected printer_busy，不发，Q239）
+  D->>D: 确认打印机没在跑任务（空闲或停在打完 / 失败 / 已取消都行；准备中、打印中、暂停中回 rejected printer_busy，不发，Q239；runSeq 和 job.start 带的 expectedRunSeq 不一样，或传文件期间看不到打印机，回 rejected printer_used，不发，Q363）
   D->>R: 发开打指令（带映射）
   D-->>P: printer.event job.staged（R-CMD-04 的 CFG-CMD-05 从这里算）
   R-->>D: 状态：准备中 → 打印中
@@ -153,8 +153,8 @@ sequenceDiagram
 | 11–14 | 传文件期间有人点停止 | daemon 中止传输、删掉传了一半的文件、记下这个 jobRef 不再发开打，回 job.cancelled beforeStart=true → 任务结局 STOPPED_BEFORE_START，订单回原位（SEQ-04） | MSG-CMD-START、Q223 |
 | 11–14 | 下载或上传失败、哈希不对 | daemon 在同一条命令里自动重试，各最多 3 次，每次超时 CFG-CMD-02；用完回 failed → 下发失败，订单回排队中原位（S-ORD-T09、R-DSP-08），任务结局 SEND_FAILED。开打指令发出后不再重试 | MSG-CMD-START |
 | 10 | 命令过期 | daemon 回 expired → 下发失败处理 | MSG-CMD-TTL |
-| 15–17 | job.staged 后过了 CFG-CMD-05（默认 60 秒，真机实测再定），任务 prepared_at 仍为空（打印机自己没报过准备中） | 进待办"开打可能没到"，一直留到有人处理或打印机有上报。现场人员看摄像头后点"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹 → 任务结局 STOPPED_BEFORE_START，订单回原位）。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机没在跑任务，不会打两次 | R-CMD-04、R-PRT-17、MSG-CMD-START、Q243 |
-| 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位；打印机跟最新上报走，在跑外部任务就进外部占用（S-PRN-T17，Q317） | MSG-CMD-START |
+| 15–17 | job.staged 后过了 CFG-CMD-05（默认 60 秒，真机实测再定），任务 prepared_at 仍为空（打印机自己没报过准备中） | 进待办"开打可能没到"，一直留到有人处理或打印机有上报。现场人员看摄像头后点"停止并退回队列"（stopPrint 发 job.stop；打印机报已停止 / 已取消，或 daemon 确认从文件放上打印机起一直连着、runSeq 没变，删文件、记下不再开打、回 job.cancelled beforeStart=true → 任务结局 STOPPED_BEFORE_START，订单回原位，打印机进待清板；daemon 确认不了的由人判，可判没开打，Q360、Q361）。之后打印机才报准备中或开打 → 不挂回订单；打印机没有当前任务就进外部占用，已有别的当前任务就状态不变，都挂等待处理 LATE_START（R-PRT-17）。**永远不自动重发开打**；重新派单时 daemon 会先确认打印机没在跑任务，不会打两次 | R-CMD-04、R-PRT-17、MSG-CMD-START、Q243 |
+| 14 | 发开打前打印机不空闲 | daemon 回 rejected printer_busy，什么都不发 → 下发失败，订单回原位；打印机跟最新上报走，在跑外部任务就进外部占用（S-PRN-T17，Q317），否则进待清板（S-PRN-T16，Q370）。派单后打印机跑过东西（rejected printer_used）同样处理（Q363） | MSG-CMD-START |
 | 17 | 开打前报错（如加热失败） | job.failed beforeStart → 订单回原位（S-ORD-T09），挂等待处理（START_FAILED） | Q87、S-FLG-ATTENTION |
 | 17 | 打印机屏幕上有人取消 | job.cancelled 无 commandId、beforeStart → 订单回原位 | S-ORD-T09 |
 
@@ -179,7 +179,7 @@ sequenceDiagram
   alt 已经开打
     P->>P: 订单 失败（S-ORD-T13、R-PRT-04），打印机 待清板（S-PRN-T08）
   else 还没开打
-    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机报过准备中 → 待清板（S-PRN-T16，Q306），没报过 → 空闲（S-PRN-T05），任务结局 STOPPED_BEFORE_START
+    P->>P: 订单回排队中原位，不算失败（S-ORD-T09、R-PRT-05），打印机进待清板（S-PRN-T16，Q370），任务结局 STOPPED_BEFORE_START
   end
   P-->>S: SSE printer.updated / order.updated，前端停转圈
 ```
@@ -267,12 +267,12 @@ sequenceDiagram
     P->>P: 按打印机事实结束任务 FINISHED / FAILED，不要人判（MSG-RECON-02、Q234）
   else 已派单，快照 pendingStarts 里有这个 jobRef（daemon 还在排队、下载或上传）
     P->>P: 仍是已派单，不判下发失败；要退回队列只能发 job.stop，等 daemon 回 job.cancelled beforeStart（R-PRT-16、Q223、Q308）
-  else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹、daemon 也不再持有它
-    P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位（R-PRT-16、R-DSP-08）
+  else 已派单、prepared_at 为空、打印机上没有这次任务的痕迹、daemon 也不再持有它、job.start 已在更早的连接里送达或已有回应（Q362）
+    P->>P: 任务结局 SEND_FAILED（下发失败），订单回原位，打印机进待清板（R-PRT-16、R-DSP-08、Q370）
   else 原来是离线（空闲时断的线）
     P->>P: 在跑对不上的任务 → 外部占用（S-PRN-T14）；停在打完/失败/已取消 → 待清板（S-PRN-T15，任务名一样也不算证明，Q309）；否则空闲（S-PRN-T01，Q304）
   else 其他对不上
-    P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08）
+    P->>P: 挂等待处理（RECONCILE_MISMATCH，R-PRT-08），现场人员判失败、打完或没开打（Q360）
     S->>P: reconcileOrder（expectedStatus=DISPATCHED 或 PRINTING，outcome=FAILED 或 PRINTED，Q318）
     P->>P: S-ORD-T13 或 S-ORD-T14
   end

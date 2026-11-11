@@ -338,7 +338,7 @@
 | `mapping_settings_version` | 当时"映射"分区的设置版本（R-DSP-13） |
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
-| `prepared_at?` | 打印机自己第一次报这个 jobRef 准备中的时间（`job.staged` 不算）。不是阶段，只给 R-CMD-04 和对账（R-PRT-16、MSG-RECON）判断"开打到没到"用（Q223） |
+| `prepared_at?` | 打印机自己第一次报这个 jobRef 准备中的时间（`job.staged` 不算）。不是阶段，只给 R-CMD-04 和对账（R-PRT-16、MSG-RECON）判断"开打到没到"用（Q223）；不决定任务结束后打印机去哪，一律待清板（Q370） |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
 | `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。R-PRT-16 自动判的 → `SEND_FAILED`。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
 | `paused_ms` | 暂停累计 |
