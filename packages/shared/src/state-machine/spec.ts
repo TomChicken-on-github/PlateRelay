@@ -26,15 +26,19 @@ export type OrderState = (typeof ORDER_STATES)[number];
 /** States an order never leaves. FAILED is not one: a reprint takes it back to the queue. */
 export const TERMINAL_ORDER_STATES: readonly OrderState[] = ["REJECTED", "COMPLETED", "CANCELLED", "DISPOSED"];
 
+/**
+ * A printer is in one of four states, named for what people have to do about it.
+ * What a job is doing (preparing, printing, paused) is the job's phase, not a printer state.
+ */
 export const PRINTER_STATES = [
-  "OFFLINE",
-  "IDLE",
-  "PREPARING",
-  "PRINTING",
-  "PAUSED",
+  /** Can take an order. */
+  "AVAILABLE",
+  /** Running something: a job of ours or one started outside the system. */
+  "WORKING",
+  /** Someone has to look at it. Holds as long as at least one fault reason is present. */
+  "FAULT",
+  /** Stopped. Someone confirms the plate is clear before it is available again. */
   "CLEARING_REQUIRED",
-  "EXTERNAL_JOB",
-  "MAINTENANCE",
 ] as const;
 export type PrinterState = (typeof PRINTER_STATES)[number];
 
@@ -54,26 +58,29 @@ export const JOB_OUTCOMES = [
 ] as const;
 export type JobOutcome = (typeof JOB_OUTCOMES)[number];
 
-/** Reasons behind the "needs attention" flag. Each is cleared by its own rule. */
-export const ATTENTION_REASONS = [
+/** Why a printer is in FAULT. Each is removed by its own rule; the printer leaves FAULT when none is left. */
+export const FAULT_REASONS = [
+  /** The panel can't reach it (daemon disconnected or printer off the network), whatever it was doing. */
+  "UNREACHABLE",
+  /** It paused on an error or ran out of filament. Removed when it reports printing again or the job ends. */
   "PRINTER_ERROR",
-  "FILAMENT_RUNOUT",
-  "START_FAILED",
-  "RECONCILE_MISMATCH",
-  "LATE_START",
-  "STARTED_WITHOUT_CLEARING",
+  /** A job could not be sent to it. Removed by a person. */
+  "SEND_FAILED",
+  /** A person took it out of service. Removed by a person. */
+  "MAINTENANCE",
+  /** Nothing says how its job ended. Removed when a person judges the job, or the printer reports the job running. */
+  "NEEDS_JUDGEMENT",
+  /** Its daemon speaks an incompatible protocol version. Removed when the daemon reconnects upgraded. */
+  "DAEMON_OUTDATED",
 ] as const;
-export type AttentionReason = (typeof ATTENTION_REASONS)[number];
+export type FaultReason = (typeof FAULT_REASONS)[number];
 
-/** Attention reasons that staff may dismiss with "mark as handled". */
-export const DISMISSABLE_ATTENTION: readonly AttentionReason[] = ["START_FAILED", "STARTED_WITHOUT_CLEARING", "LATE_START"];
-
-/** Attention reasons about a job rather than about the machine. A forced reclaim clears these and leaves the rest. */
-export const JOB_ATTENTION: readonly AttentionReason[] = ["RECONCILE_MISMATCH", "LATE_START", "START_FAILED"];
+/** Fault reasons a person removes with "mark as handled" or by ending maintenance. */
+export const FAULTS_REMOVED_BY_PEOPLE: readonly FaultReason[] = ["SEND_FAILED", "MAINTENANCE", "NEEDS_JUDGEMENT"];
 
 /**
- * What a person may conclude about a job the system can't settle by itself
- * (a reconcile mismatch, a forced reclaim, an order the self-check lists).
+ * What a person may conclude about a job the system can't settle from facts
+ * (nothing on reconnect says how it ended, or a stop that nobody could confirm).
  */
 export const JUDGEMENTS = {
   failed: "FAILED",
@@ -107,9 +114,9 @@ export const ORDER_TRANSITIONS = {
   dispatch: { from: ["QUEUED"], to: "DISPATCHED" },
   jobReturnedToQueue: { from: ["DISPATCHED"], to: "QUEUED" },
   printerStarted: { from: ["DISPATCHED"], to: "PRINTING" },
-  /** From DISPATCHED only when a reconnect finds the printer already finished. */
+  /** Also from DISPATCHED: the printer's report of the end counts even if the panel never saw the start. */
   printerFinished: { from: ["PRINTING", "DISPATCHED"], to: "PRINTED" },
-  /** From DISPATCHED only when a reconnect finds the printer already failed, or staff judge a mismatch. */
+  /** Also from DISPATCHED, as above, or by a person's judgement. */
   printerFailed: { from: ["PRINTING", "DISPATCHED"], to: "FAILED" },
   staffJudgedFinished: { from: ["PRINTING", "DISPATCHED"], to: "PRINTED" },
   reprint: { from: ["FAILED"], to: "QUEUED" },
@@ -122,39 +129,22 @@ export const ORDER_TRANSITIONS = {
 export type OrderTrigger = keyof typeof ORDER_TRANSITIONS;
 
 /**
- * Printer transitions by trigger. Losing the connection while not idle is not
- * a transition: the printer keeps its last state and gets the "lost" flag.
+ * Printer transitions by trigger. Every way out of work or fault leads to
+ * CLEARING_REQUIRED; only a person makes a printer available. The one automatic
+ * way back from FAULT is the printer itself reporting that it is running.
  */
 export const PRINTER_TRANSITIONS = {
-  connectedIdle: { from: ["OFFLINE"], to: "IDLE" },
-  connectedRunningUnknownJob: { from: ["OFFLINE"], to: "EXTERNAL_JOB" },
-  connectedStoppedAtEnd: { from: ["OFFLINE"], to: "CLEARING_REQUIRED" },
-  disconnectedWhileIdle: { from: ["IDLE"], to: "OFFLINE" },
-  dispatch: { from: ["IDLE"], to: "PREPARING" },
-  printerStarted: { from: ["PREPARING"], to: "PRINTING" },
-  /**
-   * Job ended before printing started. A dispatched job never hands the printer straight back
-   * to idle, however it ends: someone confirms the plate first.
-   */
-  jobEndedBeforeStart: { from: ["PREPARING"], to: "CLEARING_REQUIRED" },
-  printerPaused: { from: ["PRINTING"], to: "PAUSED" },
-  printerResumed: { from: ["PAUSED"], to: "PRINTING" },
-  /** From PREPARING only when a reconnect finds the printer already at its end state. */
-  printerEnded: { from: ["PRINTING", "PAUSED", "PREPARING"], to: "CLEARING_REQUIRED" },
-  externalJobStarted: { from: ["IDLE", "CLEARING_REQUIRED"], to: "EXTERNAL_JOB" },
-  /** The only exception to `jobEndedBeforeStart`: the printer is running somebody else's job when ours ends. */
-  externalJobTookOverBeforeStart: { from: ["PREPARING"], to: "EXTERNAL_JOB" },
-  externalJobEnded: { from: ["EXTERNAL_JOB"], to: "CLEARING_REQUIRED" },
-  plateCleared: { from: ["CLEARING_REQUIRED"], to: "IDLE" },
-  startMaintenance: { from: ["IDLE", "OFFLINE"], to: "MAINTENANCE" },
-  endMaintenance: { from: ["MAINTENANCE"], to: "IDLE" },
-  /** Plate confirmed or maintenance ended while the printer can't be reached: it is not idle until it reconnects. */
-  releasedWhileUnreachable: { from: ["CLEARING_REQUIRED", "MAINTENANCE"], to: "OFFLINE" },
-  /**
-   * An administrator takes back a printer the normal rules can't free. Not allowed while the panel is
-   * connected to the printer and it reports a job running. A current job must be judged in the same step.
-   */
-  forceReclaimed: { from: ["PREPARING", "PRINTING", "PAUSED", "EXTERNAL_JOB"], to: "CLEARING_REQUIRED" },
+  dispatch: { from: ["AVAILABLE"], to: "WORKING" },
+  /** The printer reports running something the panel didn't expect there (an external job, or a job it had given up on). */
+  printerRunning: { from: ["AVAILABLE", "CLEARING_REQUIRED"], to: "WORKING" },
+  /** The job or external job ended, however it ended, or a reconnect can't tell what became of the job. */
+  workEnded: { from: ["WORKING"], to: "CLEARING_REQUIRED" },
+  faultRaised: { from: ["AVAILABLE", "WORKING", "CLEARING_REQUIRED"], to: "FAULT" },
+  /** Last fault reason gone while the printer reports something running. */
+  printerResumed: { from: ["FAULT"], to: "WORKING" },
+  /** Last fault reason gone and nothing is running. */
+  faultsCleared: { from: ["FAULT"], to: "CLEARING_REQUIRED" },
+  plateCleared: { from: ["CLEARING_REQUIRED"], to: "AVAILABLE" },
 } as const satisfies Record<string, TransitionRow<PrinterState>>;
 export type PrinterTrigger = keyof typeof PRINTER_TRANSITIONS;
 
@@ -173,37 +163,27 @@ export function isAllowed<S extends string>(row: TransitionRow<S>, from: S): boo
   return row.from.includes(from);
 }
 
-export interface JobEndInput {
-  outcome: JobOutcome;
-  /** What the printer is doing right now according to its latest report. */
-  printerLatest: "IDLE" | "RUNNING_OTHER_JOB";
-}
-
 export interface JobEndEffect {
   order: OrderTrigger;
-  printer: PrinterTrigger;
-  /** Raise "start failed" attention in the same transaction. */
-  raiseStartFailed: boolean;
+  /** The printer gets the "could not be sent" fault reason in the same transaction. */
+  raiseSendFailed: boolean;
 }
 
 /**
- * What a print job's end does to its order and printer. Order, printer and
- * job change in one transaction; nothing else may write these states.
+ * What a print job's end does to its order. Order, printer and job change in
+ * one transaction. The printer side needs no table: its work has ended, so it
+ * needs clearing, unless it reports another job running or still has a fault.
  */
-export function jobEndEffect(input: JobEndInput): JobEndEffect {
-  switch (input.outcome) {
+export function jobEndEffect(outcome: JobOutcome): JobEndEffect {
+  switch (outcome) {
     case "FINISHED":
-      return { order: "printerFinished", printer: "printerEnded", raiseStartFailed: false };
+      return { order: "printerFinished", raiseSendFailed: false };
     case "FAILED":
-      return { order: "printerFailed", printer: "printerEnded", raiseStartFailed: false };
+      return { order: "printerFailed", raiseSendFailed: false };
     case "SEND_FAILED":
+      return { order: "jobReturnedToQueue", raiseSendFailed: true };
     case "STOPPED_BEFORE_START":
-    case "START_FAILED": {
-      return {
-        order: "jobReturnedToQueue",
-        printer: input.printerLatest === "RUNNING_OTHER_JOB" ? "externalJobTookOverBeforeStart" : "jobEndedBeforeStart",
-        raiseStartFailed: input.outcome === "START_FAILED",
-      };
-    }
+    case "START_FAILED":
+      return { order: "jobReturnedToQueue", raiseSendFailed: false };
   }
 }

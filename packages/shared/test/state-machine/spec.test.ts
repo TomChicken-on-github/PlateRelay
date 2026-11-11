@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  FAULTS_REMOVED_BY_PEOPLE,
+  FAULT_REASONS,
   JOB_OUTCOMES,
   JUDGEMENTS,
   ORDER_STATES,
@@ -36,57 +38,43 @@ describe("transition tables", () => {
     expect(ORDER_TRANSITIONS.cancel.from).toEqual(["PENDING_REVIEW", "QUEUED"]);
   });
 
-  it("never take a printer from an external job straight back to idle", () => {
-    for (const row of Object.values(PRINTER_TRANSITIONS)) {
-      if ((row.from as readonly string[]).includes("EXTERNAL_JOB")) expect(row.to).toBe("CLEARING_REQUIRED");
+  it("make a printer available only when a person confirms a cleared plate", () => {
+    const toAvailable = Object.entries(PRINTER_TRANSITIONS).filter(([, row]) => row.to === "AVAILABLE");
+    expect(toAvailable.map(([name]) => name)).toEqual(["plateCleared"]);
+    expect(PRINTER_TRANSITIONS.plateCleared.from).toEqual(["CLEARING_REQUIRED"]);
+  });
+
+  it("lead every way out of work or fault to clearing, except the printer reporting it runs again", () => {
+    for (const [name, row] of Object.entries(PRINTER_TRANSITIONS)) {
+      const from = row.from as readonly string[];
+      if (from.includes("WORKING") && row.to !== "FAULT") expect(row.to).toBe("CLEARING_REQUIRED");
+      if (from.includes("FAULT") && name !== "printerResumed") expect(row.to).toBe("CLEARING_REQUIRED");
     }
+  });
+
+  it("let a person remove only the fault reasons that are theirs to remove", () => {
+    for (const reason of FAULTS_REMOVED_BY_PEOPLE) expect(FAULT_REASONS).toContain(reason);
+    expect(FAULTS_REMOVED_BY_PEOPLE).not.toContain("UNREACHABLE");
+    expect(FAULTS_REMOVED_BY_PEOPLE).not.toContain("PRINTER_ERROR");
   });
 });
 
-describe("what a job's end does to its order and printer", () => {
+describe("what a job's end does to its order", () => {
   it("is defined for every outcome", () => {
-    for (const outcome of JOB_OUTCOMES) {
-      for (const printerLatest of ["IDLE", "RUNNING_OTHER_JOB"] as const) {
-        const e = jobEndEffect({ outcome, printerLatest });
-        expect(ORDER_TRANSITIONS[e.order]).toBeDefined();
-        expect(PRINTER_TRANSITIONS[e.printer]).toBeDefined();
-      }
-    }
-  });
-
-  it("never hands the printer straight back to idle, however the job ends", () => {
-    for (const outcome of JOB_OUTCOMES) {
-      expect(PRINTER_TRANSITIONS[jobEndEffect({ outcome, printerLatest: "IDLE" }).printer].to).toBe("CLEARING_REQUIRED");
-      expect(PRINTER_TRANSITIONS[jobEndEffect({ outcome, printerLatest: "RUNNING_OTHER_JOB" }).printer].to).not.toBe("IDLE");
-    }
-  });
-
-  it("only reaches idle from a state a person confirmed or a clean connect", () => {
-    const toIdle = Object.entries(PRINTER_TRANSITIONS).filter(([, row]) => row.to === "IDLE").map(([name]) => name);
-    expect(toIdle.sort()).toEqual(["connectedIdle", "endMaintenance", "plateCleared"]);
-  });
-
-  it("lets a forced reclaim take back every occupied state and nothing else", () => {
-    expect([...PRINTER_TRANSITIONS.forceReclaimed.from].sort()).toEqual(["EXTERNAL_JOB", "PAUSED", "PREPARING", "PRINTING"]);
-    expect(PRINTER_TRANSITIONS.forceReclaimed.to).toBe("CLEARING_REQUIRED");
-  });
-
-  it("maps every judgement a person can make to an order transition that exists", () => {
-    for (const outcome of Object.values(JUDGEMENTS)) {
-      const e = jobEndEffect({ outcome, printerLatest: "IDLE" });
-      expect(ORDER_TRANSITIONS[e.order]).toBeDefined();
-    }
-    expect(jobEndEffect({ outcome: JUDGEMENTS.notStarted, printerLatest: "IDLE" }).order).toBe("jobReturnedToQueue");
+    for (const outcome of JOB_OUTCOMES) expect(ORDER_TRANSITIONS[jobEndEffect(outcome).order]).toBeDefined();
   });
 
   it("returns the order to the queue whenever printing never started", () => {
     for (const outcome of ["STOPPED_BEFORE_START", "SEND_FAILED", "START_FAILED"] as const) {
-      expect(jobEndEffect({ outcome, printerLatest: "IDLE" }).order).toBe("jobReturnedToQueue");
+      expect(jobEndEffect(outcome).order).toBe("jobReturnedToQueue");
     }
   });
 
-  it("flags a start failure for staff", () => {
-    expect(jobEndEffect({ outcome: "START_FAILED", printerLatest: "IDLE" }).raiseStartFailed).toBe(true);
-    expect(jobEndEffect({ outcome: "SEND_FAILED", printerLatest: "IDLE" }).raiseStartFailed).toBe(false);
+  it("flags a failed send for staff and nothing else", () => {
+    for (const outcome of JOB_OUTCOMES) expect(jobEndEffect(outcome).raiseSendFailed).toBe(outcome === "SEND_FAILED");
+  });
+
+  it("maps every judgement a person can make to an outcome", () => {
+    expect(Object.values(JUDGEMENTS).sort()).toEqual(["FAILED", "FINISHED", "STOPPED_BEFORE_START"]);
   });
 });
