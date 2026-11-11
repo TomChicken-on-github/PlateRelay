@@ -255,7 +255,7 @@ daemon                                  面板
 
 ### MSG-CFG `config.update`
 
-面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, downloadConcurrency, discoveryEnabled }`。对应 CFG-CAM-02、07 和 CFG-CMD-02（CFG-CAM-03 删除，Q416）。`staggerSeconds`（1 秒）、`uploadKbps`（1000）、`downloadConcurrency`（2）是固定值，照样在消息里下发，方便以后改成参数；`fileCacheBytes` 删除（Q388、Q391）。
+面板设置变了且和 daemon 有关时下发：`{ snapshot: { watchedSeconds, unwatchedSeconds, staggerSeconds, uploadKbps }, transferTimeoutSeconds, downloadConcurrency, discoveryEnabled }`。对应 CFG-CAM-02、07、09 和 CFG-CMD-02（CFG-CAM-03 删除，Q416）。`staggerSeconds`（1 秒）、`downloadConcurrency`（2）是固定值，照样在消息里下发，方便以后改成参数；`fileCacheBytes` 删除（Q388、Q391）。
 
 ### 其他
 
