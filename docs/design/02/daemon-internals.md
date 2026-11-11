@@ -1,6 +1,6 @@
 # 2.5 · daemon 内部结构
 
-> 属于 [文档 2](README.md)。编号 `DAE-`。来自追问 Q250–Q260（2026-11-07）。对外的消息看 [daemon-protocol.md](daemon-protocol.md)（MSG-），适配器接口看 [interfaces.md](interfaces.md)（IF-ADP）；本文只写 daemon 进程里面怎么分块、状态放哪、怎么打包和测试，不新增业务规则。
+> 属于 [文档 2](README.md)。编号 `DAE-`。来自追问 Q250–Q260（2026-11-07），2026-11-11 按第二稿补齐（runSeq、`pendingStarts`、自动续料、发起打印，Q422）。对外的消息看 [daemon-protocol.md](daemon-protocol.md)（MSG-），适配器接口看 [interfaces.md](interfaces.md)（IF-ADP）；本文只写 daemon 进程里面怎么分块、状态放哪、怎么打包和测试，不新增业务规则。
 
 ## 1. 进程模型（DAE-PROC）
 
@@ -35,8 +35,8 @@ platerelay_daemon/
 | --- | --- | --- | --- |
 | DAE-MOD-01 | `link` | wss 连接、挑战认证、心跳、重连退避、和面板的时钟差、消息信封、发件箱收发、按 `id` 去重、按 Schema 校验；MSG-HTTP 的下载和上传客户端 | MSG-AUTH、MSG-ENV、MSG-HB、MSG-HTTP、MSG-SCH-03 |
 | DAE-MOD-02 | `store` | DAE-STO 的全部内容；所有写入走一个写线程 | MSG-ENV-03、MSG-ENV-04、MSG-JOBREF-02、R-CMD-08 |
-| DAE-MOD-03 | `printers` | 拿适配器会话；合并后的快照按 1 次/秒限流发出；编 `bootId` / `seq`；判断系统任务还是外部任务；比较前后两份快照合成 `job.*` 事件并判 `beforeStart`；写结束记录；命令按白名单、过期时间、命令台账执行；对账时提供痕迹 | MSG-SNAPSHOT、MSG-EVT、MSG-CMD-WL、MSG-CMD-TTL、MSG-JOBREF、MSG-RECON |
-| DAE-MOD-04 | `jobs` | 下载排队 → 下载 → 核对 → FTPS 上传 → 开打前检查 → 开打；传文件期间的停止；任务结束后删 3mf、收延时摄影、拍结束照片 | MSG-CMD-START、F-PRT-10、F-PRT-11、R-CAM-11 |
+| DAE-MOD-03 | `printers` | 拿适配器会话；合并后的快照按 1 次/秒限流发出；编 `bootId` / `seq`；判断系统任务还是外部任务；比较前后两份快照合成 `job.*` 事件并判 `beforeStart`；写结束记录；命令按白名单、过期时间、命令台账执行；维护每台打印机的 `runSeq` 和"看不到打印机"的时段；快照带上 `pendingStarts` 和托盘 `rfidUid`；比较快照合成 `filament.refilled`（R-PRT-28）；对账时提供痕迹 | MSG-SNAPSHOT、MSG-EVT、MSG-CMD-WL、MSG-CMD-TTL、MSG-JOBREF、MSG-RECON、R-PRT-28 |
+| DAE-MOD-04 | `jobs` | 按 DAE-JOB 跑 `job.start`：下载排队 → 下载 → 核对 → FTPS 上传 → 开打前检查（含 `expectedRunSeq`）→ 发起打印 → 开打；开打指令发出后的停止；重启后收尾；传文件期间的停止；任务结束后删 3mf、收延时摄影、拍结束照片 | MSG-CMD-START、F-PRT-10、F-PRT-11、R-CAM-11 |
 | DAE-MOD-05 | `media` | 按需拉流转推、JPEG 帧转发、抓拍频率、错峰、单一上传队列 | MSG-MEDIA、MSG-SNAP |
 | DAE-MOD-06 | `discovery` | 被动监听，只听不发，汇总后发 `discovery.report` | F-PRT-12、MSG-DISC |
 | DAE-MOD-07 | `adapter_api` / `adapters` | 见 DAE-ADP | IF-ADP |
@@ -48,16 +48,16 @@ platerelay_daemon/
 | 编号 | 约定 |
 | --- | --- |
 | DAE-ADP-01 | 适配器放在 daemon 包里，跟 daemon 一起安装、一起定版本；v1 不用 entry point，"daemon 版本"就是"驱动版本"（Q251）。有了第二个品牌或社区驱动，再把 `adapter_api` 拆成独立的包。 |
-| DAE-ADP-02 | **适配器只说"这台打印机现在是什么样"**（Q258）：协议收发、增量合并成完整状态、原始状态换算成标准状态（IF-ADP-04 的左列）、HMS 等换算成 `ActiveError`、`deviceBoot`、当前任务名、存储里的文件列表，以及执行 start / stop / 控制这些动作。它不认识 `jobRef`，只认识文件名和任务名。 |
-| DAE-ADP-03 | **业务判断都在核心的 printer worker**：任务名和文件名对文件清单和 MSG-ASSIGN（MSG-JOBREF-02）；合成 `job.started`、`job.finished`、`job.failed`、`job.cancelled`，判 `beforeStart`；结束记录；`bootId` / `seq`；限流；命令台账和"不再开打"标记。这些规则只写一次，所有品牌共用，一致性测试只测适配器报的状态准不准。 |
+| DAE-ADP-02 | **适配器只说"这台打印机现在是什么样"**（Q258）：协议收发、增量合并成完整状态、原始状态换算成标准状态（IF-ADP-04 的左列）、HMS 等换算成 `ActiveError`、`deviceBoot`、当前任务名、存储里的文件列表，以及执行 start / stop / 控制这些动作。它不认识 `jobRef`，只认识文件名和任务名。另外回答一个问题：给它一段看不到打印机的时段，它能不能证明这段时间打印机没跑过东西（能证明 / 不能证明）；答不上就按跑过算，`runSeq` 加一（MSG-SNAPSHOT `runSeq`）。拓竹能不能证明等驱动实测。 |
+| DAE-ADP-03 | **业务判断都在核心的 printer worker**：任务名和文件名对文件清单和 MSG-ASSIGN（MSG-JOBREF-02）；合成 `job.started`、`job.finished`、`job.failed`、`job.cancelled`，判 `beforeStart`；`runSeq`；`pendingStarts`；结束记录；`bootId` / `seq`；限流；命令台账和"不再开打"标记。这些规则只写一次，所有品牌共用，一致性测试只测适配器报的状态准不准。 |
 
 ## 4. 本机持久化（DAE-STO）
 
 | 编号 | 约定 |
 | --- | --- |
 | DAE-STO-01 | 一个 SQLite 文件，Python 自带的 sqlite3，WAL，`synchronous=FULL`（Q252）。 |
-| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、结束照片待上传记录到面板回 `201`（MSG-HTTP-05，Q319）、面板地址和 `daemonId`。 |
-| DAE-STO-03 | 要么都写、要么都不写的放进一个事务：任务结束时的结束记录 + 发件箱里的结束事件 + 清单里"这个 3mf 待删" + 结束照片待上传记录（`jobRef`、拍摄时间、文件路径、sha256；拍照失败也记一条，标明没拍到）。照片 JPEG 在提交事务之前先写到本机目录（写临时文件、fsync、改名），所以重启后要么两样都在、要么都不在。收到 MSG-HTTP-05 的 `201` 才删照片和记录，结束事件被 `ack` 不算（Q319）；收到命令时的命令 ID + 必要的"不再开打"标记，**在执行之前提交**。 |
+| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、结束照片待上传记录到面板回 `201`（MSG-HTTP-05，Q319）、每台打印机的 `runSeq`、每条还没结束的 `job.start` 的参数和"发起打印"时间（DAE-JOB）、面板地址和 `daemonId`。 |
+| DAE-STO-03 | 要么都写、要么都不写的放进一个事务：任务结束时的结束记录 + 发件箱里的结束事件 + 清单里"这个 3mf 待删" + 结束照片待上传记录（`jobRef`、拍摄时间、文件路径、sha256；拍照失败也记一条，标明没拍到）。照片 JPEG 在提交事务之前先写到本机目录（写临时文件、fsync、改名），所以重启后要么两样都在、要么都不在。收到 MSG-HTTP-05 的 `201` 才删照片和记录，结束事件被 `ack` 不算（Q319）；收到命令时的命令 ID + 必要的"不再开打"标记，**在执行之前提交**；"发起打印"（`startIssuedAt`）**在发开打指令之前提交**（DAE-JOB-02）。`runSeq` 先写盘再上报。 |
 | DAE-STO-04 | 不进 SQLite：私钥照 MSG-ENR 步骤 3 单独存（Linux / Docker 0600 文件，Windows DPAPI）；访问码只在内存（INV-07）；快照只在内存留最新一份；抓拍不落盘（结束照片除外，见 DAE-STO-03）。 |
 | DAE-STO-05 | 不做打印文件缓存：每次派单都重新下载，用完删掉本机的临时文件（Q388，取代 Q255 的按 sha256 缓存）。 |
 
@@ -69,6 +69,25 @@ platerelay_daemon/
 | DAE-XFER-02 | 进了下载队列就算开始执行：已回 `accepted`、命令 ID 已落盘，不会因排队过期（MSG-CMD-TTL）。CFG-CMD-02 的单次超时从真正开始传起算。 |
 | DAE-XFER-03 | 已删除（Q388：没有缓存，不跳过下载）。 |
 | DAE-XFER-04 | 进度步骤是 `queued` → `download` → `upload`，通过 `command.result.data` 报给面板，前端能显示"排队中"。 |
+
+## 5A. 开打流程（DAE-JOB）
+
+daemon 里一条 `job.start` 的流程（Q422）。面板那边的订单、打印机、任务三个状态机不因此改变。
+
+```
+收到（命令 ID 落盘）
+ → 排队 → 下载 → 上传 → 开打前检查（没在跑任务、runSeq 等于 expectedRunSeq、传文件期间一直看得到打印机）
+ → 发起打印（落盘 startIssuedAt）
+ → 发开打指令 → job.staged → 之后全看打印机上报
+```
+
+| 编号 | 约定 |
+| --- | --- |
+| DAE-JOB-01 | 各个出口：发起打印之前被停止 → `job.cancelled { beforeStart: true }`（`STOPPED_BEFORE_START`）；传输重试用完 → `failed`（`SEND_FAILED`）；开打前检查没过 → `rejected`（`printer_busy` / `printer_used`，MSG-CMD-START）。 |
+| DAE-JOB-02 | **发起打印**：开打前检查通过后，先把这条任务的 `startIssuedAt` 写进 SQLite 并提交，然后才发开打指令。它是"开打指令可能已经发出"的分界线。 |
+| DAE-JOB-03 | **重启后收尾**：daemon 启动时逐条检查没结束的 `job.start`。没有 `startIssuedAt` 的，开打指令一定没发过：删掉传了一半的文件（INV-15），写下"不再开打"，回 `command.result { status: "failed", code: "daemon_restarted" }`，任务以 `SEND_FAILED` 结束，订单回原位（R-DSP-08），不用人判。有 `startIssuedAt` 的，说不清发没发出去，不重发、不下结论，照常等打印机上报，对账按 MSG-RECON-02（打印机在跑它 → ①，有结局 → ②，其他 → ③ 人判）。 |
+| DAE-JOB-04 | 重启后不自动接着传、接着打。只有适配器能证明重启期间打印机没跑过东西时，接着打才可能通过 `runSeq` 检查；等驱动实测证明拓竹做得到，再考虑加（Q422）。 |
+| DAE-JOB-05 | 开打指令发出后收到停止、打印机又没在跑它：按 MSG-CMD-START（一直看得到且 `runSeq` 没变 → 删文件、回 `beforeStart`；否则照常发停止）。 |
 
 ## 6. 媒体（DAE-MED）
 
@@ -103,9 +122,9 @@ platerelay_daemon/
 
 | 编号 | 约定 |
 | --- | --- |
-| DAE-TST-01 | `adapters/fake` 是一台**模拟打印机**，有完整状态机：收下 start 后走准备、打印、完成，时间可加速；暂停、继续、停止、跳过零件都有反应。脚本可注入：报错、断料、断线、断电重启（`deviceBoot` 变）、开打前失败、固件拒绝、FTPS 传到一半断开（Q260）。 |
+| DAE-TST-01 | `adapters/fake` 是一台**模拟打印机**，有完整状态机：收下 start 后走准备、打印、完成，时间可加速；暂停、继续、停止、跳过零件都有反应。脚本可注入：报错、断料、断线、断电重启（`deviceBoot` 变）、开打前失败、固件拒绝、FTPS 传到一半断开（Q260）；第二稿起还要能模拟：断线期间跑了别的任务（测 `runSeq`）、固件自动续料（`filament.refilled`）、RFID 卷和换卷（`rfidUid`）。 |
 | DAE-TST-02 | 回放模式：用录下来的真机报文（X2D 等）测拓竹适配器的状态换算（IF-ADP-08、MSG-SCH-04）。 |
 | DAE-TST-03 | 假面板：按 JSON Schema 收发消息，daemon 的单元和集成测试对着它跑。 |
-| DAE-TST-04 | 崩溃注入：在"命令 ID 写盘"和"真正执行"之间杀进程，重启后断言没执行两次；在"结束记录写盘"之后杀进程，断言重连后补上了事件（DAE-STO-03、R-CMD-08）。 |
+| DAE-TST-04 | 崩溃注入：在"命令 ID 写盘"和"真正执行"之间杀进程，重启后断言没执行两次；在"结束记录写盘"之后杀进程，断言重连后补上了事件（DAE-STO-03、R-CMD-08）；在"发起打印"前后各杀一次进程，断言前者以 `SEND_FAILED` 回原位、后者不重发开打（DAE-JOB-03）。 |
 | DAE-TST-05 | 面板联调用真 daemon + fake 适配器，可以起多台模拟打印机；面板那边不另写假 daemon，只有一条代码路径。 |
 | DAE-TST-06 | 真机上的控制命令只在用户开发驱动、当时明确同意时才验证（项目开发规则）。 |
