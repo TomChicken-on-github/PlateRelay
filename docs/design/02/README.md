@@ -12,7 +12,8 @@
 | --- | --- | --- |
 | [entities.md](entities.md) | 实体、字段、约束、索引、数据库迁移 | `E-` |
 | [http-api.md](http-api.md) | HTTP 接口的通用约定：认证、错误、分页、幂等、并发、实时推送、权限声明 | `API-` |
-| [openapi.yaml](openapi.yaml) | 每个接口的路径、参数、请求体、响应（OpenAPI 3.1）。**接口的唯一来源**（Q150） | 操作 ID |
+| [openapi.yaml](../../../packages/shared/schema/openapi.yaml) | 每个接口的路径、参数、请求体、响应（OpenAPI 3.1）。**接口的唯一来源**（Q150）。放在 `packages/shared/schema/`，里面不写文档编号 | 操作 ID |
+| [api-rules.md](api-rules.md) | 每个接口对应的规则编号和状态转换（原来写在 openapi.yaml 的 `x-rules`、`x-transitions` 里） | — |
 | [daemon-protocol.md](daemon-protocol.md) | daemon 和面板之间的协议：注册、认证、消息信封、消息清单、命令、媒体通道 | `MSG-` |
 | [interfaces.md](interfaces.md) | 可插拔接口：打印机适配器、对象存储、文件解析、人机验证、通知渠道、外部登录、排队策略 | `IF-` |
 | [daemon-internals.md](daemon-internals.md) | daemon 内部结构：进程模型、模块、适配器和核心的分工、本机持久化、传文件排队、媒体、打包、排查、测试（Q250–Q260） | `DAE-` |
@@ -25,8 +26,8 @@
 - **唯一来源**：
   - 实体字段：本文 entities.md。
   - 接口：openapi.yaml。
-  - daemon 消息：重写时放进 `packages/shared/schema/` 的 JSON Schema（Q141），本文 daemon-protocol.md 是它的设计稿。
-  - openapi.yaml 里的实体结构，重写时也挪进 `packages/shared/schema/`，改成 `$ref` 引用，和 daemon 消息共用一套（Q150）。
+  - daemon 消息：`packages/shared/schema/daemon/v1/` 的 JSON Schema（Q141），本文 daemon-protocol.md 是它的设计稿。
+  - 接口和 daemon 消息的契约都在 `packages/shared/schema/`（Q150），说明见那里的 README。契约是代码的一部分，不写文档编号；编号和接口的对照见 api-rules.md。
 - **生成与检查**：服务端请求校验、前端客户端、Python 的 daemon 消息类型都从 Schema 生成，不手写第二份。CI 检查代码里的路由和 openapi.yaml 一一对应，每个接口都声明了权限节点（F-API-02）。
 
 ## 和现有代码的差异

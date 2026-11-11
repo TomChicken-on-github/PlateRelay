@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/hello.schema.json",
+  "title": "Hello",
+  "description": "daemon 连上后发的第一条消息。",
+  "type": "object",
+  "properties": {
+    "daemonId": {
+      "$ref": "common.schema.json#/$defs/Uuid"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "description": "主.次，如 1.0"
+    },
+    "daemonVersion": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string",
+      "description": "linux / windows / docker 等"
+    },
+    "bootId": {
+      "$ref": "common.schema.json#/$defs/Uuid",
+      "description": "daemon 进程每次启动生成"
+    },
+    "adapters": {
+      "type": "array",
+      "items": {
+        "title": "AdapterInfo",
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "version"
+        ]
+      }
+    }
+  },
+  "required": [
+    "daemonId",
+    "protocolVersion",
+    "daemonVersion",
+    "platform",
+    "bootId",
+    "adapters"
+  ]
+}

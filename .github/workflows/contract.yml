@@ -1,0 +1,35 @@
+name: contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v5
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --project daemon --locked
+
+      - name: 契约本身的检查（操作 ID、权限声明、不带设计文档编号）
+        run: pnpm --filter @platerelay/shared check:contract
+
+      - name: 生成的代码和契约一致
+        run: |
+          pnpm --filter @platerelay/shared generate
+          daemon/scripts/generate_protocol.sh
+          git diff --exit-code -- packages/shared/src/generated daemon/src/platerelay_daemon/protocol
+
+      - run: pnpm --filter @platerelay/shared typecheck
+      - name: 面板这边的契约测试
+        run: pnpm --filter @platerelay/shared exec vitest run test/contract
+      - name: daemon 测试（含协议样例）
+        run: uv run --project daemon pytest daemon/tests -q

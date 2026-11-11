@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/ping.schema.json",
+  "title": "Ping",
+  "description": "心跳。",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

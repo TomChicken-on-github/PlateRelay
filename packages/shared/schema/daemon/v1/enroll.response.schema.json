@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/enroll.response.schema.json",
+  "title": "EnrollResponse",
+  "description": "POST /daemon/v1/enroll 的响应体。",
+  "type": "object",
+  "properties": {
+    "daemonId": {
+      "$ref": "common.schema.json#/$defs/Uuid"
+    }
+  },
+  "required": [
+    "daemonId"
+  ]
+}

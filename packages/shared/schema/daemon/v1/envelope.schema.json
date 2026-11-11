@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/envelope.schema.json",
+  "title": "Envelope",
+  "description": "控制通道上每个 JSON 文本帧的信封。",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "common.schema.json#/$defs/Uuid",
+      "description": "每条消息唯一，接收方按它去重"
+    },
+    "type": {
+      "type": "string",
+      "description": "消息类型，如 printer.event；不认识的类型回 ack 后忽略"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "body": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "ts",
+    "body"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/upgrade_required.schema.json",
+  "title": "UpgradeRequired",
+  "description": "daemon 的协议版本太老，面板发完这条就断开。",
+  "type": "object",
+  "properties": {
+    "minProtocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "upgradeCommand": {
+      "type": "string",
+      "description": "给人执行的升级命令；daemon 只记进日志，不自动升级"
+    }
+  },
+  "required": [
+    "minProtocolVersion",
+    "upgradeCommand"
+  ]
+}

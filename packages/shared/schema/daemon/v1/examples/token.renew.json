@@ -1,0 +1,9 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d9b",
+  "type": "token.renew",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "httpToken": "token2",
+    "httpTokenExpiresAt": "2026-11-04T14:00:00Z"
+  }
+}

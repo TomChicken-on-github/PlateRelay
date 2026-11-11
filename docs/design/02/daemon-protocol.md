@@ -1,6 +1,6 @@
 # 2.3 · daemon 协议
 
-> 属于 [文档 2](README.md)。编号 `MSG-`。重写时，本文的消息定义会落成 `packages/shared/schema/daemon/v1/` 下的 JSON Schema（Q141），TypeScript 和 Python 两边都从 Schema 生成类型；Schema 和本文不一致时，先改本文再改 Schema。
+> 属于 [文档 2](README.md)。编号 `MSG-`。本文的消息定义落成 `packages/shared/schema/daemon/v1/` 下的 JSON Schema（Q141），TypeScript 和 Python 两边都从 Schema 生成类型；Schema 和本文不一致时，先改本文再改 Schema。
 
 ## 1. 总体
 
@@ -47,7 +47,7 @@ daemon                                  面板
 | MSG-AUTH-01 | `hello`：`{ daemonId, protocolVersion, daemonVersion, platform, bootId, adapters: [{ brand, version }] }`。`bootId` 是 daemon 进程每次启动生成的 UUID。 |
 | MSG-AUTH-02 | `challenge`：`{ nonce, serverTime }`，`nonce` 是 32 字节随机数的 base64，只能用一次，30 秒内有效。 |
 | MSG-AUTH-03 | `auth`：`{ signature }`。签名算法 RSA-PSS（SHA-256，盐长 32），签的内容是 UTF-8 字符串 `"platerelay-daemon-auth/v1\n" + daemonId + "\n" + nonce + "\n" + 面板的 origin`。带上 origin，签名就不能拿到别的面板去用。 |
-| MSG-AUTH-04 | `welcome`：`{ sessionId, protocolVersion, heartbeatSeconds, httpToken, httpTokenExpiresAt, printers: [MSG-ASSIGN 的条目], config: MSG-CFG }`。`httpToken` 用来调 MSG-HTTP 的接口，和这条连接同生共死，到期前面板在控制通道上发 `token.renew` 换新的。 |
+| MSG-AUTH-04 | `welcome`：`{ sessionId, protocolVersion, serverTime, heartbeatSeconds, httpToken, httpTokenExpiresAt, printers: [MSG-ASSIGN 的条目], config: MSG-CFG }`。`httpToken` 用来调 MSG-HTTP 的接口，和这条连接同生共死，到期前面板在控制通道上发 `token.renew` 换新的。 |
 | MSG-AUTH-05 | 失败时面板用关闭码断开：`4401` 签名不对、`4403` daemon 已吊销、`4409` 同一个 daemon 有了更新的连接（新的顶掉旧的；10 分钟内被不同 IP 顶掉 3 次及以上就告警管理员"疑似私钥泄露"，不自动吊销，R-OPS-02、Q238）、`4426` 协议版本不兼容。 |
 | MSG-AUTH-06 | daemon 断线后按指数退避重连：1 秒起，翻倍，最长 60 秒，加 ±20% 随机抖动（Q175）。收到 `4403` 不再重连。 |
 
@@ -194,10 +194,11 @@ daemon                                  面板
 ```json
 { "printers": [{ "printerId": "…", "brand": "bambu", "serial": "…", "host": "192.168.0.106",
                  "accessCodeCipher": "base64…", "keyFingerprint": "…",
-                 "currentJobRef": "…", "cleanupJobRefs": ["…"] }] }
+                 "currentJobRef": "…", "cleanupJobRefs": ["…"], "knownRunSeq": 17 }] }
 ```
 
 - `currentJobRef` 是面板记的这台打印机的当前任务（没有为 null）；`cleanupJobRefs` 是已结束、但打印机上可能还留着文件（3mf、延时摄影）要收尾的任务。**是不是系统任务以面板为准**（Q228）。
+- `knownRunSeq` 是面板见过的这台打印机最大的 `runSeq`；daemon 丢了本地状态时从比它大的数重新开始（见 MSG-SNAPSHOT 的 `runSeq`）。面板还没见过时省略。
 - 停用的打印机（E-PRN `disabled_at`）不在列表里（R-PRT-20）。
 
 - 访问码是浏览器用 daemon 公钥加密的密文，面板解不开，只是转交（INV-07）。daemon 在内存里解密，不落盘、不进日志。

@@ -1,0 +1,18 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d80",
+  "type": "hello",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "daemonId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d05",
+    "protocolVersion": "1.0",
+    "daemonVersion": "0.1.0",
+    "platform": "linux",
+    "bootId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d02",
+    "adapters": [
+      {
+        "brand": "bambu",
+        "version": "0.1.0"
+      }
+    ]
+  }
+}

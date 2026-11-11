@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/token.renew.schema.json",
+  "title": "TokenRenew",
+  "description": "HTTP 令牌到期前面板换新的。",
+  "type": "object",
+  "properties": {
+    "httpToken": {
+      "type": "string"
+    },
+    "httpTokenExpiresAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    }
+  },
+  "required": [
+    "httpToken",
+    "httpTokenExpiresAt"
+  ]
+}

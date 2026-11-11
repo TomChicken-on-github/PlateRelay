@@ -1,0 +1,14 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d99",
+  "type": "command",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "commandId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d04",
+    "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+    "kind": "camera.open",
+    "expiresAt": "2026-11-04T12:01:00Z",
+    "params": {
+      "framesUrl": "wss://panel.example/media/frames/abc"
+    }
+  }
+}

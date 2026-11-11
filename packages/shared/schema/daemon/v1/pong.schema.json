@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/pong.schema.json",
+  "title": "Pong",
+  "description": "心跳回应。",
+  "type": "object",
+  "properties": {},
+  "required": []
+}

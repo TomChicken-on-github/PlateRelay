@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/printer.snapshot.schema.json",
+  "title": "PrinterSnapshot",
+  "description": "整台打印机的完整状态（不是增量），变化时发，同一台最多每秒一次。不确认、不重发，下一份会覆盖它。拿不到的字段省略，不填假值。",
+  "type": "object",
+  "properties": {
+    "printerId": {
+      "$ref": "common.schema.json#/$defs/Uuid"
+    },
+    "bootId": {
+      "$ref": "common.schema.json#/$defs/Uuid",
+      "description": "daemon 这次启动的标识"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "这台打印机在这次启动里单调递增；面板丢掉比已处理的更旧的快照"
+    },
+    "connected": {
+      "type": "boolean",
+      "description": "daemon 现在连不连得上这台打印机"
+    },
+    "state": {
+      "$ref": "common.schema.json#/$defs/NormalizedState"
+    },
+    "substage": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Substage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "job": {
+      "title": "SnapshotJob",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid",
+          "description": "系统任务的打印任务 ID；外部任务没有"
+        },
+        "external": {
+          "type": "boolean",
+          "description": "true = 不是系统下发的任务"
+        },
+        "name": {
+          "type": "string",
+          "description": "打印机上的任务名或文件名"
+        },
+        "percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "remainingSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "layer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalLayers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skippedParts": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "打印机上报的已跳过零件"
+        }
+      },
+      "description": "打印机正在跑或刚结束的任务，没有为 null。",
+      "required": [
+        "external"
+      ]
+    },
+    "pendingStarts": {
+      "type": "array",
+      "items": {
+        "title": "PendingStart",
+        "type": "object",
+        "properties": {
+          "jobRef": {
+            "$ref": "common.schema.json#/$defs/Uuid"
+          },
+          "stage": {
+            "title": "PendingStartStage",
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "DOWNLOADING",
+              "UPLOADING"
+            ]
+          }
+        },
+        "required": [
+          "jobRef",
+          "stage"
+        ]
+      },
+      "description": "daemon 手里还没发出开打指令的任务；已经停下、不会再开打的不列。对账靠它认出任务还在进行。"
+    },
+    "temps": {
+      "type": "object",
+      "description": "键如 nozzle1、bed、chamber",
+      "additionalProperties": {
+        "title": "Temperature",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "number"
+          },
+          "target": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "current"
+        ]
+      }
+    },
+    "nozzles": {
+      "type": "array",
+      "items": {
+        "title": "SnapshotNozzle",
+        "type": "object",
+        "properties": {
+          "extruder": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "diameterMm": {
+            "type": "number"
+          },
+          "flow": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "extruder",
+          "diameterMm"
+        ]
+      }
+    },
+    "trays": {
+      "type": "array",
+      "items": {
+        "title": "SnapshotTray",
+        "type": "object",
+        "properties": {
+          "unit": {
+            "type": "integer",
+            "description": "AMS 编号；外挂料 = -1"
+          },
+          "slot": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "material": {
+            "type": "string"
+          },
+          "subType": {
+            "type": "string"
+          },
+          "colour": {
+            "type": "string",
+            "description": "#RRGGBB"
+          },
+          "rfidUid": {
+            "type": "string",
+            "description": "RFID 卷的唯一号，非 RFID 卷省略；面板拿它判断是否换过料"
+          },
+          "remainingPercent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "打印机自己估的余量，照传但面板不用来算"
+          },
+          "extruders": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "这个料位能供给的挤出机"
+          }
+        },
+        "required": [
+          "unit",
+          "slot"
+        ]
+      }
+    },
+    "bedType": {
+      "type": "string"
+    },
+    "storage": {
+      "type": "array",
+      "items": {
+        "title": "StorageMedium",
+        "type": "object",
+        "properties": {
+          "medium": {
+            "type": "string",
+            "description": "internal / usb / sdcard 等"
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "freeBytes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "medium",
+          "present"
+        ]
+      }
+    },
+    "activeErrors": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/ActiveError"
+      }
+    },
+    "controls": {
+      "type": "object",
+      "description": "设定值类控制的当前值，如灯、速度档"
+    },
+    "camera": {
+      "title": "CameraCapabilities",
+      "type": "object",
+      "properties": {
+        "stream": {
+          "type": "boolean"
+        },
+        "snapshot": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "stream",
+        "snapshot"
+      ]
+    },
+    "deviceBoot": {
+      "type": "string",
+      "description": "适配器给的打印机这次开机的标识，拿不到就省略；只用于显示"
+    },
+    "runSeq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "daemon 给这台打印机记的运行序号，落盘、只增不减：每看到打印机开始一次运行加一；有一段时间看不到打印机、证明不了它没跑过东西的也加一。只用于开打前检查和确认任务没开打。"
+    }
+  },
+  "required": [
+    "printerId",
+    "bootId",
+    "seq",
+    "connected",
+    "state",
+    "runSeq"
+  ]
+}

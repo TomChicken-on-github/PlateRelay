@@ -1,0 +1,593 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/command.schema.json",
+  "title": "Command",
+  "description": "面板发给 daemon 的命令。daemon 只执行这里列出的类型，别的一律 rejected。同一个 commandId 最多执行一次：执行前先把它写进硬盘，daemon 重启也一样。",
+  "oneOf": [
+    {
+      "title": "JobStartCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "job.start"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "JobStartParams",
+          "type": "object",
+          "properties": {
+            "jobRef": {
+              "$ref": "common.schema.json#/$defs/Uuid"
+            },
+            "expectedRunSeq": {
+              "type": "integer",
+              "description": "面板派单时见到的运行序号；发开打指令前对不上就拒绝，什么都不发"
+            },
+            "file": {
+              "title": "JobFile",
+              "type": "object",
+              "properties": {
+                "fileId": {
+                  "$ref": "common.schema.json#/$defs/Uuid"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "fileId",
+                "sha256",
+                "sizeBytes"
+              ]
+            },
+            "plateIndex": {
+              "type": "integer"
+            },
+            "bedType": {
+              "type": "string"
+            },
+            "mapping": {
+              "type": "array",
+              "items": {
+                "title": "FilamentMapping",
+                "type": "object",
+                "properties": {
+                  "sliceSlot": {
+                    "type": "integer",
+                    "description": "切片文件里的耗材槽"
+                  },
+                  "extruder": {
+                    "type": "integer"
+                  },
+                  "unit": {
+                    "type": "integer"
+                  },
+                  "slot": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "sliceSlot",
+                  "extruder",
+                  "unit",
+                  "slot"
+                ]
+              }
+            },
+            "timelapse": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "jobRef",
+            "expectedRunSeq",
+            "file",
+            "plateIndex",
+            "bedType",
+            "mapping",
+            "timelapse"
+          ]
+        }
+      },
+      "description": "下载文件、放到打印机上并开打。进了下载队列就算开始执行。下载和上传各自最多试 3 次；开打指令发出之后不再重试任何一步。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "JobStopCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "job.stop"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "title": "StopJobParams",
+              "type": "object",
+              "properties": {
+                "jobRef": {
+                  "$ref": "common.schema.json#/$defs/Uuid"
+                }
+              },
+              "required": [
+                "jobRef"
+              ]
+            },
+            {
+              "title": "StopExternalParams",
+              "type": "object",
+              "properties": {
+                "external": {
+                  "const": true
+                }
+              },
+              "required": [
+                "external"
+              ]
+            }
+          ]
+        }
+      },
+      "description": "停止任务。传文件、准备中、打印中都用它；只在打印机正在跑这个任务时才发给打印机。external = 停掉打印机上正在跑的外部任务。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "JobSkipPartsCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "job.skip_parts"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "JobSkipPartsParams",
+          "type": "object",
+          "properties": {
+            "jobRef": {
+              "$ref": "common.schema.json#/$defs/Uuid"
+            },
+            "partIds": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          },
+          "required": [
+            "jobRef",
+            "partIds"
+          ]
+        }
+      },
+      "description": "打印中跳过零件。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "ErrorResolveCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "error.resolve"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "ErrorResolveParams",
+          "type": "object",
+          "properties": {
+            "errorId": {
+              "type": "string"
+            },
+            "action": {
+              "$ref": "common.schema.json#/$defs/StandardErrorAction"
+            }
+          },
+          "required": [
+            "errorId",
+            "action"
+          ]
+        }
+      },
+      "description": "对一条报错选一个动作。动作是停止时按 job.stop 处理。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "ControlCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "control"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "ControlParams",
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "description": "必须在这台打印机机型的静态命令清单里"
+            },
+            "args": {
+              "type": "object",
+              "description": "设定值一律是目标值，不用切换或加减"
+            }
+          },
+          "required": [
+            "action",
+            "args"
+          ]
+        }
+      },
+      "description": "设备控制：灯、温度、风扇、速度、暂停、继续、进退料等。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "RefreshCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "refresh"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      "description": "让打印机重新上报一次完整状态（只读）。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "StorageListCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "storage.list"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      "description": "列出打印机存储里的文件（只读，不删不下载）。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "CameraOpenCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "camera.open"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "title": "VideoStreamParams",
+              "type": "object",
+              "properties": {
+                "srtUrl": {
+                  "type": "string"
+                },
+                "rtspsUrl": {
+                  "type": "string"
+                },
+                "publishToken": {
+                  "type": "string"
+                },
+                "latencyMs": {
+                  "type": "integer"
+                },
+                "expiresAt": {
+                  "$ref": "common.schema.json#/$defs/Timestamp"
+                }
+              },
+              "required": [
+                "srtUrl",
+                "rtspsUrl",
+                "publishToken",
+                "latencyMs",
+                "expiresAt"
+              ]
+            },
+            {
+              "title": "JpegFramesParams",
+              "type": "object",
+              "properties": {
+                "framesUrl": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "framesUrl"
+              ]
+            }
+          ]
+        }
+      },
+      "description": "开始往媒体服务推实况。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "CameraCloseCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "camera.close"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      "description": "停止推实况。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "SnapshotModeCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "snapshot.mode"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "SnapshotModeParams",
+          "type": "object",
+          "properties": {
+            "watched": {
+              "type": "boolean",
+              "description": "这台打印机现在有没有人在看"
+            }
+          },
+          "required": [
+            "watched"
+          ]
+        }
+      },
+      "description": "切换抓拍频率。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "SnapshotNowCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "snapshot.now"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "SnapshotNowParams",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "title": "SnapshotReason",
+              "type": "string",
+              "enum": [
+                "FIRST_VIEWER",
+                "ERROR"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "description": "立刻抓拍一张。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    },
+    {
+      "title": "TimelapseCollectCommand",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "timelapse.collect"
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+        },
+        "params": {
+          "title": "TimelapseCollectParams",
+          "type": "object",
+          "properties": {
+            "jobRef": {
+              "$ref": "common.schema.json#/$defs/Uuid"
+            }
+          },
+          "required": [
+            "jobRef"
+          ]
+        }
+      },
+      "description": "取回并上传这个任务的延时摄影。",
+      "required": [
+        "commandId",
+        "printerId",
+        "kind",
+        "expiresAt",
+        "params"
+      ]
+    }
+  ]
+}

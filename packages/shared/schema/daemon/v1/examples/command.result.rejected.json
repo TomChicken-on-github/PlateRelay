@@ -1,0 +1,12 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d91",
+  "type": "command.result",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "commandId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d04",
+    "status": "rejected",
+    "code": "printer_busy",
+    "message": null,
+    "data": {}
+  }
+}

@@ -1,6 +1,6 @@
 # 2.2 · HTTP 接口约定
 
-> 属于 [文档 2](README.md)。编号 `API-`。每个接口的具体定义在 [openapi.yaml](openapi.yaml)（Q150），本文只写所有接口共同遵守的约定。
+> 属于 [文档 2](README.md)。编号 `API-`。每个接口的具体定义在 [openapi.yaml](../../../packages/shared/schema/openapi.yaml)（Q150，放在 `packages/shared/schema/`），本文只写所有接口共同遵守的约定。
 
 ## 1. 基本
 
@@ -115,7 +115,7 @@
 | --- | --- |
 | API-CONC-01 | **编辑冲突**（Q139）：可编辑的资源（E-GEN-04）在响应里带 `version`，保存时请求体必须带上读到的 `version`；不一致返回 409 `version_conflict`，响应里带当前版本的完整内容，前端提示"已被别人修改"。 |
 | API-CONC-02 | **状态转换**（Q138）：订单和打印机的转换接口，请求体必须带 `expectedStatus`（订单）或 `expectedState`（打印机），就是界面上看到的状态。服务端加行锁后比较，不一致返回 409 `state_conflict`。这样两个人同时点"通过"和"驳回"，后到的那个会失败，而不是覆盖。针对某一次打印的命令（停止、跳过零件）还要带 `expectedJobId`，锁行后和状态一起比较，对不上返回 409 `job_mismatch`，免得晚到的请求落到下一单上（Q313）。 |
-| API-CONC-03 | 每个转换接口在 openapi.yaml 里用 `x-transitions` 列出它可能触发的文档 1 转换编号（如 `[S-ORD-T02]`），测试按这张表核对。 |
+| API-CONC-03 | 每个转换接口可能触发的文档 1 转换编号（如 `S-ORD-T02`）列在 [api-rules.md](api-rules.md)；openapi.yaml 在代码目录里，不写文档编号。 |
 | API-CONC-04 | 队列相关的写操作（审核通过、派单、拖拽、修改后退、重打）在同一把排队锁下执行，保证排序值不打架。 |
 
 ## 7. 分页、排序、筛选

@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/common.schema.json",
+  "title": "Common",
+  "description": "daemon 协议各消息共用的结构。双方都忽略不认识的字段，所以对象都不封闭。",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC 时间"
+    },
+    "NormalizedState": {
+      "type": "string",
+      "description": "适配器上报的标准设备状态，不是面板的打印机状态；换算只在面板做。",
+      "enum": [
+        "OFFLINE",
+        "NOT_READY",
+        "IDLE",
+        "BUSY",
+        "PREPARING",
+        "PRINTING",
+        "PAUSED",
+        "ERROR_PAUSED",
+        "FINISHED",
+        "FAILED",
+        "CANCELLED",
+        "FAULT",
+        "UNKNOWN"
+      ]
+    },
+    "Substage": {
+      "type": "string",
+      "description": "标准子阶段，只用于展示。",
+      "enum": [
+        "heating_bed",
+        "heating_nozzle",
+        "heating_chamber",
+        "cooling",
+        "homing",
+        "leveling",
+        "calibrating",
+        "cleaning_nozzle",
+        "inspecting_first_layer",
+        "identifying_plate",
+        "changing_filament",
+        "loading_filament",
+        "unloading_filament",
+        "other"
+      ]
+    },
+    "StandardErrorAction": {
+      "type": "string",
+      "description": "报错可选的标准动作。",
+      "enum": [
+        "RESUME",
+        "RESUME_ACCEPT_DEFECTS",
+        "RESUME_PROBLEM_SOLVED",
+        "RETRY",
+        "CONFIRM_DONE",
+        "IGNORE",
+        "IGNORE_PERMANENTLY",
+        "ACKNOWLEDGE",
+        "STOP",
+        "ABORT_OPERATION",
+        "SILENCE_ALARM",
+        "RECHECK",
+        "FIRMWARE_RESTART",
+        "EMERGENCY_STOP"
+      ]
+    },
+    "ErrorActionOption": {
+      "title": "ErrorActionOption",
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "common.schema.json#/$defs/StandardErrorAction"
+        },
+        "vendorActionId": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "厂商原始按钮 ID，排查用"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requiresOnSite": {
+          "type": "boolean",
+          "description": "必须有人在机器旁处理过才能点"
+        },
+        "destructive": {
+          "type": "boolean",
+          "description": "会终止任务"
+        }
+      },
+      "required": [
+        "action",
+        "label",
+        "requiresOnSite",
+        "destructive"
+      ]
+    },
+    "ActiveError": {
+      "title": "ActiveError",
+      "type": "object",
+      "properties": {
+        "errorId": {
+          "type": "string",
+          "description": "本次报错的唯一 ID，适配器生成"
+        },
+        "vendorCode": {
+          "type": "string",
+          "description": "厂商原始码"
+        },
+        "channel": {
+          "type": "string",
+          "description": "报错来源通道，如 print_error、hms"
+        },
+        "severity": {
+          "title": "ErrorSeverity",
+          "type": "string",
+          "enum": [
+            "fatal",
+            "error",
+            "warning",
+            "info"
+          ]
+        },
+        "module": {
+          "type": "string",
+          "description": "如 ams、toolhead"
+        },
+        "message": {
+          "type": "string"
+        },
+        "helpUrl": {
+          "type": "string"
+        },
+        "blocksJob": {
+          "type": "boolean",
+          "description": "是否卡住了当前任务"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/ErrorActionOption"
+          }
+        },
+        "raisedAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp"
+        }
+      },
+      "description": "打印机上一条还没消失的报错。",
+      "required": [
+        "errorId",
+        "vendorCode",
+        "channel",
+        "severity",
+        "blocksJob",
+        "actions",
+        "raisedAt"
+      ]
+    },
+    "AssignedPrinter": {
+      "title": "AssignedPrinter",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "brand": {
+          "type": "string",
+          "description": "适配器品牌，如 bambu"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string",
+          "description": "打印机在局域网里的地址"
+        },
+        "accessCodeCipher": {
+          "type": "string",
+          "description": "浏览器用 daemon 公钥加密的访问码密文（base64）。面板解不开，只是转交；daemon 只在内存里解密，不落盘、不进日志。"
+        },
+        "keyFingerprint": {
+          "type": "string",
+          "description": "加密时用的 daemon 公钥指纹；对不上说明 daemon 换过密钥，要重填访问码"
+        },
+        "currentJobRef": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Uuid",
+              "description": "面板记的这台打印机的当前任务，没有为 null"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanupJobRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Uuid"
+          },
+          "description": "已结束、但打印机上可能还留着文件要收尾的任务"
+        },
+        "knownRunSeq": {
+          "type": "integer",
+          "description": "面板已知的这台打印机的最大运行序号；daemon 丢了本地状态时从比它大的数重新开始"
+        }
+      },
+      "description": "分配给这个 daemon 的一台打印机。是不是系统任务以面板下发的为准。",
+      "required": [
+        "printerId",
+        "brand",
+        "serial",
+        "host",
+        "accessCodeCipher",
+        "keyFingerprint",
+        "currentJobRef",
+        "cleanupJobRefs"
+      ]
+    },
+    "DaemonConfig": {
+      "title": "DaemonConfig",
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "title": "SnapshotConfig",
+          "type": "object",
+          "properties": {
+            "watchedSeconds": {
+              "type": "integer",
+              "description": "有人在看时的抓拍间隔"
+            },
+            "unwatchedSeconds": {
+              "type": "integer",
+              "description": "没人看时的抓拍间隔"
+            },
+            "staggerSeconds": {
+              "type": "integer",
+              "description": "多台打印机之间错开的秒数"
+            },
+            "uploadKbps": {
+              "type": "integer",
+              "description": "抓拍上传的总速率上限"
+            }
+          },
+          "required": [
+            "watchedSeconds",
+            "unwatchedSeconds",
+            "staggerSeconds",
+            "uploadKbps"
+          ]
+        },
+        "transferTimeoutSeconds": {
+          "type": "integer",
+          "description": "下载或上传文件每次尝试的超时，从真正开始传起算"
+        },
+        "downloadConcurrency": {
+          "type": "integer",
+          "description": "同时下载的文件数"
+        },
+        "discoveryEnabled": {
+          "type": "boolean",
+          "description": "是否被动监听局域网里的打印机广播"
+        }
+      },
+      "description": "面板下发给 daemon 的参数。",
+      "required": [
+        "snapshot",
+        "transferTimeoutSeconds",
+        "downloadConcurrency",
+        "discoveryEnabled"
+      ]
+    }
+  }
+}

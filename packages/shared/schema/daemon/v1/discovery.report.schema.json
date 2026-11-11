@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/discovery.report.schema.json",
+  "title": "DiscoveryReport",
+  "description": "被动监听局域网广播听到的打印机，每次是完整列表，有变化时发，最多每 10 秒一次。只听不发。",
+  "type": "object",
+  "properties": {
+    "printers": {
+      "type": "array",
+      "items": {
+        "title": "DiscoveredPrinter",
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "lastSeenAt": {
+            "$ref": "common.schema.json#/$defs/Timestamp"
+          }
+        },
+        "required": [
+          "brand",
+          "serial",
+          "host",
+          "lastSeenAt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "printers"
+  ]
+}
