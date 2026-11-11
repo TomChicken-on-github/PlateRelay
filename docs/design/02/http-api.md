@@ -81,7 +81,7 @@
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
 | 422 | `validation_failed` | 参数校验失败，带 `errors` |
-| 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04） |
+| 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04；上传见 R-SUB-13） |
 | 422 | `rule_violation` | 违反业务规则，带 `rule`（如超过修改次数 `R-VER-09`、超过排队上限 `R-SUB-08`） |
 | 428 | `idempotency_key_required` | 写请求没带幂等键 |
 | 429 | `rate_limited` | 限频，带 `Retry-After` |

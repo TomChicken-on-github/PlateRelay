@@ -73,6 +73,7 @@ sequenceDiagram
 | 9 | 机型或喷嘴和开放的打印机都对不上 | 422 `rule_violation`（R-SUB-05） | R-SUB-05 |
 | 9 | 超过排队上限 | 整次拒绝，422（R-SUB-08） | R-ARB-05 |
 | 9 | 表单已被管理员改过 | 409 `version_conflict`，前端重新拉表单 | E-FORM |
+| 1 | 手上已有 CFG-SUB-08 − 1 个没提交的文件（默认从第 3 个起） | 422 `captcha_required`，前端弹人机验证后重传 | R-SUB-13、Q236 |
 | 8 之前 | 过了 CFG-SUB-07（默认 2 小时）没提交 | 删文件 | R-SUB-10 |
 | 14 | 另一个管理员已经审过 | 409 `state_conflict` | API-CONC-02 |
 | 14 | 驳回 | rejectOrder，必须填原因 → 已驳回（S-ORD-T03） | R-REV-02 |
@@ -388,7 +389,7 @@ sequenceDiagram
 | 7 | 令牌过期 | 401，管理员重新生成 | F-DMN-01 |
 | 7 | 令牌已被使用 | 401，脚本提示管理员去 daemon 列表查有没有陌生的注册 | MSG-ENR、Q156 |
 | 12 | 签名不对 | 4401 断开 | MSG-AUTH-05 |
-| 12 | 同一个 daemon 又连了一条 | 新的顶掉旧的，旧的收到 4409，不另外告警（Q387） | MSG-AUTH-05 |
+| 12 | 同一个 daemon 又连了一条 | 新的顶掉旧的，旧的收到 4409。10 分钟内被不同 IP 顶掉 3 次及以上 → 通知管理员"疑似私钥泄露，请检查并吊销"，不自动吊销 | MSG-AUTH-05、R-OPS-02 |
 | 14 | 访问码是用旧公钥加密的 | connection.down（access_code_key_mismatch），面板提示重填 | MSG-ASSIGN |
 
 添加打印机：管理员在 getDaemonPublicKey 拿公钥，浏览器加密访问码，createPrinter（INV-07、F-PRT-12）；面板发新的 printers.assign。
