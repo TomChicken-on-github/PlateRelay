@@ -76,6 +76,8 @@ class PrinterSession(Protocol):
                                                           # job.* 由 daemon 核心比较快照合成（Q258）
     async def snapshot(self) -> DeviceSnapshot: ...       # 合并后的完整状态；daemon 转成 MSG-SNAPSHOT
     async def refresh(self) -> None: ...                  # 只读，拓竹 = pushall（R-PRT-12）
+    async def ran_during_gap(self, since: datetime) -> bool | None: ...  # 看不到打印机的这段时间它跑没跑过东西；
+                                                          # None = 证明不了，核心按跑过算，runSeq 加一（DAE-ADP-02）
 
     async def upload(self, local_file: Path, remote_name: str) -> RemoteFile: ...  # FTPS 等；重试由核心管（MSG-CMD-START）
     async def start(self, job: StartJob) -> CommandResult: ...      # 只发开打指令，文件已在打印机上
