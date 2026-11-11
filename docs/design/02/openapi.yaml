@@ -429,7 +429,7 @@ paths:
       summary: 提交：每盘一个订单
       x-permission: order:submit
       x-transitions: [S-ORD-T01]
-      x-rules: [R-SUB-02, R-SUB-05, R-SUB-06, R-SUB-07, R-SUB-08, R-ARB-05]
+      x-rules: [R-SUB-02, R-SUB-05, R-SUB-06, R-SUB-07, R-SUB-08, R-SUB-09, R-ARB-05]
       description: 多盘一次提交，超过排队上限整次拒绝（R-ARB-05）。表单版本不是最新时返回 409 version_conflict。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -446,6 +446,7 @@ paths:
                   items: {type: integer, minimum: 1}
                   minItems: 1
                 colourPref: {$ref: '#/components/schemas/ColourPref'}
+                bedType: {type: [string, 'null']}
                 formVersionId: {type: string, format: uuid}
                 answers:
                   type: array
@@ -2900,7 +2901,7 @@ components:
         fileName: {type: string, description: 'x-requires: order:view:any，本人也能看'}
         plate: {$ref: '#/components/schemas/Plate'}
         colourPref: {$ref: '#/components/schemas/ColourPref'}
-        bedType: {type: [string, 'null'], description: 切片里的板型（自选板已推后，Q390）}
+        bedType: {type: [string, 'null']}
         submittedAt: {type: string, format: date-time}
         queue:
           type: [object, 'null']
@@ -3457,7 +3458,11 @@ components:
             maxSeconds: {type: integer, minimum: 0}
           required: [minSeconds, maxSeconds]
           additionalProperties: false
-      required: [printers, catalog, wait]
+        bedTypes:
+          type: [array, 'null']
+          items: {type: string}
+          description: 自选板打开时为各机型板型的并集；提交页按选中各盘的机型取交集（CFG-QUE-09、R-SUB-09）
+      required: [printers, catalog, wait, bedTypes]
       additionalProperties: false
     TodoItem:
       type: object

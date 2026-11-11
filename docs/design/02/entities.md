@@ -284,6 +284,7 @@
 | `active_version_id` | uuid | 会被打印的版本 |
 | `pending_version_id` | uuid? | 等重审的版本；只在 `PENDING_REVIEW` 且 `sort_key` 不为空时有值 |
 | `colour_pref` | colour_pref | |
+| `bed_type` | text? | 申请者自选的板型（CFG-QUE-09）；空 = 按切片 |
 | `form_version_id` | uuid | 提交时的表单版本 |
 | `answers` | jsonb | 表单答案快照：`{ fieldId, label, type, value }[]` |
 | `revision_count` | int | 已用修改次数（R-VER-09） |
@@ -477,7 +478,7 @@
 | `model_id` | 机型（适配器报的机型 ID） |
 | `bed_type` | 板型，取切片里的板型名（`curr_bed_type`） |
 
-主键 `(model_id, bed_type)`。管理员在可用资源的机型编辑里勾选，整组替换（R-SUB-11、Q274）。不记块数、不分装没装上（Q265）。R-SUB-15 按这张表算。v1 没有"板系列"，同一块板能上哪些机型留给以后的资源管理。
+主键 `(model_id, bed_type)`。管理员在可用资源的机型编辑里勾选，整组替换（R-SUB-11、Q274）。不记块数、不分装没装上（Q265）。R-SUB-15 和自选板选项（R-SUB-09）按这张表算。v1 没有"板系列"，同一块板能上哪些机型留给以后的资源管理。
 
 ## 8. 通知、审计、幂等、归档
 
