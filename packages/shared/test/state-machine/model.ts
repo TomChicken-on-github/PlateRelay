@@ -24,15 +24,13 @@
  * whenever a rule would need a transition the table doesn't list.
  */
 import {
-  type AttentionReason,
+  type FaultReason,
   type JobOutcome,
   type JobPhase,
   type OrderState,
   type OrderTrigger,
   type PrinterState,
   type PrinterTrigger,
-  DISMISSABLE_ATTENTION,
-  JOB_ATTENTION,
   JUDGEMENTS,
   JOB_TRANSITIONS,
   type JobTrigger,
@@ -161,22 +159,16 @@ export interface Job {
   stopSent: boolean;
 }
 
-export interface Attention {
-  reason: AttentionReason;
-  job: number | null;
-}
-
 export interface Printer {
   s: PrinterState;
+  /** The job of ours it holds, until that job has ended. */
   job: number | null;
-  attention: Attention[];
-  lost: boolean;
+  /** It reports something running that is not its current job (an external job, or a job that already ended). */
+  busyWithOther: boolean;
+  faults: FaultReason[];
   /** Whether the panel currently has a live path to this printer. */
   connected: boolean;
-  lastBoot: number;
   last: View;
-  /** An ended system job the printer is running again (a late start). */
-  lateRun: number | null;
 }
 
 export interface Budget {
@@ -199,105 +191,30 @@ export interface Budget {
   revisions: number;
   archives: number;
   deactivations: number;
-  /** Times an administrator forces a printer back (the last resort; never needed for things to come to rest). */
-  reclaims: number;
+  /** Times a person judges a job on a faulted printer without waiting for it to come back (never needed for things to come to rest). */
+  releases: number;
 }
 
-/**
- * Rules that were added after the exploration found a gap without them. They are all part of the
- * current rules; each can be switched off so that a test can show the checker still catches the gap.
- */
-export interface RuleFixes {
-  /** On reconnect, don't conclude "the start never arrived" while the start command is undelivered, or was delivered in this same connection and not answered yet (the snapshot may predate it). */
-  noTraceWaitsForStartDelivery: boolean;
-  /** The start names the last print run the panel knew of; the daemon refuses to send it if the printer has run anything since (or was unreachable meanwhile). */
-  daemonRejectsStartIfPrinterWasUsed: boolean;
-  /** A reconcile mismatch goes away when the job ends or the printer reports it running; staff can't judge a job the printer reports running. */
-  factsClearMismatch: boolean;
-  /** Staff judging a mismatch get a third option: "never started, back to the queue" (printer then needs clearing; the daemon is told to never start it). */
-  staffCanJudgeNotStarted: boolean;
-  /** A stop for a staged job when the daemon has watched the printer ever since and it began nothing: the daemon deletes the staged file, promises never to start it and reports "cancelled before start" itself. */
+/** Variants of the rules, to compare designs. The defaults are the current rules. */
+export interface Options {
+  /**
+   * Before sending a start the daemon checks that the printer has run nothing since the dispatch
+   * (and that it could see the printer throughout the transfer); otherwise it refuses.
+   */
+  daemonChecksPrinterUnused: boolean;
+  /**
+   * A stop for a staged job the printer never took: if the daemon has watched the printer ever since
+   * and it began nothing, the daemon deletes the file, promises never to start it and reports
+   * "cancelled before start" itself.
+   */
   daemonConfirmsStopOfUnstartedJob: boolean;
-  /** A before-start end reported by the printer itself always counts as "the printer had begun preparing". */
-  printerReportedEndImpliesPrepared: boolean;
-  /** Whatever frees a printer (plate cleared, part stored, maintenance ended, job returned to the queue) while the panel can't reach it leaves it offline, not idle. */
-  freedWhileLostGoesOffline: boolean;
-  /** The printer reports an external job while ours was sent but never reported preparing: ours ends as "start never arrived". */
-  externalJobBeforePreparingEndsJob: boolean;
-  /**
-   * The reconnect table also covers: panel shows an external job but the printer has stopped (→ needs clearing);
-   * and a current job while the printer runs something else (never reported preparing → "start never arrived",
-   * otherwise staff judge). Whenever a job ends while the printer reports another job running, the printer
-   * shows that external job instead of idle or needs-clearing.
-   */
-  reconcileCoversExternalJobs: boolean;
-  /** On reconnect, a printer stopped at "failed" for a job the panel never saw printing isn't concluded automatically (it may have failed before starting): staff judge. */
-  failedStateBeforeSeenPrintingNeedsStaff: boolean;
-  /** After reconciling against a reconnect snapshot, older printer events resent from the daemon's outbox are dropped. */
-  dropPrinterEventsOlderThanSnapshot: boolean;
-  /**
-   * "It never started" is concluded automatically only when the daemon can show the printer ran nothing since
-   * the dispatch (its run counter is unchanged). Otherwise staff judge. A current job found while the printer
-   * runs something else is concluded automatically only if the daemon still holds its start unsent.
-   */
-  notStartedNeedsUnchangedRunCount: boolean;
-  /** The printer reporting the current job's end is a fact whatever phase the panel had reached, online as on reconnect. */
-  printerEndAppliesFromAnyPhase: boolean;
-  /** Stop is offered in maintenance too while the printer reports something running or paused. */
-  maintenanceAllowsStop: boolean;
+  /** Whenever the panel ends a job (a judgement, a failed send, a reconnect), it also tells the daemon to never start it. */
+  panelTellsDaemonWhenJobEnds: boolean;
 }
-
-/**
- * Candidate simplifications: automatic conclusions that could be handed to staff instead.
- * All off = the current rules.
- */
-export interface Cuts {
-  /** "No trace of the job on the printer" is never concluded automatically as "start never arrived": staff judge. */
-  noTraceGoesToStaff: boolean;
-  /** An ended job running again is simply an external job: no separate attention reason. */
-  lateStartIsJustExternal: boolean;
-  /** A reboot while away gets no row of its own: the other rows apply, and whatever they can't match goes to staff. */
-  noRebootRow: boolean;
-}
-export const NO_CUTS: Cuts = { noTraceGoesToStaff: false, lateStartIsJustExternal: false, noRebootRow: false };
-
-export const BEFORE_FIXES: RuleFixes = {
-  noTraceWaitsForStartDelivery: false,
-  daemonRejectsStartIfPrinterWasUsed: false,
-  factsClearMismatch: false,
-  staffCanJudgeNotStarted: false,
-  daemonConfirmsStopOfUnstartedJob: false,
-  printerReportedEndImpliesPrepared: false,
-  freedWhileLostGoesOffline: false,
-  externalJobBeforePreparingEndsJob: false,
-  reconcileCoversExternalJobs: false,
-  failedStateBeforeSeenPrintingNeedsStaff: false,
-  dropPrinterEventsOlderThanSnapshot: false,
-  notStartedNeedsUnchangedRunCount: false,
-  printerEndAppliesFromAnyPhase: false,
-  maintenanceAllowsStop: false,
-};
-
-export const CURRENT_RULES: RuleFixes = {
-  noTraceWaitsForStartDelivery: true,
-  daemonRejectsStartIfPrinterWasUsed: true,
-  factsClearMismatch: true,
-  staffCanJudgeNotStarted: true,
-  daemonConfirmsStopOfUnstartedJob: true,
-  printerReportedEndImpliesPrepared: true,
-  freedWhileLostGoesOffline: true,
-  externalJobBeforePreparingEndsJob: true,
-  reconcileCoversExternalJobs: true,
-  failedStateBeforeSeenPrintingNeedsStaff: true,
-  dropPrinterEventsOlderThanSnapshot: true,
-  notStartedNeedsUnchangedRunCount: true,
-  printerEndAppliesFromAnyPhase: true,
-  maintenanceAllowsStop: true,
-};
+export const CURRENT_RULES: Options = { daemonChecksPrinterUnused: true, daemonConfirmsStopOfUnstartedJob: true, panelTellsDaemonWhenJobEnds: true };
 
 export interface State {
-  fixes: RuleFixes;
-  cuts: Cuts;
+  opts: Options;
   orders: Order[];
   jobs: Job[];
   printers: Printer[];
@@ -355,8 +272,7 @@ export interface Config {
   printers: number;
   orders: number;
   budget: Budget;
-  fixes?: RuleFixes;
-  cuts?: Cuts;
+  opts?: Options;
 }
 
 export const NO_FAULTS: Budget = {
@@ -378,7 +294,7 @@ export const NO_FAULTS: Budget = {
   revisions: 0,
   archives: 0,
   deactivations: 0,
-  reclaims: 0,
+  releases: 0,
 };
 
 const MAX_REVISIONS = 1;
@@ -400,8 +316,7 @@ export function initialState(cfg: Config): State {
     files: [],
   }));
   const st: State = {
-    fixes: { ...(cfg.fixes ?? CURRENT_RULES) },
-    cuts: { ...(cfg.cuts ?? NO_CUTS) },
+    opts: { ...(cfg.opts ?? CURRENT_RULES) },
     orders: Array.from({ length: cfg.orders }, () => ({
       s: "PENDING_REVIEW",
       hasSortValue: false,
@@ -420,7 +335,7 @@ export function initialState(cfg: Config): State {
     truth: { prepared: [], printed: [], finished: [] },
     budget: { ...cfg.budget },
   };
-  st.printers = devices.map((_, p) => ({ s: "IDLE", job: null, attention: [], lost: false, connected: true, lastBoot: 0, last: view(st, p), lateRun: null }));
+  st.printers = devices.map((_, p) => ({ s: "AVAILABLE", job: null, busyWithOther: false, faults: [], connected: true, last: view(st, p) }));
   return st;
 }
 
@@ -490,23 +405,48 @@ const current = (st: State, j: number | undefined): Job | null => {
   return job && job.phase !== "ENDED" ? job : null;
 };
 
-function raise(pr: Printer, reason: AttentionReason, job: number | null) {
-  if (!pr.attention.some((a) => a.reason === reason && a.job === job)) pr.attention.push({ reason, job });
-  pr.attention.sort((a, b) => (a.reason + a.job).localeCompare(b.reason + b.job));
+const has = (pr: Printer, reason: FaultReason) => pr.faults.includes(reason);
+
+/** The panel believes something is running on the printer. */
+const busy = (pr: Printer) => pr.busyWithOther || (pr.job !== null && !has(pr, "NEEDS_JUDGEMENT"));
+
+function raiseFault(c: Ctx, p: number, reason: FaultReason) {
+  const pr = c.st.printers[p]!;
+  if (has(pr, reason)) return;
+  pr.faults.push(reason);
+  pr.faults.sort();
+  if (pr.s !== "FAULT") c.setPrinter(p, "faultRaised");
 }
-function clear(pr: Printer, pred: (a: Attention) => boolean) {
-  pr.attention = pr.attention.filter((a) => !pred(a));
+
+/** Removes a fault reason. With none left the printer goes back to work if it reports something running, else it needs clearing. */
+function dropFault(c: Ctx, p: number, reason: FaultReason) {
+  const pr = c.st.printers[p]!;
+  if (!has(pr, reason)) return;
+  pr.faults = pr.faults.filter((f) => f !== reason);
+  if (pr.faults.length === 0) c.setPrinter(p, busy(pr) ? "printerResumed" : "faultsCleared");
+}
+
+/** The panel learns the printer is running something other than its current job. */
+function otherJobRunning(c: Ctx, p: number) {
+  const pr = c.st.printers[p]!;
+  pr.busyWithOther = true;
+  if (pr.s === "AVAILABLE" || pr.s === "CLEARING_REQUIRED") c.setPrinter(p, "printerRunning");
+}
+
+/** Nothing is running any more as far as the panel knows. */
+function workMayHaveEnded(c: Ctx, p: number) {
+  const pr = c.st.printers[p]!;
+  if (pr.s === "WORKING" && !busy(pr)) c.setPrinter(p, "workEnded");
 }
 
 // ---------------------------------------------------------------- panel: job end
 
 /** Ends a job and applies its effect on order and printer in one go. */
-function endJob(c: Ctx, j: number, outcome: JobOutcome, why: string) {
+function endJob(c: Ctx, j: number, outcome: JobOutcome, why: string, byDaemon = false) {
   const st = c.st;
   const job = st.jobs[j]!;
-  const pr = st.printers[job.printer]!;
   const ord = st.orders[job.order]!;
-  // Check the conclusion against what the printer really did.
+  const pr = st.printers[job.printer]!;
   const printed = st.truth.printed.includes(j);
   const finished = st.truth.finished.includes(j);
   const contradicts =
@@ -521,44 +461,19 @@ function endJob(c: Ctx, j: number, outcome: JobOutcome, why: string) {
   }
   c.setJob(j, "ended");
   job.outcome = outcome;
-  const latest = pr.last;
-  const effect = jobEndEffect({
-    outcome,
-    printerLatest: running(latest.s) && latest.job !== j ? "RUNNING_OTHER_JOB" : "IDLE",
-  });
+  const effect = jobEndEffect(outcome);
   c.setOrder(job.order, effect.order);
-  c.setPrinter(job.printer, effect.printer);
-  clear(pr, (a) => a.job === j && (a.reason === "PRINTER_ERROR" || a.reason === "FILAMENT_RUNOUT"));
-  if (effect.raiseStartFailed) raise(pr, "START_FAILED", j);
-  if (st.fixes.factsClearMismatch) clear(pr, (a) => a.job === j && a.reason === "RECONCILE_MISMATCH");
-  if (st.fixes.reconcileCoversExternalJobs && pr.s === "CLEARING_REQUIRED" && running(latest.s) && latest.job !== j) {
-    c.setPrinter(job.printer, "externalJobStarted");
-    raise(pr, "STARTED_WITHOUT_CLEARING", null);
-  }
   ord.job = null;
   ord.lastPrinter = job.printer;
   pr.job = null;
-}
-
-function lateStart(c: Ctx, p: number, j: number, fromOldEvent = false) {
-  const pr = c.st.printers[p]!;
-  if (pr.lateRun === j) return;
-  if (fromOldEvent) {
-    c.find("staleEventTakenForLateStart", "an old event for a job that already ended was taken for the printer starting it again");
+  // Unless the daemon itself said the job is over, it is told, so that it can never start it later.
+  if (st.opts.panelTellsDaemonWhenJobEnds && !byDaemon && outcome !== "FINISHED" && !st.daemon.inbox.some((x) => x.kind === "stop" && x.job === j)) {
+    st.daemon.inbox.push({ p: job.printer, kind: "stop", job: j, expired: false });
   }
-  pr.lateRun = j;
-  if (!c.st.cuts.lateStartIsJustExternal) raise(pr, "LATE_START", j);
-  if (pr.job === null && (pr.s === "IDLE" || pr.s === "CLEARING_REQUIRED")) c.setPrinter(p, "externalJobStarted");
-}
-
-/** An already-ended job stopped running on the printer: same as an external job ending. */
-function endedJobStoppedRunning(c: Ctx, p: number, j: number) {
-  const pr = c.st.printers[p]!;
-  if (pr.lateRun === j) {
-    pr.lateRun = null;
-    clear(pr, (a) => a.reason === "LATE_START" && a.job === j);
-  }
-  if (pr.s === "EXTERNAL_JOB" && !running(pr.last.s)) c.setPrinter(p, "externalJobEnded");
+  if (effect.raiseSendFailed) raiseFault(c, job.printer, "SEND_FAILED");
+  dropFault(c, job.printer, "PRINTER_ERROR");
+  dropFault(c, job.printer, "NEEDS_JUDGEMENT");
+  workMayHaveEnded(c, job.printer);
 }
 
 function startPrinting(c: Ctx, j: number) {
@@ -566,36 +481,42 @@ function startPrinting(c: Ctx, j: number) {
   c.setJob(j, "printerStarted");
   job.pausedFrom = null;
   c.setOrder(job.order, "printerStarted");
-  c.setPrinter(job.printer, "printerStarted");
 }
 
 function pauseJob(c: Ctx, j: number, reason: "USER" | "ERROR" | null) {
   const job = c.st.jobs[j]!;
-  const pr = c.st.printers[job.printer]!;
   const from = job.phase as "PREPARING" | "PRINTING";
   c.setJob(j, "printerPaused");
   job.pausedFrom = from;
-  if (from === "PRINTING") c.setPrinter(job.printer, "printerPaused");
-  if (reason === "ERROR") raise(pr, "PRINTER_ERROR", j);
+  if (reason === "ERROR") raiseFault(c, job.printer, "PRINTER_ERROR");
 }
 
 function resumeJob(c: Ctx, j: number) {
   const job = c.st.jobs[j]!;
-  const pr = c.st.printers[job.printer]!;
-  if (job.pausedFrom === "PRINTING") {
-    c.setJob(j, "printerResumedPrinting");
-    c.setPrinter(job.printer, "printerResumed");
-  } else {
-    c.setJob(j, "printerResumedPreparing");
-  }
+  c.setJob(j, job.pausedFrom === "PRINTING" ? "printerResumedPrinting" : "printerResumedPreparing");
   job.pausedFrom = null;
-  clear(pr, (a) => a.job === j && a.reason === "PRINTER_ERROR");
+  dropFault(c, job.printer, "PRINTER_ERROR");
 }
 
 function endFromEvent(c: Ctx, j: number, kind: "finished" | "failed" | "cancelled", beforeStart: boolean, why: string) {
   const outcome: JobOutcome =
     kind === "finished" ? "FINISHED" : kind === "failed" ? (beforeStart ? "START_FAILED" : "FAILED") : beforeStart ? "STOPPED_BEFORE_START" : "FAILED";
-  endJob(c, j, outcome, why);
+  endJob(c, j, outcome, why, true);
+}
+
+/** The printer reports the current job running: follow it, whatever the panel had recorded. */
+function followRunningJob(c: Ctx, j: number, v: View) {
+  const job = c.st.jobs[j]!;
+  const ord = c.st.orders[job.order]!;
+  if ((v.s === "PREPARING" || (v.s === "PAUSED" && v.pausedFromPrep)) && (job.phase === "TRANSFERRING" || job.phase === "PREPARING")) {
+    job.prepared = true;
+    c.setJob(j, "printerReportedPreparing");
+  }
+  if ((v.s === "PRINTING" || (v.s === "PAUSED" && !v.pausedFromPrep)) && ord.s === "DISPATCHED") startPrinting(c, j);
+  if (v.s === "PAUSED" && job.phase !== "PAUSED") pauseJob(c, j, v.pauseReason);
+  if (v.s !== "PAUSED" && job.phase === "PAUSED") resumeJob(c, j);
+  // Seeing the job run answers the question of what became of it.
+  dropFault(c, job.printer, "NEEDS_JUDGEMENT");
 }
 
 // ---------------------------------------------------------------- panel: messages
@@ -605,41 +526,30 @@ function handle(c: Ctx, m: Msg) {
   const pr = st.printers[m.p]!;
   const printerEvent = !["startAccepted", "staged", "startRejectedBusy", "startFailed", "startExpired", "snapshot", "connectionUp", "connectionDown"].includes(m.kind) && m.fromPrinter !== false;
   const connectionEvent = m.kind === "connectionUp" || m.kind === "connectionDown";
-  if (st.fixes.dropPrinterEventsOlderThanSnapshot && m.olderThanSnapshot && (printerEvent || connectionEvent)) return;
-  const knownRuns = pr.last.runs;
+  // Printer events older than the reconnect snapshot are dropped: the snapshot is the newer fact.
+  if (m.olderThanSnapshot && (printerEvent || connectionEvent)) return;
   if (!m.olderThanSnapshot || m.kind === "snapshot") pr.last = m.view;
   const j = m.job;
   const job = current(st, j);
-  if (st.fixes.factsClearMismatch && typeof m.view.job === "number" && running(m.view.s) && !m.olderThanSnapshot) {
-    const vj = m.view.job;
-    if (current(st, vj) && m.kind !== "connectionUp" && !(m.kind === "snapshot" && (pr.lost || pr.s === "OFFLINE" || !pr.connected))) {
-      clear(pr, (a) => a.job === vj && a.reason === "RECONCILE_MISMATCH");
-    }
-  }
-  if (st.fixes.printerReportedEndImpliesPrepared && job && m.fromPrinter && (m.kind === "failed" || m.kind === "cancelled")) job.prepared = true;
   const isEnded = j !== undefined && st.jobs[j]?.phase === "ENDED";
 
   switch (m.kind) {
     case "connectionDown":
       pr.connected = false;
-      if (pr.s === "IDLE") c.setPrinter(m.p, "disconnectedWhileIdle");
-      else if (pr.s !== "OFFLINE") pr.lost = true;
+      raiseFault(c, m.p, "UNREACHABLE");
       return;
     case "connectionUp":
-      reconcile(c, m.p, m.view, knownRuns);
+      reconcile(c, m.p, m.view);
       return;
     case "snapshot":
-      if (pr.lost || pr.s === "OFFLINE" || !pr.connected) {
-        reconcile(c, m.p, m.view, knownRuns);
+      if (!pr.connected) {
+        reconcile(c, m.p, m.view);
         return;
       }
-      if (typeof m.view.job === "number" && m.view.s === "PREPARING") {
+      if (typeof m.view.job === "number" && running(m.view.s)) {
         const vj = m.view.job;
-        const vjob = current(st, vj);
-        if (vjob && (vjob.phase === "TRANSFERRING" || vjob.phase === "PREPARING")) {
-          vjob.prepared = true;
-          c.setJob(vj, "printerReportedPreparing");
-        } else if (st.jobs[vj]?.phase === "ENDED") lateStart(c, m.p, vj);
+        if (current(st, vj)) followRunningJob(c, vj, m.view);
+        else if (st.jobs[vj]?.phase === "ENDED") otherJobRunning(c, m.p);
       }
       return;
     case "startAccepted":
@@ -652,8 +562,10 @@ function handle(c: Ctx, m: Msg) {
       }
       return;
     case "started":
-      if (job && job.phase !== "PRINTING" && !(job.phase === "PAUSED" && job.pausedFrom === "PRINTING")) startPrinting(c, j!);
-      else if (isEnded) lateStart(c, m.p, j!, !!m.olderThanSnapshot);
+      if (job) {
+        if (job.phase !== "PRINTING" && !(job.phase === "PAUSED" && job.pausedFrom === "PRINTING")) startPrinting(c, j!);
+        dropFault(c, m.p, "NEEDS_JUDGEMENT");
+      } else if (isEnded) otherJobRunning(c, m.p);
       return;
     case "paused":
       if (job && (job.phase === "PREPARING" || job.phase === "PRINTING")) pauseJob(c, j!, m.view.pauseReason);
@@ -664,183 +576,67 @@ function handle(c: Ctx, m: Msg) {
     case "finished":
     case "failed":
     case "cancelled":
-      if (job) {
-        if (!st.fixes.printerEndAppliesFromAnyPhase && m.kind === "finished" && job.phase !== "PRINTING" && job.phase !== "PAUSED") {
-          c.find("eventNotCoveredByRules", `online "finished" for a job still ${job.phase} (only allowed on reconnect)`);
-        }
-        endFromEvent(c, j!, m.kind, !!m.beforeStart, `event ${m.kind}`);
-      } else if (isEnded) endedJobStoppedRunning(c, m.p, j!);
+      // The printer (or the daemon, for a transfer it aborted) says the job is over: a fact, whatever phase the panel had.
+      if (job) endFromEvent(c, j!, m.kind, !!m.beforeStart, `event ${m.kind}`);
+      else if (isEnded && pr.busyWithOther && !running(pr.last.s)) {
+        pr.busyWithOther = false;
+        workMayHaveEnded(c, m.p);
+      }
       return;
     case "startRejectedBusy":
     case "startFailed":
     case "startExpired":
-      if (job && job.phase === "TRANSFERRING") endJob(c, j!, "SEND_FAILED", m.kind);
+      if (job && job.phase === "TRANSFERRING") endJob(c, j!, "SEND_FAILED", m.kind, true);
       return;
     case "externalStarted":
-      switch (pr.s) {
-        case "IDLE":
-          c.setPrinter(m.p, "externalJobStarted");
-          return;
-        case "CLEARING_REQUIRED":
-          c.setPrinter(m.p, "externalJobStarted");
-          raise(pr, "STARTED_WITHOUT_CLEARING", null);
-          return;
-        case "MAINTENANCE":
-        case "EXTERNAL_JOB":
-          return;
-        case "PREPARING": {
-          const cur = current(st, pr.job ?? undefined)!;
-          if (st.fixes.reconcileCoversExternalJobs && pr.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) return; // settled when staff judge
-          if (cur.phase === "TRANSFERRING") {
-            endJob(c, pr.job!, "SEND_FAILED", "external job started during transfer");
-            return;
-          }
-          if (st.fixes.externalJobBeforePreparingEndsJob && cur.phase === "PREPARING" && !cur.prepared) {
-            endJob(c, pr.job!, "SEND_FAILED", "external job started before ours was reported preparing");
-            return;
-          }
-          c.find("eventNotCoveredByRules", `external job started while panel printer PREPARING and job ${cur.phase}${cur.staged ? " (start sent)" : ""}`);
-          return;
-        }
-        default:
-          if (st.fixes.reconcileCoversExternalJobs && pr.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) return;
-          c.find("eventNotCoveredByRules", `external job started while panel printer ${pr.s}`);
-          return;
-      }
+      // If a job of ours is still being transferred, the daemon will find the printer busy and refuse the start itself.
+      otherJobRunning(c, m.p);
+      return;
     case "externalEnded":
-      if (pr.s === "EXTERNAL_JOB") c.setPrinter(m.p, "externalJobEnded");
-      else if (st.fixes.reconcileCoversExternalJobs && pr.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) return;
-      else if (pr.s !== "MAINTENANCE") c.find("eventNotCoveredByRules", `external job ended while panel printer ${pr.s}`);
+      pr.busyWithOther = false;
+      workMayHaveEnded(c, m.p);
       return;
   }
 }
 
-const trace = (v: View, j: number) => v.job === j || v.files.includes(j);
-
-/** The reconnect reconciliation table, checked top to bottom, first match wins. */
-function reconcile(c: Ctx, p: number, v: View, knownRuns = v.runs) {
+/**
+ * Reconnect. Three rows for a printer that holds a job:
+ *   1. the same job is still under way (running on the printer, or the start not sent yet): carry on;
+ *   2. the printer or the daemon says how the job ended: take that;
+ *   3. anything else: a person judges the job.
+ * Without a job the printer is working if it runs something, else it needs clearing.
+ */
+function reconcile(c: Ctx, p: number, v: View) {
   const st = c.st;
   const pr = st.printers[p]!;
   const j = pr.job;
   const job = j === null ? null : st.jobs[j]!;
-  const ord = job ? st.orders[job.order]! : null;
-  const active = ord && (ord.s === "DISPATCHED" || ord.s === "PRINTING");
-  const dispatched = ord?.s === "DISPATCHED";
-  const bootChanged = v.boot !== pr.lastBoot;
-  pr.lastBoot = v.boot;
-  const done = () => {
-    pr.lost = false;
-    pr.connected = true;
-  };
-
-  // 1. The printer rebooted while we were away: never conclude automatically.
-  if (active && bootChanged && !st.cuts.noRebootRow) {
-    raise(pr, "RECONCILE_MISMATCH", j);
-    if (!st.truth.printed.includes(j!)) {
-      if (!st.fixes.staffCanJudgeNotStarted) c.find("staffJudgementHasNoCorrectOption", "reboot while away; job never started, but staff can only judge failed or finished");
-    }
-    return done();
-  }
-  if (job && j !== null && v.job === j && running(v.s)) {
-    // 2–4. Same job still running: follow the printer.
-    if ((v.s === "PREPARING" || (v.s === "PAUSED" && v.pausedFromPrep)) && (job.phase === "TRANSFERRING" || job.phase === "PREPARING")) {
-      job.prepared = true;
-      c.setJob(j, "printerReportedPreparing");
-    }
-    if ((v.s === "PRINTING" || (v.s === "PAUSED" && !v.pausedFromPrep)) && dispatched) startPrinting(c, j);
-    if (v.s === "PAUSED" && job.phase !== "PAUSED") pauseJob(c, j, v.pauseReason);
-    if (v.s !== "PAUSED" && job.phase === "PAUSED") resumeJob(c, j);
-    if (v.s === "PREPARING" && job.phase === "PAUSED") resumeJob(c, j);
-    return done();
-  }
+  pr.connected = true;
+  pr.busyWithOther = running(v.s) && v.job !== j;
   if (job && j !== null) {
     const rec = v.endRecords.find((r) => r.job === j);
-    // 5. Idle, and the daemon has the end record.
-    if (!running(v.s) && rec) {
-      if (st.fixes.printerReportedEndImpliesPrepared && rec.fromPrinter) job.prepared = true;
-      endFromEvent(c, j, rec.kind, rec.beforeStart, "reconcile: end record");
-      return done();
-    }
-    if (st.fixes.dropPrinterEventsOlderThanSnapshot && rec) {
-      // the end record counts whatever the printer is doing now; then look at the rest.
-      if (st.fixes.printerReportedEndImpliesPrepared && rec.fromPrinter) job.prepared = true;
-      endFromEvent(c, j, rec.kind, rec.beforeStart, "reconcile: end record");
-      return reconcile(c, p, v);
-    }
-    if (st.fixes.reconcileCoversExternalJobs && running(v.s) && v.job !== j) {
-      // the printer is busy with something else.
-      if (st.fixes.notStartedNeedsUnchangedRunCount) {
-        // Still held by the daemon: the start was certainly never sent (and the daemon will refuse it). Otherwise nobody can tell.
-        if (v.pendingStarts.includes(j)) endJob(c, j, "SEND_FAILED", "reconcile: printer runs another job, the daemon still holds our start");
-        else raise(pr, "RECONCILE_MISMATCH", j);
-      } else if (job.phase === "TRANSFERRING") endJob(c, j, "SEND_FAILED", "reconcile: printer runs another job, our start was never sent");
-      else raise(pr, "RECONCILE_MISMATCH", j);
-      return done();
-    }
-    // 6. Daemon still transferring: keep waiting.
-    if (dispatched && v.pendingStarts.includes(j)) return done();
-    if (st.fixes.noTraceWaitsForStartDelivery && dispatched && !job.startAccepted && (job.startDeliveredIn === null || job.startDeliveredIn === st.daemon.epoch)) return done();
-    // 7. Never prepared and no trace at all: the start never arrived.
-    if (dispatched && !job.prepared && !running(v.s) && !trace(v, j)) {
-      if (st.cuts.noTraceGoesToStaff || (st.fixes.notStartedNeedsUnchangedRunCount && v.runs !== job.seenRuns)) raise(pr, "RECONCILE_MISMATCH", j);
-      else endJob(c, j, "SEND_FAILED", "reconcile: no trace");
-      return done();
-    }
-    // 8. The printer's last job is this one and it stopped at finished or failed.
     const seenPrinting = job.phase === "PRINTING" || (job.phase === "PAUSED" && job.pausedFrom === "PRINTING");
-    if (v.job === j && (v.s === "FINISHED" || (v.s === "FAILED" && (seenPrinting || !st.fixes.failedStateBeforeSeenPrintingNeedsStaff)))) {
-      endJob(c, j, v.s === "FINISHED" ? "FINISHED" : "FAILED", `reconcile: printer stopped at ${v.s}`);
-      return done();
+    if (rec) {
+      // 2. The daemon recorded the end.
+      endFromEvent(c, j, rec.kind, rec.beforeStart, "reconcile: end record");
+    } else if (v.job === j && running(v.s)) {
+      // 1. Still running.
+      followRunningJob(c, j, v);
+    } else if (v.pendingStarts.includes(j) || (!job.startAccepted && (job.startDeliveredIn === null || job.startDeliveredIn === st.daemon.epoch))) {
+      // 1. The daemon still holds the start, or the start command hasn't reached it yet (the snapshot may predate it).
+    } else if (v.job === j && (v.s === "FINISHED" || (v.s === "FAILED" && seenPrinting))) {
+      // 2. The printer's last job is this one and it stopped at finished or failed. A failure of a job the panel
+      // never saw printing may have happened before the start, so that one is left to a person.
+      endJob(c, j, v.s === "FINISHED" ? "FINISHED" : "FAILED", `reconcile: printer stopped at ${v.s}`, true);
+    } else {
+      // 3. Nothing says what became of it.
+      raiseFault(c, p, "NEEDS_JUDGEMENT");
     }
-    // 9. Idle, no end record, but a trace or it had prepared: staff judge.
-    if (!running(v.s) && (trace(v, j) || job.prepared)) {
-      raise(pr, "RECONCILE_MISMATCH", j);
-      if (!st.truth.printed.includes(j)) {
-        if (!st.fixes.staffCanJudgeNotStarted) c.find("staffJudgementHasNoCorrectOption", `reconcile mismatch for a job that never started printing (printer ${v.s})`);
-      }
-      return done();
-    }
-    // 10. Anything else that doesn't add up goes to staff as well.
-    if (st.fixes.notStartedNeedsUnchangedRunCount) raise(pr, "RECONCILE_MISMATCH", j);
-    else c.find("reconcileNoRowMatched", `panel ${pr.s}/job ${job.phase}, printer ${v.s} running ${v.job === j ? "this job" : v.job === null ? "nothing" : "another job"}`);
-    return done();
   }
-  // No current job.
-  if (running(v.s)) {
-    if (typeof v.job === "number" && st.jobs[v.job]?.phase === "ENDED") {
-      if (pr.s === "OFFLINE") c.setPrinter(p, "connectedRunningUnknownJob");
-      lateStart(c, p, v.job);
-      return done();
-    }
-    if (pr.s === "OFFLINE") c.setPrinter(p, "connectedRunningUnknownJob");
-    else if (pr.s === "IDLE") c.setPrinter(p, "externalJobStarted");
-    else if (pr.s === "CLEARING_REQUIRED") {
-      c.setPrinter(p, "externalJobStarted");
-      raise(pr, "STARTED_WITHOUT_CLEARING", null);
-    } else if (pr.s !== "MAINTENANCE" && pr.s !== "EXTERNAL_JOB") {
-      c.find("reconcileNoRowMatched", `no job, panel ${pr.s}, printer running`);
-    }
-    return done();
-  }
-  if (pr.s === "OFFLINE") {
-    // also when it ran something unseen or rebooted while away (its end state is gone, the plate may not be clear).
-    const unseen = st.fixes.reconcileCoversExternalJobs && (v.runs > knownRuns || bootChanged);
-    if (v.s === "FINISHED" || v.s === "FAILED" || v.s === "CANCELLED" || unseen) c.setPrinter(p, "connectedStoppedAtEnd");
-    else c.setPrinter(p, "connectedIdle");
-    return done();
-  }
-  if (st.fixes.reconcileCoversExternalJobs && pr.s === "IDLE" && v.runs > knownRuns) {
-    // the printer ran something the panel never saw; it needs clearing.
-    c.setPrinter(p, "externalJobStarted");
-    c.setPrinter(p, "externalJobEnded");
-    return done();
-  }
-  if (pr.s === "EXTERNAL_JOB") {
-    if (pr.lateRun !== null) endedJobStoppedRunning(c, p, pr.lateRun);
-    else if (st.fixes.reconcileCoversExternalJobs) c.setPrinter(p, "externalJobEnded");
-    else c.find("reconcileNoRowMatched", "panel external job, printer no longer running");
-  }
-  return done();
+  dropFault(c, p, "UNREACHABLE");
+  // A person may have judged its job and released it while it was away.
+  if (pr.s === "CLEARING_REQUIRED" && busy(pr)) c.setPrinter(p, "printerRunning");
+  workMayHaveEnded(c, p);
 }
 
 // ---------------------------------------------------------------- device and daemon
@@ -927,7 +723,7 @@ function actions(st: State): Act[] {
     if (o.s === "PENDING_REVIEW" || o.s === "QUEUED") A(`cancel order ${i}`, "human", (c) => c.setOrder(i, "cancel"));
     if (o.s === "QUEUED") {
       st.printers.forEach((pr, p) => {
-        if (pr.s !== "IDLE" || pr.lost || pr.attention.length > 0) return;
+        if (pr.s !== "AVAILABLE") return;
         A(
           `dispatch order ${i} to printer ${p}`,
           "human",
@@ -957,7 +753,7 @@ function actions(st: State): Act[] {
         c.setOrder(i, "store");
         const p = s.orders[i]!.lastPrinter!;
         if (s.printers[p]!.s === "CLEARING_REQUIRED") {
-          release(c, p, "plateCleared");
+          c.setPrinter(p, "plateCleared");
           if (!running(s.devices[p]!.s)) s.devices[p]!.plateDirty = false;
         }
       });
@@ -999,112 +795,62 @@ function actions(st: State): Act[] {
     const job = current(st, pr.job ?? undefined);
     const j = pr.job;
     const pending = (kind: CmdKind) => st.daemon.inbox.some((c) => c.p === p && c.kind === kind && c.job === (j ?? undefined));
-    if (job && j !== null && (pr.s === "PREPARING" || pr.s === "PRINTING" || pr.s === "PAUSED") && !pending("stop")) {
+    const reportsRunning = pr.connected && running(pr.last.s);
+    if (job && j !== null && !pending("stop")) {
       A(`stop job on printer ${p}`, "human", (c) => {
         c.st.jobs[j]!.stopSent = true;
         c.st.daemon.inbox.push({ p, kind: "stop", job: j, expired: false });
       });
     }
-    const stoppable = pr.s === "EXTERNAL_JOB" || (st.fixes.maintenanceAllowsStop && pr.s === "MAINTENANCE" && pr.connected && running(pr.last.s));
-    if (stoppable && !st.daemon.inbox.some((c) => c.p === p && c.kind === "stopExternal")) {
-      A(`stop external job on printer ${p}`, "human", (c) => void c.st.daemon.inbox.push({ p, kind: "stopExternal", expired: false }));
+    // Whatever else runs on it (external job, test print in maintenance, a job that had already ended) can be stopped too.
+    if (pr.busyWithOther && pr.connected && !st.daemon.inbox.some((c) => c.p === p && c.kind === "stopExternal")) {
+      A(`stop what runs on printer ${p}`, "human", (c) => void c.st.daemon.inbox.push({ p, kind: "stopExternal", expired: false }));
     }
     if (job && j !== null && job.phase === "PAUSED" && !pending("resume")) {
       A(`resume printer ${p}`, "human", (c) => void c.st.daemon.inbox.push({ p, kind: "resume", job: j, expired: false }));
     }
-    // "Start may not have arrived": after a stop, refresh once and decide from the printer's facts.
-    // Normally the printer has long acted on (or lost) what was sent to it by then; a start that is
-    // still on its way at that point is the rare slow case and is budgeted like a fault.
-    if (job && j !== null && job.phase === "PREPARING" && job.staged && !job.prepared && job.stopSent && !pending("stop") && st.daemon.link && st.devices[p]!.reachable && !st.daemon.outbox.some((m) => m.p === p)) {
-      // (The refresh answer travels the same ordered channel, so it is read after everything already queued.)
+    // "Start may not have arrived": a stop was sent and neither the printer nor the daemon said anything.
+    // After a refresh that still shows nothing running, a person has to judge. A start still on its way at
+    // that point is the rare slow case and is budgeted like a fault.
+    if (job && j !== null && job.phase === "PREPARING" && job.staged && !job.prepared && job.stopSent && !pending("stop") && pr.connected && st.daemon.link && st.devices[p]!.reachable && !st.daemon.outbox.some((m) => m.p === p) && !has(pr, "NEEDS_JUDGEMENT")) {
       const d = st.devices[p]!;
       const slow = d.lanStart !== null || d.lanStop;
       A(`refresh after stopping a start that may not have arrived on printer ${p}${slow ? " (commands still on their way)" : ""}`, "human", (c) => {
         const s = c.st;
         const v = view(s, p);
         s.printers[p]!.last = v;
-        if (running(v.s)) return;
-        if (!trace(v, j) && !s.cuts.noTraceGoesToStaff && !(s.fixes.notStartedNeedsUnchangedRunCount && v.runs !== s.jobs[j]!.seenRuns)) endJob(c, j, "SEND_FAILED", "refresh after stop: no trace");
-        else if (!s.printers[p]!.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) {
-          raise(s.printers[p]!, "RECONCILE_MISMATCH", j);
-          if (!s.truth.printed.includes(j)) {
-            if (!s.fixes.staffCanJudgeNotStarted) c.find("staffJudgementHasNoCorrectOption", "refresh after stop found the job's file on the printer; staff can only judge failed or finished");
-          }
-        }
+        if (!running(v.s)) raiseFault(c, p, "NEEDS_JUDGEMENT");
       }, slow ? "slowCommands" : undefined);
     }
-    if (pr.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) {
-      const queued = st.daemon.link && st.daemon.outbox.some((m) => m.p === p); // staff act on what the panel shows once it has caught up
-      if (job && j !== null && !queued && !(st.fixes.factsClearMismatch && pr.last.job === j && running(pr.last.s))) {
+    // A person judges the job of a faulted printer: failed, finished or never started. Not while the printer
+    // reports something running. Needed when nothing says how the job ended; also allowed for any other fault
+    // without waiting for the printer to come back, which the rules must never depend on.
+    if (job && j !== null && pr.s === "FAULT" && !reportsRunning) {
+      const needed = has(pr, "NEEDS_JUDGEMENT");
+      const caughtUp = !(st.daemon.link && st.daemon.outbox.some((m) => m.p === p));
+      if (caughtUp || !needed) {
         const truthPrinted = st.truth.printed.includes(j);
         const truthFinished = st.truth.finished.includes(j);
-        // Staff look at the camera: offer the true option if there is one, else both.
-        const options: JobOutcome[] = !truthPrinted
-          ? st.fixes.staffCanJudgeNotStarted
-            ? ["STOPPED_BEFORE_START"]
-            : ["FAILED", "FINISHED"]
-          : truthFinished
-            ? ["FINISHED"]
-            : ["FAILED"];
-        // Judging while a command is still on its way to the printer is the rare slow case.
+        // They look at the machine and judge what they see.
+        const outcome: JobOutcome = !truthPrinted ? JUDGEMENTS.notStarted : truthFinished ? JUDGEMENTS.finished : JUDGEMENTS.failed;
         const slowJudge = st.devices[p]!.lanStart !== null || st.devices[p]!.lanStop;
-        for (const outcome of options) {
-          A(`staff judge printer ${p} job ${outcome}${slowJudge ? " (commands still on their way)" : ""}`, "human", (c) => {
-            clear(c.st.printers[p]!, (a) => a.reason === "RECONCILE_MISMATCH");
-            // "Never started" is the cautious version: the printer still needs its plate confirmed.
-            if (outcome === "STOPPED_BEFORE_START") {
-              c.st.jobs[j]!.prepared = true;
-              // The daemon is told as well, so that it can never start this job later.
-              c.st.daemon.inbox.push({ p, kind: "stop", job: j, expired: false });
-            }
-            endJob(c, j, outcome, "staff judgement");
-          }, slowJudge ? "slowCommands" : undefined);
-        }
+        A(
+          `staff judge printer ${p} job ${outcome}${needed ? "" : " (released without waiting)"}${slowJudge ? " (commands still on their way)" : ""}`,
+          needed ? "human" : "backstop",
+          (c) => endJob(c, j, outcome, "staff judgement"),
+          needed ? (slowJudge ? "slowCommands" : undefined) : "releases",
+        );
       }
     }
-    // The administrator's last resort. Not offered while the panel is connected and the printer reports a job running.
-    if (["PREPARING", "PRINTING", "PAUSED", "EXTERNAL_JOB"].includes(pr.s) && !(pr.connected && running(pr.last.s))) {
-      const truthPrinted = j !== null && st.truth.printed.includes(j);
-      const truthFinished = j !== null && st.truth.finished.includes(j);
-      // They look at the machine and judge what they see at that moment.
-      const outcome: JobOutcome | null = job && j !== null ? (!truthPrinted ? JUDGEMENTS.notStarted : truthFinished ? JUDGEMENTS.finished : JUDGEMENTS.failed) : null;
-      A(
-        `admin reclaims printer ${p}${outcome ? ` judging job ${outcome}` : ""}`,
-        "backstop",
-        (c) => {
-          const P = c.st.printers[p]!;
-          if (outcome && j !== null) {
-            // The daemon is told, so that it never starts (or goes on with) this job.
-            c.st.daemon.inbox.push({ p, kind: "stop", job: j, expired: false });
-            endJob(c, j, outcome, "forced reclaim");
-          }
-          if (P.s !== "CLEARING_REQUIRED") c.setPrinter(p, "forceReclaimed");
-          clear(P, (a) => JOB_ATTENTION.includes(a.reason));
-          P.lateRun = null;
-        },
-        "reclaims",
-      );
-    }
-    for (const reason of DISMISSABLE_ATTENTION) {
-      if (pr.attention.some((a) => a.reason === reason)) {
-        A(`mark ${reason} handled on printer ${p}`, "human", (c) => clear(c.st.printers[p]!, (a) => a.reason === reason));
-      }
-    }
-    if (pr.s === "CLEARING_REQUIRED" && !st.orders.some((o) => o.s === "PRINTED" && o.lastPrinter === p)) {
+    if (has(pr, "SEND_FAILED")) A(`mark SEND_FAILED handled on printer ${p}`, "human", (c) => dropFault(c, p, "SEND_FAILED"));
+    if (pr.s === "CLEARING_REQUIRED" && pr.job === null && !st.orders.some((o) => o.s === "PRINTED" && o.lastPrinter === p)) {
       A(`confirm plate cleared on printer ${p}`, "human", (c) => {
-        const s = c.st;
-        release(c, p, "plateCleared");
-        clear(s.printers[p]!, (a) => a.reason === "START_FAILED" || a.reason === "STARTED_WITHOUT_CLEARING");
-        if (!running(s.devices[p]!.s)) s.devices[p]!.plateDirty = false;
-      });
-    }
-    if ((pr.s === "IDLE" || pr.s === "OFFLINE") && pr.job === null) A(`start maintenance on printer ${p}`, "human", (c) => c.setPrinter(p, "startMaintenance"));
-    if (pr.s === "MAINTENANCE" && !running(pr.last.s)) {
-      A(`end maintenance on printer ${p}`, "human", (c) => {
-        release(c, p, "endMaintenance");
+        c.setPrinter(p, "plateCleared");
         if (!running(c.st.devices[p]!.s)) c.st.devices[p]!.plateDirty = false;
       });
     }
+    if (pr.job === null && !has(pr, "MAINTENANCE") && pr.s !== "WORKING") A(`start maintenance on printer ${p}`, "human", (c) => raiseFault(c, p, "MAINTENANCE"));
+    if (has(pr, "MAINTENANCE")) A(`end maintenance on printer ${p}`, "human", (c) => dropFault(c, p, "MAINTENANCE"));
   });
 
   // ---- world: message delivery
@@ -1143,8 +889,7 @@ function actions(st: State): Act[] {
         s.daemon.link = false;
         s.printers.forEach((pr, p) => {
           pr.connected = false;
-          if (pr.s === "IDLE") c.setPrinter(p, "disconnectedWhileIdle");
-          else if (pr.s !== "OFFLINE") pr.lost = true;
+          raiseFault(c, p, "UNREACHABLE");
         });
         // Snapshots in flight are not resent.
         s.daemon.outbox = s.daemon.outbox.filter((m) => m.kind !== "snapshot");
@@ -1166,9 +911,7 @@ function actions(st: State): Act[] {
         s.daemon.link = false;
         s.printers.forEach((pr, p) => {
           pr.connected = false;
-          pr.connected = false;
-          if (pr.s === "IDLE") c.setPrinter(p, "disconnectedWhileIdle");
-          else if (pr.s !== "OFFLINE") pr.lost = true;
+          raiseFault(c, p, "UNREACHABLE");
         });
       }
     },
@@ -1182,7 +925,7 @@ function actions(st: State): Act[] {
         const s = c.st;
         s.daemon.transfers.splice(k, 1);
         const d = s.devices[t.p]!;
-        if (running(d.s) || (s.fixes.daemonRejectsStartIfPrinterWasUsed && (t.printerWasUsed || d.runs !== t.seenRuns))) {
+        if (running(d.s) || (s.opts.daemonChecksPrinterUnused && (t.printerWasUsed || d.runs !== t.seenRuns))) {
           emit(s, t.p, "startRejectedBusy", { job: t.job });
           return;
         }
@@ -1313,15 +1056,6 @@ function actions(st: State): Act[] {
   return acts;
 }
 
-/** A person frees a printer. While the panel can't reach it, it becomes offline rather than idle and reconciles when it is back. */
-function release(c: Ctx, p: number, trigger: "plateCleared" | "endMaintenance") {
-  const pr = c.st.printers[p]!;
-  if (c.st.fixes.freedWhileLostGoesOffline && !pr.connected) {
-    c.setPrinter(p, "releasedWhileUnreachable");
-    pr.lost = false;
-  } else c.setPrinter(p, trigger);
-}
-
 function deviceResume(st: State, p: number) {
   const d = st.devices[p]!;
   d.s = d.pausedFromPrep ? "PREPARING" : "PRINTING";
@@ -1361,7 +1095,7 @@ function daemonCommand(c: Ctx, cmd: Cmd) {
         return;
       }
       const sg = st.daemon.staged.find((x) => x.job === cmd.job);
-      if (st.fixes.daemonConfirmsStopOfUnstartedJob && d.reachable && sg && sg.watched && sg.runs === d.runs) {
+      if (st.opts.daemonConfirmsStopOfUnstartedJob && d.reachable && sg && sg.watched && sg.runs === d.runs) {
         // The printer shows no sign of ever having taken this job: the daemon removes the staged
         // file, promises never to start it and says so, exactly as it does during a transfer.
         d.files = d.files.filter((f) => f !== cmd.job);
@@ -1401,15 +1135,16 @@ export function successors(st: State): Step[] {
 export function invariantViolations(st: State): string[] {
   const out: string[] = [];
   st.printers.forEach((pr, p) => {
+    if ((pr.s === "FAULT") !== pr.faults.length > 0) out.push(`printer ${p} is ${pr.s} with faults [${pr.faults.join(",")}]`);
+    if (!pr.connected && !has(pr, "UNREACHABLE")) out.push(`printer ${p} can't be reached but isn't flagged`);
+    if (pr.s === "AVAILABLE" && (pr.job !== null || pr.busyWithOther)) out.push(`printer ${p} is available while something runs on it`);
+    if (pr.s === "CLEARING_REQUIRED" && busy(pr)) out.push(`printer ${p} needs clearing while something runs on it`);
+    if (pr.s === "WORKING" && !busy(pr)) out.push(`printer ${p} is working with nothing running`);
     if (pr.job !== null) {
       const job = st.jobs[pr.job]!;
       if (job.phase === "ENDED") out.push(`printer ${p} still points at ended job ${pr.job}`);
       if (job.printer !== p) out.push(`printer ${p} points at job of printer ${job.printer}`);
-      if (!["PREPARING", "PRINTING", "PAUSED"].includes(pr.s)) out.push(`printer ${p} has a current job but is ${pr.s}`);
-      if ((pr.s === "PAUSED") !== (job.phase === "PAUSED" && job.pausedFrom === "PRINTING")) out.push(`printer ${p} ${pr.s} but job ${job.phase}`);
-    } else if (["PREPARING", "PRINTING", "PAUSED"].includes(pr.s)) out.push(`printer ${p} is ${pr.s} without a job`);
-    if ((pr.s === "IDLE" || pr.s === "OFFLINE") && pr.lost) out.push(`printer ${p} is ${pr.s} and lost at the same time`);
-    if (pr.s === "IDLE" && !pr.connected) out.push(`printer ${p} is idle while the panel can't reach it`);
+    } else if (has(pr, "NEEDS_JUDGEMENT")) out.push(`printer ${p} waits for a judgement without a job`);
   });
   st.orders.forEach((o, i) => {
     const active = o.s === "DISPATCHED" || o.s === "PRINTING";
@@ -1436,24 +1171,22 @@ export function quiescentMismatch(st: State): string[] {
   st.printers.forEach((pr, p) => {
     const d = st.devices[p]!;
     if (!d.reachable || d.lanStart !== null || d.lanStop || d.lanResume) return;
-    if (pr.attention.some((a) => a.reason === "RECONCILE_MISMATCH")) return; // waiting for staff
-    if (pr.lost) out.push(`printer ${p} still flagged lost with everything delivered`);
+    if (has(pr, "NEEDS_JUDGEMENT")) return; // waiting for a person
+    if (has(pr, "UNREACHABLE")) out.push(`printer ${p} still flagged unreachable with everything delivered`);
     const r = running(d.s);
-    if ((pr.s === "IDLE" || pr.s === "CLEARING_REQUIRED") && r) out.push(`panel ${pr.s} but printer ${p} is running ${d.job}`);
-    if (pr.s === "EXTERNAL_JOB" && !r) out.push(`panel external job but printer ${p} is ${d.s}`);
-    if ((pr.s === "PRINTING" || pr.s === "PAUSED") && !(r && d.job === pr.job)) out.push(`panel ${pr.s} job ${pr.job} but printer ${p} ${d.s} ${d.job}`);
+    if ((pr.s === "AVAILABLE" || pr.s === "CLEARING_REQUIRED") && r) out.push(`panel ${pr.s} but printer ${p} is running ${d.job}`);
+    if (pr.busyWithOther && !r) out.push(`panel shows another job running but printer ${p} is ${d.s}`);
+    const job = pr.job === null ? null : st.jobs[pr.job]!;
+    if (job && (job.phase === "PRINTING" || job.phase === "PAUSED") && !(r && d.job === pr.job)) out.push(`panel job ${pr.job} ${job.phase} but printer ${p} ${d.s} ${d.job}`);
   });
   return out;
 }
 
 const SETTLED: readonly OrderState[] = [...TERMINAL_ORDER_STATES, "FAILED"];
 
-/** Everything has come to rest: orders settled, printers idle with no flags. */
+/** Everything has come to rest: orders settled, printers available. */
 export function settled(st: State): boolean {
-  return (
-    st.orders.every((o) => SETTLED.includes(o.s)) &&
-    st.printers.every((pr) => pr.s === "IDLE" && pr.job === null && !pr.lost && pr.attention.length === 0)
-  );
+  return st.orders.every((o) => SETTLED.includes(o.s)) && st.printers.every((pr) => pr.s === "AVAILABLE");
 }
 
 export const printedOrBeyond = (o: Order) => o.s === "PRINTED" || o.s === "READY_FOR_PICKUP" || o.s === "COMPLETED";
@@ -1461,7 +1194,7 @@ export const printedOrBeyond = (o: Order) => o.s === "PRINTED" || o.s === "READY
 export function describe(st: State): string {
   const o = st.orders.map((x, i) => `order${i}=${x.s}${x.job !== null ? `(job${x.job})` : ""}`).join(" ");
   const p = st.printers
-    .map((x, i) => `printer${i}=${x.s}${x.job !== null ? `(job${x.job})` : ""}${x.lost ? "+lost" : ""}${x.attention.map((a) => `+${a.reason}`).join("")}`)
+    .map((x, i) => `printer${i}=${x.s}${x.job !== null ? `(job${x.job})` : ""}${x.busyWithOther ? "+other" : ""}${x.faults.map((f) => `+${f}`).join("")}`)
     .join(" ");
   const d = st.devices.map((x, i) => `device${i}=${x.s}/${x.job}${x.reachable ? "" : "/unreachable"}${x.plateDirty ? "/dirty" : ""}`).join(" ");
   return `${o} | ${p} | ${d} | link=${st.daemon.link ? "up" : "down"} outbox=${st.daemon.outbox.length} inbox=${st.daemon.inbox.length}`;

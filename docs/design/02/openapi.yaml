@@ -844,7 +844,7 @@ paths:
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
       x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过、被标为不重打（R-PRT-18）或申请者账户已停用（Q341）的失败订单返回 422 rule_violation（R-PRT-09）。
+      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 rule_violation（R-PRT-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -917,11 +917,11 @@ paths:
     post:
       operationId: reconcileOrder
       tags: [orders]
-      summary: 对账不一致时判失败、判打完或判没开打
+      summary: 人工判定：判失败、判打完或判没开打
       x-permission: printer:operate
       x-transitions: [S-ORD-T13, S-ORD-T14, S-ORD-T09]
       x-rules: [R-PRT-08]
-      description: 打印机上报这个任务正在运行时不能判，返回 409 state_conflict（Q359）。判没开打（NOT_STARTED）：任务以 STOPPED_BEFORE_START 结束，订单回排队原位，打印机进待清板，面板给 daemon 发 job.stop 让它记下不再开打（Q360）。
+      description: 只在这个任务的打印机挂着 JUDGE 原因时可用（R-PRT-07 第 ③ 种、R-CMD-04），否则 409 state_conflict；放出异常打印机时的判定走 releasePrinter。打印机上报这个任务正在运行时不能判，返回 409 state_conflict（Q359）。判没开打（NOT_STARTED）：任务以 STOPPED_BEFORE_START 结束，订单回排队原位，打印机进待清板，面板给 daemon 发 job.stop 让它记下不再开打（Q360）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -934,39 +934,8 @@ paths:
               properties:
                 expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账（S-ORD-T13、T14，Q318）}
                 outcome: {type: string, enum: [FAILED, PRINTED, NOT_STARTED]}
-                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
-              required: [expectedStatus, outcome]
-              additionalProperties: false
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/OrderDetail'}
-        default: {$ref: '#/components/responses/Problem'}
-  /orders/{orderId}/resolve-inconsistency:
-    post:
-      operationId: resolveOrderInconsistency
-      tags: [orders]
-      summary: 处理状态自检列出的订单
-      x-permission: printer:reclaim
-      x-transitions: [S-ORD-T13, S-ORD-T14, S-ORD-T09]
-      x-rules: [R-OPS-03]
-      description: 只能用于状态自检（GET /consistency）当前列出的订单，没列出的返回 409 state_conflict。订单按判定走现有转换，写审计（Q374）。
-      parameters:
-      - {$ref: '#/components/parameters/OrderId'}
-      - {$ref: '#/components/parameters/IdempotencyKey'}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING]}
-                outcome: {type: string, enum: [FAILED, PRINTED, NOT_STARTED]}
-                reason: {type: string, minLength: 1, maxLength: 2000, description: 必填，写进审计}
-              required: [expectedStatus, outcome, reason]
+                note: {type: string, minLength: 1, maxLength: 2000, description: 原因，必填，写审计（R-PRT-08、R-NTE-03）}
+              required: [expectedStatus, outcome, note]
               additionalProperties: false
       responses:
         '200':
@@ -1010,7 +979,7 @@ paths:
       tags: [orders]
       summary: 铲件入库
       x-permission: order:store
-      x-transitions: [S-ORD-T16, S-PRN-T11]
+      x-transitions: [S-ORD-T16, S-PRN-T25]
       x-rules: [R-PCK-01, INV-12]
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -1200,7 +1169,7 @@ paths:
       summary: 某单派到某台的可行性和映射建议
       x-permission: order:dispatch
       x-rules: [R-DSP-03, R-DSP-04, R-DSP-05, R-DSP-06, R-DSP-07, R-DSP-09, R-DSP-10, R-DSP-12, R-DSP-15]
-      description: 打印机挂了阻止派单的标记（文档 1 §4.2，所有标记都阻止）、在维护中或已停用时返回 409 printer_flagged，params.flags 列出原因（R-DSP-15，Q233）。
+      description: 打印机不是可用或已停用时返回 409 printer_not_available，params.state 和 params.reasons 列出原因（R-DSP-15，Q233、Q396）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - name: orderId
@@ -1219,9 +1188,9 @@ paths:
       tags: [queue]
       summary: 派单
       x-permission: order:dispatch
-      x-transitions: [S-ORD-T08, S-PRN-T03]
+      x-transitions: [S-ORD-T08, S-PRN-T20]
       x-rules: [R-DSP-02, R-DSP-03, R-DSP-04, R-DSP-06, R-DSP-07, R-DSP-08, R-DSP-09, R-DSP-11, R-DSP-13, R-DSP-15, R-ARB-10]
-      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机挂了任何标记、在维护中或已停用返回 409 printer_flagged（params.flags），手动派单也一样（R-DSP-15，Q233）。
+      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机不是可用或已停用返回 409 printer_not_available（params.state、params.reasons），手动派单也一样（R-DSP-15，Q233）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1234,7 +1203,7 @@ paths:
               properties:
                 orderId: {type: string, format: uuid}
                 expectedStatus: {type: string, enum: [QUEUED]}
-                expectedState: {type: string, enum: [IDLE]}
+                expectedState: {type: string, enum: [AVAILABLE]}
                 bedType: {type: [string, 'null']}
                 bedTypeMismatchConfirmed: {type: boolean, default: false}
                 mapping:
@@ -1390,6 +1359,35 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PrinterDetail'}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/trays/{unit}/{slot}/grams:
+    put:
+      operationId: setTrayGrams
+      tags: [printers]
+      summary: 改槽位剩余克数
+      description: 人改过即去掉"待确认"；记审计，不写回打印机。RFID 卷也可以改
+      x-permission: filament:catalog
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - {name: unit, in: path, required: true, schema: {type: integer}, description: AMS 编号；外挂料 = -1}
+      - {name: slot, in: path, required: true, schema: {type: integer}}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grams: {type: integer, minimum: 0, maximum: 10000}
+              required: [grams]
+              additionalProperties: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Tray'}
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/star:
     put:
       operationId: setPrinterStar
@@ -1420,9 +1418,10 @@ paths:
     post:
       operationId: enterMaintenance
       tags: [printers]
-      summary: 进维护模式
+      summary: 挂上维护原因
       x-permission: printer:maintenance
-      x-transitions: [S-PRN-T12]
+      x-transitions: [S-PRN-T22]
+      description: 给打印机挂异常原因 MAINTENANCE（S-RSN-MAINT），任何状态都能挂；有当前任务时任务照常推进（Q397）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1433,7 +1432,7 @@ paths:
             schema:
               type: object
               properties:
-                expectedState: {type: string, enum: [IDLE, OFFLINE]}
+                expectedState: {$ref: '#/components/schemas/PrinterState'}
                 reason: {type: string, minLength: 1}
               required: [expectedState, reason]
               additionalProperties: false
@@ -1448,9 +1447,10 @@ paths:
     post:
       operationId: exitMaintenance
       tags: [printers]
-      summary: 关维护模式
+      summary: 去掉维护原因
       x-permission: printer:maintenance
-      x-transitions: [S-PRN-T13]
+      x-transitions: [S-PRN-T23, S-PRN-T24]
+      description: 去掉 MAINTENANCE 原因。没有别的原因时，打印机还在跑东西（如测试打印）进工作，否则进待清板，由人确认清板后才可用（Q397）；不再需要勾"热床已清理"。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1461,12 +1461,8 @@ paths:
             schema:
               type: object
               properties:
-                expectedState: {type: string, enum: [MAINTENANCE]}
-                bedCleared:
-                  type: boolean
-                  const: true
-                  description: 对话框里勾"热床已清理"，必须为 true 才能关维护（S-PRN-T13，INV-01，Q305）
-              required: [expectedState, bedCleared]
+                expectedState: {type: string, enum: [ATTENTION]}
+              required: [expectedState]
               additionalProperties: false
       responses:
         '200':
@@ -1483,7 +1479,7 @@ paths:
       x-permission: printer:stop
       x-transitions: [S-ORD-T09, S-ORD-T13]
       x-rules: [R-PRT-04, R-PRT-05, R-CMD-04, R-CMD-05, P-01]
-      description: 前端先让人选原因并二次确认。准备中（含任务还在传文件，daemon 中止传输并确认没开打，Q223）、打印中、暂停中都发 job.stop（Q203），不挂标记、没有命令锁；打印机还报打印中或暂停中时可以再点（R-CMD-05，Q243）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或发出停止 10 秒后刷新为空闲且无这次任务痕迹后才回原位（R-CMD-04），没有单独的"判为没到"接口（Q220）。
+      description: 前端先让人选原因并二次确认。任务在传文件（daemon 中止传输并确认没开打，Q223）、准备中、打印中、暂停中都发 job.stop（Q203），没有命令锁；打印机还报打印中或暂停中时可以再点（R-CMD-05，Q243）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或 daemon 确认没开打后才回原位；daemon 确认不了时打印机挂 JUDGE，由人判（R-CMD-04，Q395）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1495,17 +1491,10 @@ paths:
               type: object
               properties:
                 expectedState: {$ref: '#/components/schemas/PrinterState'}
-                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部占用时不带（Q326）；维护中且打印机上报在运行或暂停时也不带（Q377）}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部任务时不带（Q326、Q377）}
                 reason: {type: string, minLength: 1}
                 reasonVisible: {type: boolean, default: true}
               required: [expectedState, reason]
-              if:
-                properties:
-                  expectedState: {enum: [EXTERNAL, MAINTENANCE]}
-              then:
-                not: {required: [expectedJobId]}
-              else:
-                required: [expectedJobId]
               additionalProperties: false
       responses:
         '202': {$ref: '#/components/responses/Accepted'}
@@ -1625,14 +1614,15 @@ paths:
                         modifiedAt: {type: string, format: date-time}
                         system: {type: boolean, description: 是否系统文件（MSG-JOBREF-02）}
         default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/attention/dismiss:
+  /printers/{printerId}/release:
     post:
-      operationId: dismissAttention
+      operationId: releasePrinter
       tags: [printers]
-      summary: 等待处理标记已处理
+      summary: 放出异常的打印机
       x-permission: printer:operate
-      x-rules: [R-PRT-24, S-FLG-ATTENTION]
-      description: 只能去掉 START_FAILED、UNCLEARED_START、LATE_START 三种原因（Q325、Q340）；其他原因返回 422。写审计。
+      x-transitions: [S-PRN-T24, S-ORD-T13, S-ORD-T14, S-ORD-T09]
+      x-rules: [R-PRT-27, R-PRT-08]
+      description: 去掉这台打印机除 OFFLINE 以外的全部异常原因，没有别的原因就进待清板；还联系不上的留在异常，重连后再进待清板（Q420）。打印机最新上报正在运行时返回 409 state_conflict（Q372）。有当前任务时必须带 expectedJobId 和 outcome，没有时两者都不带，否则 422。判没开打时给 daemon 发 job.stop。写审计（Q402）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1643,37 +1633,7 @@ paths:
             schema:
               type: object
               properties:
-                reason: {type: string, enum: [START_FAILED, UNCLEARED_START, LATE_START]}
-                jobId: {type: [string, 'null'], format: uuid, description: 这条原因挂在哪个任务上（START_FAILED 时是结束的任务，LATE_START 时是那个迟到的任务）}
-              required: [reason]
-              additionalProperties: false
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PrinterDetail'}
-        default: {$ref: '#/components/responses/Problem'}
-  /printers/{printerId}/reclaim:
-    post:
-      operationId: reclaimPrinter
-      tags: [printers]
-      summary: 强制收回打印机
-      x-permission: printer:reclaim
-      x-transitions: [S-PRN-T18, S-ORD-T13, S-ORD-T14, S-ORD-T09]
-      x-rules: [R-PRT-25]
-      description: 打印机固定进待清板。面板连着这台打印机且它最新上报正在运行时返回 409 state_conflict（Q372）。有当前任务时必须带 expectedJobId 和 outcome，没有当前任务（外部占用）时两者都不带，否则 422。去掉和任务有关的等待处理（RECONCILE_MISMATCH、LATE_START、START_FAILED），给 daemon 发 job.stop 让它记下这个任务不再开打，写审计（Q369、Q373）。
-      parameters:
-      - {$ref: '#/components/parameters/PrinterId'}
-      - {$ref: '#/components/parameters/IdempotencyKey'}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                expectedState: {type: string, enum: [PREPARING, PRINTING, PAUSED, EXTERNAL]}
+                expectedState: {type: string, enum: [ATTENTION]}
                 expectedJobId: {type: [string, 'null'], format: uuid, description: 用户看到的当前任务；对不上 409 job_mismatch}
                 outcome: {type: [string, 'null'], enum: [FAILED, PRINTED, NOT_STARTED, null], description: 当前任务的判定}
                 reason: {type: string, minLength: 1, maxLength: 2000, description: 必填，写进审计}
@@ -1686,15 +1646,52 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PrinterDetail'}
         default: {$ref: '#/components/responses/Problem'}
+  /printers/{printerId}/events:
+    get:
+      operationId: listPrinterEvents
+      tags: [printers]
+      summary: 打印机事件日志
+      x-permission: printer:operate
+      x-rules: [R-PRT-26]
+      description: 最新的在前，游标分页。只读。
+      parameters:
+      - {$ref: '#/components/parameters/PrinterId'}
+      - name: cursor
+        in: query
+        schema: {type: string}
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        kind: {type: string, enum: [PAUSED, RESUMED, ERROR, HMS, CONNECTION_DOWN, CONNECTION_UP, REFILL]}
+                        at: {type: string, format: date-time}
+                        jobId: {type: [string, 'null'], format: uuid}
+                        data: {type: object}
+                      required: [id, kind, at, jobId, data]
+                      additionalProperties: false
+                  nextCursor: {type: [string, 'null']}
+                required: [items, nextCursor]
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/clear-bed:
     post:
       operationId: confirmBedCleared
       tags: [printers]
       summary: 确认清板
       x-permission: order:store
-      x-transitions: [S-PRN-T11]
+      x-transitions: [S-PRN-T25]
       x-rules: [R-PCK-02, INV-01]
-      description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。同一个事务里去掉等待处理的 START_FAILED、UNCLEARED_START 原因（Q325）。
+      description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1880,7 +1877,7 @@ paths:
                     transport: {type: [string, 'null'], enum: [srt, rtsps]}
                   required: [kind, whepUrl, hlsUrl, prefer, token, expiresAt, transport]
                   additionalProperties: false
-                  description: 按 CFG-CAM-11 给出一个或两个地址；自动 = 两个都给，prefer=webrtc
+                  description: 两个地址都给，prefer=webrtc（固定，Q391）
                 - type: object
                   properties:
                     kind: {type: string, enum: [jpeg-frames]}
@@ -2253,7 +2250,7 @@ paths:
       summary: 改角色、停用
       x-permission: user:manage
       x-rules: [INV-13, API-AUTH-04, R-ACC-05]
-      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。待审核、排队中的同一个事务里取消，原因"账户停用"；已派单、打印中的照常打完，之后按 R-PCK-05 处理；失败的保持失败。
+      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。停用只管登录和提交，不连带取消订单，要取消的由管理员另外取消（Q415）。
       parameters:
       - name: userId
         in: path
@@ -2629,36 +2626,6 @@ paths:
                 required: [items, nextCursor]
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
-  /consistency:
-    get:
-      operationId: getConsistency
-      tags: [admin]
-      summary: 状态自检
-      x-permission: printer:reclaim
-      x-rules: [R-OPS-03]
-      description: 只读。列出订单、打印任务、打印机三者之间不该出现的不一致。正常情况下是空的（Q374）。
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        kind: {type: string, enum: [ORDER_WITHOUT_ACTIVE_JOB, PRINTER_WITHOUT_CURRENT_JOB, JOB_STATE_MISMATCH, PRINTER_WITH_SEVERAL_ACTIVE_JOBS]}
-                        orderId: {type: [string, 'null'], format: uuid}
-                        printerId: {type: [string, 'null'], format: uuid}
-                        jobId: {type: [string, 'null'], format: uuid}
-                      required: [kind, orderId, printerId, jobId]
-                      additionalProperties: false
-                required: [items]
-                additionalProperties: false
-        default: {$ref: '#/components/responses/Problem'}
   /archive:
     post:
       operationId: archivePeriod
@@ -2793,11 +2760,7 @@ components:
       properties:
         commandId: {type: string, format: uuid}
         printerId: {type: string, format: uuid}
-        flag:
-          oneOf:
-          - {$ref: '#/components/schemas/PrinterFlag'}
-          - {type: 'null'}
-      required: [commandId, printerId, flag]
+      required: [commandId, printerId]
       additionalProperties: false
       description: API-ASYNC-01：命令已记下并发出。结果通过实时推送到达。
     Person:
@@ -2827,11 +2790,12 @@ components:
       description: entities.md §2.1。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算（文档 1 S-ORD-DISPATCHED，Q248）
     PrinterState:
       type: string
-      enum: [OFFLINE, IDLE, PREPARING, PRINTING, PAUSED, CLEARING_REQUIRED, EXTERNAL, MAINTENANCE]
-      description: entities.md §2.2
-    PrinterFlag:
+      enum: [AVAILABLE, WORKING, ATTENTION, CLEARING_REQUIRED]
+      description: entities.md §2.2；第二稿四个状态（Q396）。准备中、打印中、暂停中看 job.phase
+    AttentionReason:
       type: string
-      enum: [ATTENTION, LOST, STORAGE_LOW, DAEMON_UPGRADE]
+      enum: [OFFLINE, ERROR, MAINTENANCE, JUDGE, SEND_FAILED, DAEMON_UPGRADE]
+      description: 文档 1 §4.2 异常原因
     PauseReason: {type: string, enum: [USER, ERROR, RUNOUT]}
     ColourPref: {type: string, enum: [EXACT, SIMILAR, ANY]}
     ProcessNode: {type: string, enum: [SUBMIT, REVIEW, QUEUE, PRINT, STORE, PICKUP]}
@@ -3008,10 +2972,10 @@ components:
             id: {type: string, format: uuid}
             name: {type: string}
             state: {$ref: '#/components/schemas/PrinterState'}
-            flags:
+            reasons:
               type: array
-              items: {$ref: '#/components/schemas/PrinterFlag'}
-          required: [id, name, state, flags]
+              items: {$ref: '#/components/schemas/AttentionReason'}
+          required: [id, name, state, reasons]
           additionalProperties: false
         progress:
           type: [object, 'null']
@@ -3194,11 +3158,12 @@ components:
         material: {type: [string, 'null']}
         subType: {type: [string, 'null']}
         colour: {type: [string, 'null']}
-        remainingPercent: {type: [integer, 'null']}
+        remainingGrams: {type: integer, description: 面板记的槽位克数，不是打印机估的余量}
+        gramsUnconfirmed: {type: boolean, description: 换料后重置为默认净重、还没人确认}
         extruders:
           type: array
           items: {type: integer}
-      required: [unit, slot, label, extruders]
+      required: [unit, slot, label, remainingGrams, gramsUnconfirmed, extruders]
       additionalProperties: false
     MappingCheck:
       type: object
@@ -3325,9 +3290,11 @@ components:
           oneOf:
           - {$ref: '#/components/schemas/PauseReason'}
           - {type: 'null'}
-        flags:
+        reasons:
           type: array
-          items: {$ref: '#/components/schemas/PrinterFlag'}
+          items: {$ref: '#/components/schemas/AttentionReason'}
+          description: 异常原因（S-RSN-*）；空 = 不在异常
+        externalRunning: {type: boolean, description: 工作（外部任务）}
         starred: {type: boolean}
         openToApplicants: {type: boolean}
         job:
@@ -3409,14 +3376,15 @@ components:
               additionalProperties: false
           attention:
             type: array
-            description: 等待处理的全部原因，每个原因一条；界面合成一个标记，点开列出（Q315）
+            description: 异常的全部原因，每个原因一条；界面合成一个异常，点开列出（Q315、Q396）
             items:
               type: object
               properties:
-                reason: {type: string, enum: [ERROR, RUNOUT, START_FAILED, RECONCILE_MISMATCH, LATE_START, UNCLEARED_START]}
+                reason: {$ref: '#/components/schemas/AttentionReason'}
                 since: {type: string, format: date-time}
                 jobId: {type: [string, 'null'], format: uuid}
-              required: [reason, since, jobId]
+                note: {type: [string, 'null'], description: 维护原因等}
+              required: [reason, since, jobId, note]
               additionalProperties: false
           activeErrors:
             type: array
@@ -3555,12 +3523,10 @@ components:
           - ATTENTION
           - PAUSED_TOO_LONG
           - STOP_UNCONFIRMED
-          - LOST
-          - STORAGE_LOW
-          - DAEMON_UPGRADE
           - BYPASSED
           - UNCLAIMED
           - CLEAR_BED
+          - LOW_FILAMENT
         since: {type: string, format: date-time}
         orderId: {type: [string, 'null'], format: uuid}
         printerId: {type: [string, 'null'], format: uuid}

@@ -9,22 +9,21 @@
  *   - no system print starts on a plate nobody cleared,
  *   - once everything is delivered the panel agrees with the printer,
  *   - nothing is ever stuck: people plus a well-behaved world can always
- *     bring every order to rest and every printer back to idle, and a queued
- *     order can still get printed.
+ *     bring every order to rest and every printer back to available, and a
+ *     queued order can still get printed.
  *
- * The first group runs the current rules. The second switches off the rules
- * that were added after this exploration first found gaps (see `RuleFixes` in
- * model.ts) and checks that each gap is still caught, so the checker itself
- * can't quietly stop seeing them.
+ * The last group switches off one safeguard at a time and checks that the
+ * problem it prevents shows up, so the checker can't quietly stop seeing it.
  */
 import { describe, expect, it } from "vitest";
 import { explore, randomWalks } from "./explore.js";
-import { CURRENT_RULES, BEFORE_FIXES, type Budget, NO_FAULTS } from "./model.js";
+import { type Budget, CURRENT_RULES, NO_FAULTS, type Options } from "./model.js";
 
 type Faults = Partial<Budget>;
 
 const SCENARIOS: Record<string, Faults> = {
   "no faults": {},
+  "no faults, the order can be dispatched twice": { dispatches: 2 },
   "a start that never reaches the printer": { lostStarts: 1 },
   "a start the printer acts on late": { slowCommands: 1 },
   "panel link drops": { linkDrops: 1 },
@@ -36,42 +35,41 @@ const SCENARIOS: Record<string, Faults> = {
   "a command expires before delivery": { expiries: 1 },
   "file transfer fails": { transferFailures: 1 },
   "daemon restarts and loses its local state": { daemonWipes: 1 },
-  "printer reboots while unreachable": { lanDrops: 1, reboots: 1, dispatches: 1 },
+  "a person judges a job without waiting for the printer to come back": { linkDrops: 1, releases: 1 },
+  "printer reboots while unreachable": { lanDrops: 1, reboots: 1 },
   "revision, archive, account deactivation, file expiry around a failure": { revisions: 1, archives: 1, deactivations: 1, fileExpiries: 1, deviceFailures: 1 },
-  "panel link drops while someone starts an external job": { linkDrops: 1, externalStarts: 1, dispatches: 1 },
-  "printer drops off the LAN while someone starts an external job": { lanDrops: 1, externalStarts: 1, dispatches: 1 },
-  "printer fails while off the LAN": { lanDrops: 1, deviceFailures: 1, dispatches: 1 },
-  "print stopped on the printer while off the LAN": { lanDrops: 1, screenStops: 1, dispatches: 1 },
-  "printer fails while the panel link is down": { linkDrops: 1, deviceFailures: 1, dispatches: 1 },
-  "print stopped on the printer while the panel link is down": { linkDrops: 1, screenStops: 1, dispatches: 1 },
-  "external job after a start that never arrived": { externalStarts: 1, lostStarts: 1, dispatches: 1 },
-  "panel link and LAN both drop": { linkDrops: 1, lanDrops: 1, dispatches: 1 },
-  "daemon loses its state and an external job overwrites the last evidence": { daemonWipes: 1, externalStarts: 1, dispatches: 1 },
+  "panel link drops while someone starts an external job": { linkDrops: 1, externalStarts: 1 },
+  "printer drops off the LAN while someone starts an external job": { lanDrops: 1, externalStarts: 1 },
+  "printer fails while off the LAN": { lanDrops: 1, deviceFailures: 1 },
+  "print stopped on the printer while off the LAN": { lanDrops: 1, screenStops: 1 },
+  "printer fails while the panel link is down": { linkDrops: 1, deviceFailures: 1 },
+  "print stopped on the printer while the panel link is down": { linkDrops: 1, screenStops: 1 },
+  "external job after a start that never arrived": { externalStarts: 1, lostStarts: 1 },
+  "panel link and LAN both drop": { linkDrops: 1, lanDrops: 1 },
+  "daemon loses its state and an external job overwrites the last evidence": { daemonWipes: 1, externalStarts: 1 },
   "printer reboots unseen and the panel misses the start": { linkDrops: 1, lanDrops: 1, reboots: 1, dispatches: 1 },
-  "a misjudged job pauses while the printer is in maintenance": { linkDrops: 1, daemonWipes: 1, pauses: 1, dispatches: 1 },
-  "an administrator reclaims a printer while a link is down": { linkDrops: 1, reclaims: 1, dispatches: 1 },
-  "an administrator reclaims a printer that is off the LAN": { lanDrops: 1, reclaims: 1, dispatches: 1 },
+  "a job pauses while its printer is in maintenance after a wrong judgement": { linkDrops: 1, daemonWipes: 1, pauses: 1, dispatches: 1 },
 };
 
-const run = (faults: Faults, current: boolean) =>
-  explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, ...faults }, fixes: current ? CURRENT_RULES : BEFORE_FIXES });
+// One dispatch unless the scenario asks for more, which keeps every scenario small enough to explore completely.
+const run = (faults: Faults, opts: Options = CURRENT_RULES) => explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, dispatches: 1, ...faults }, opts }, 1_500_000);
 
 const summary = (problems: { kind: string; detail: string; trace: string[] }[]) =>
   problems.map((p) => `${p.kind}: ${p.detail}\n    ${p.trace.join(" → ")}`).join("\n");
 
-describe("under the current rules nothing gets stuck or misjudged", () => {
+describe("nothing gets stuck or misjudged", () => {
   for (const [name, faults] of Object.entries(SCENARIOS)) {
     it(name, { timeout: 120_000 }, () => {
-      const r = run(faults, true);
+      const r = run(faults);
       expect(r.complete).toBe(true);
       expect(summary(r.problems)).toBe("");
     });
   }
 
-  // Too many states to finish; the first 300 000 (breadth-first, so every short path) must be clean.
-  it("the job runs unseen while both links are down, then an external job starts", { timeout: 300_000 }, () => {
-    const budget = { ...NO_FAULTS, linkDrops: 1, lanDrops: 1, externalStarts: 1, dispatches: 1 };
-    expect(summary(explore({ printers: 1, orders: 1, budget, fixes: CURRENT_RULES }, 300_000).problems)).toBe("");
+  it("the job runs unseen while both links are down, then an external job starts (first 300,000 states)", { timeout: 120_000 }, () => {
+    // Too many states to explore completely in a test run, so this one only checks what the search reaches.
+    const r = explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, dispatches: 1, linkDrops: 1, lanDrops: 1, externalStarts: 1 }, opts: CURRENT_RULES }, 300_000);
+    expect(summary(r.problems)).toBe("");
   });
 
   it("two printers, two orders, every kind of fault at once (random walks)", { timeout: 300_000 }, () => {
@@ -95,75 +93,23 @@ describe("under the current rules nothing gets stuck or misjudged", () => {
       revisions: 1,
       archives: 1,
       deactivations: 1,
-      reclaims: 1,
+      releases: 1,
     };
-    const problems = randomWalks({ printers: 2, orders: 2, budget, fixes: CURRENT_RULES }, 1500, 150, 20261109);
+    const problems = randomWalks({ printers: 2, orders: 2, budget, opts: CURRENT_RULES }, 1500, 150, 20261109);
     expect(summary(problems)).toBe("");
   });
 });
 
-describe("without the later fixes", () => {
-  const kinds = (faults: Faults) => new Set(run(faults, false).problems.map((p) => p.kind));
+describe("what each safeguard is for", () => {
+  const kinds = (faults: Faults, off: keyof Options) => new Set(run(faults, { ...CURRENT_RULES, [off]: false }).problems.map((p) => p.kind));
 
-  it("the rules still hold when nothing goes wrong", () => {
-    const r = run({}, false);
-    expect(r.complete).toBe(true);
-    expect(summary(r.problems)).toBe("");
+  it("without the daemon's check that the printer ran nothing since the dispatch, an external job during the transfer leaves a print on an uncleared plate", { timeout: 120_000 }, () => {
+    expect(kinds({ externalStarts: 1 }, "daemonChecksPrinterUnused")).toContain("systemPrintOnUnclearedPlate");
   });
 
-  for (const name of [
-    "someone stops the print on the printer",
-    "printer pauses and is resumed on its screen",
-    "printer fails",
-    "a command expires before delivery",
-    "file transfer fails",
-    "revision, archive, account deactivation, file expiry around a failure",
-  ]) {
-    it(`the rules still hold when ${name}`, { timeout: 120_000 }, () => {
-      expect(summary(run(SCENARIOS[name]!, false).problems)).toBe("");
-    });
-  }
-
-  // The gaps the fixes closed. Each must still show up with the fixes off.
-  it("gap: stopping a start that never arrived leaves staff with no correct judgement", () => {
-    expect(kinds({ lostStarts: 1 })).toContain("staffJudgementHasNoCorrectOption");
-  });
-
-  it("gap: a reconcile mismatch outlives its job and blocks the printer for good", { timeout: 120_000 }, () => {
-    expect(kinds({ linkDrops: 1 })).toContain("stuck");
-  });
-
-  it("gap: a reconnect snapshot taken before the start command arrived sends the order back while it still prints", { timeout: 120_000 }, () => {
-    expect(kinds({ linkDrops: 1 })).toContain("outcomeContradictsPrinter");
-  });
-
-  it("gap: an external job that ran during the transfer does not stop the start", { timeout: 120_000 }, () => {
-    expect(kinds({ externalStarts: 1 })).toContain("systemPrintOnUnclearedPlate");
-  });
-
-  it("gap: a printer freed while unreachable is idle and lost at once", { timeout: 120_000 }, () => {
-    expect(kinds({ lanDrops: 1 })).toContain("invariant");
-  });
-
-  it("gap: an external job that ended while the printer was unreachable is never noticed", { timeout: 120_000 }, () => {
-    const k = kinds({ lanDrops: 1, externalStarts: 1, dispatches: 1 });
-    expect(k).toContain("reconcileNoRowMatched");
-    expect(k).toContain("stuck");
-  });
-
-  // Later fixes, switched off one at a time.
-  const without = (fix: keyof typeof CURRENT_RULES, faults: Faults, maxStates?: number) =>
-    new Set(explore({ printers: 1, orders: 1, budget: { ...NO_FAULTS, ...faults }, fixes: { ...CURRENT_RULES, [fix]: false } }, maxStates).problems.map((p) => p.kind));
-
-  it("gap: a job that ran unseen is taken for one that never started once another job hides it", { timeout: 300_000 }, () => {
-    expect(without("notStartedNeedsUnchangedRunCount", { daemonWipes: 1, externalStarts: 1, dispatches: 1 })).toContain("outcomeContradictsPrinter");
-  });
-
-  it("gap: the printer reports the end of a job the panel never saw start", { timeout: 300_000 }, () => {
-    expect(without("printerEndAppliesFromAnyPhase", { linkDrops: 1, lanDrops: 1, reboots: 1, dispatches: 1 })).toContain("eventNotCoveredByRules");
-  });
-
-  it("gap: a print paused on a printer in maintenance can't be stopped from the panel", { timeout: 300_000 }, () => {
-    expect(without("maintenanceAllowsStop", { linkDrops: 1, daemonWipes: 1, pauses: 1, dispatches: 1 })).toContain("stuck");
+  it("the daemon's check alone is enough: the rules still hold when the panel doesn't tell the daemon about ended jobs", { timeout: 120_000 }, () => {
+    for (const faults of [{ linkDrops: 1, releases: 1 }, { lostStarts: 1 }, { linkDrops: 1, externalStarts: 1 }]) {
+      expect(summary(run(faults, { ...CURRENT_RULES, panelTellsDaemonWhenJobEnds: false }).problems)).toBe("");
+    }
   });
 });
