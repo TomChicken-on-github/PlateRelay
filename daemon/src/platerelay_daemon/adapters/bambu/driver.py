@@ -11,14 +11,14 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from platerelay_daemon.driver_api import (
+from platerelay_daemon.adapter_api import ControlNotAllowedError, NormalizedState
+
+from .readonly_types import (
     ConnectionEvent,
-    ControlNotAllowedError,
     DeviceInfo,
     DeviceSnapshot,
     DeviceStatus,
     Envelope,
-    NormalizedState,
     Progress,
     ProgressEvent,
     StatusEvent,

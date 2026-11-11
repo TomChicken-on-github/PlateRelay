@@ -342,7 +342,7 @@ Builder 和 Coreteam 权限完全一样，但仍然保留为两个角色：身�
 
 **16. 拓竹 driver 复用 pybambu【已定：2026-10-27】**
 - driver 先复用 [ha-bambulab](https://github.com/greghesp/ha-bambulab) 里的 pybambu，不自己从零写 MQTT / FTPS。ha-bambulab 是 MIT 协议，和本项目的 GPLv3 兼容，要保留它的 LICENSE 原文和 README 里的第三方声明。
-- PyPI 上的 `pybambu` 2024 年就不更新了，所以把上游源码原样放进仓库（vendored）：`daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu`，**不改它，只在外面包一层**。升级步骤写在 `_vendor/README.md`。
+- PyPI 上的 `pybambu` 2024 年就不更新了，所以把上游源码原样放进仓库（vendored）：`daemon/src/platerelay_daemon/adapters/bambu/_vendor/pybambu`，**不改它，只在外面包一层**。升级步骤写在 `_vendor/README.md`。
 - 外面那层只放行只读操作（MQTT `pushall` 等），挡掉所有 FTPS 写操作。开打、暂停、继续、停止和报错处理这些控制命令还没接，要用户同意才做。不传云端凭据，所以不会访问拓竹云。
 - 实现在 PR #24（未合并）。
 

@@ -1,7 +1,7 @@
 import pytest
 
-from platerelay_daemon.driver_api import NormalizedState as S, Substage as Sub
-from platerelay_daemon.drivers.bambu.state_map import map_state, stage_name
+from platerelay_daemon.adapter_api import NormalizedState as S, Substage as Sub
+from platerelay_daemon.adapters.bambu.state_map import map_state, stage_name
 
 
 @pytest.mark.parametrize(

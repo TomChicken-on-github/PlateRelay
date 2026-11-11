@@ -1,7 +1,7 @@
 import pytest
 
-from platerelay_daemon.driver_api import ControlNotAllowedError
-from platerelay_daemon.drivers.bambu._vendor.pybambu.commands import (
+from platerelay_daemon.adapter_api import ControlNotAllowedError
+from platerelay_daemon.adapters.bambu._vendor.pybambu.commands import (
     GET_VERSION,
     PAUSE,
     PRINT_PROJECT_FILE_TEMPLATE,
@@ -9,7 +9,7 @@ from platerelay_daemon.drivers.bambu._vendor.pybambu.commands import (
     START_PUSH,
     STOP,
 )
-from platerelay_daemon.drivers.bambu.read_only import (
+from platerelay_daemon.adapters.bambu.read_only import (
     ReadOnlyBambuClient,
     ReadOnlyFTP,
     is_read_only_request,
