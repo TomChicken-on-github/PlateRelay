@@ -56,18 +56,18 @@ platerelay_daemon/
 | 编号 | 约定 |
 | --- | --- |
 | DAE-STO-01 | 一个 SQLite 文件，Python 自带的 sqlite3，WAL，`synchronous=FULL`（Q252）。 |
-| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、结束照片待上传记录到面板回 `201`（MSG-HTTP-05，Q319）、文件缓存索引（DAE-STO-05）、面板地址和 `daemonId`。 |
+| DAE-STO-02 | 存：发件箱（MSG-ENV-03）、执行过的命令 ID 到过期为止（MSG-ENV-04）、"这个 jobRef 不再开打"标记（MSG-CMD-START）、文件清单（MSG-JOBREF-02）、任务结束记录到面板 `ack`（MSG-RECON）、结束照片待上传记录到面板回 `201`（MSG-HTTP-05，Q319）、面板地址和 `daemonId`。 |
 | DAE-STO-03 | 要么都写、要么都不写的放进一个事务：任务结束时的结束记录 + 发件箱里的结束事件 + 清单里"这个 3mf 待删" + 结束照片待上传记录（`jobRef`、拍摄时间、文件路径、sha256；拍照失败也记一条，标明没拍到）。照片 JPEG 在提交事务之前先写到本机目录（写临时文件、fsync、改名），所以重启后要么两样都在、要么都不在。收到 MSG-HTTP-05 的 `201` 才删照片和记录，结束事件被 `ack` 不算（Q319）；收到命令时的命令 ID + 必要的"不再开打"标记，**在执行之前提交**。 |
 | DAE-STO-04 | 不进 SQLite：私钥照 MSG-ENR 步骤 3 单独存（Linux / Docker 0600 文件，Windows DPAPI）；访问码只在内存（INV-07）；快照只在内存留最新一份；抓拍不落盘（结束照片除外，见 DAE-STO-03）。 |
-| DAE-STO-05 | 打印文件缓存：按 sha256 存，总量上限 CFG-CMD-07（默认 2 GB），满了删最久没用过的；正在用的不删；每次用之前重新核对 sha256（Q255）。**不预取**：v1 不预分配打印机（Q249），排队的单不知道派给谁，还可能被修改或取消。 |
+| DAE-STO-05 | 不做打印文件缓存：每次派单都重新下载，用完删掉本机的临时文件（Q388，取代 Q255 的按 sha256 缓存）。 |
 
 ## 5. 传文件排队（DAE-XFER）
 
 | 编号 | 约定 |
 | --- | --- |
-| DAE-XFER-01 | 一个 daemon 同时最多下载 CFG-CMD-06 个文件（默认 2），其余排队；往打印机的 FTPS 上传每台各自进行（Q254）。 |
+| DAE-XFER-01 | 一个 daemon 同时最多下载 2 个文件（固定值，Q388），其余排队；往打印机的 FTPS 上传每台各自进行（Q254）。 |
 | DAE-XFER-02 | 进了下载队列就算开始执行：已回 `accepted`、命令 ID 已落盘，不会因排队过期（MSG-CMD-TTL）。CFG-CMD-02 的单次超时从真正开始传起算。 |
-| DAE-XFER-03 | 缓存里已有同一 sha256 的文件，跳过下载，直接上传。 |
+| DAE-XFER-03 | 已删除（Q388：没有缓存，不跳过下载）。 |
 | DAE-XFER-04 | 进度步骤是 `queued` → `download` → `upload`，通过 `command.result.data` 报给面板，前端能显示"排队中"。 |
 
 ## 6. 媒体（DAE-MED）
@@ -86,7 +86,7 @@ platerelay_daemon/
 | --- | --- |
 | DAE-PKG-01 | 原生安装（Windows、Linux、树莓派）用 uv：安装脚本装 uv，uv 下载固定版本的独立 Python（python-build-standalone），按 `uv.lock` 装依赖；daemon 的 wheel 和 ffmpeg 从发布页下载，核对 sha256（F-DMN-07，Q256）。不用系统 Python，也不用 PyInstaller（Windows 杀毒误报、arm64 要单独构建）。 |
 | DAE-PKG-02 | 服务：Linux 是 systemd unit；Windows 是 WinSW 注册的服务。Windows 服务用什么账户运行（影响 DPAPI 用机器范围还是用户范围）实现时定。 |
-| DAE-PKG-03 | Docker：基础镜像 `python:3.12-slim`，依赖按同一个 `uv.lock` 装，buildx 出 amd64 和 arm64，发布到 GHCR，每个版本固定 tag，面板给的命令带镜像 digest。非 root 运行，`network_mode: host`（F-DMN-06），`/data` 卷放 SQLite、私钥、文件缓存。面板生成 compose 片段，注册令牌走环境变量 `PLATERELAY_ENROLL_TOKEN`。 |
+| DAE-PKG-03 | Docker：基础镜像 `python:3.12-slim`，依赖按同一个 `uv.lock` 装，buildx 出 amd64 和 arm64，发布到 GHCR，每个版本固定 tag，面板给的命令带镜像 digest。非 root 运行，`network_mode: host`（F-DMN-06），`/data` 卷放 SQLite、私钥、下载中的临时文件。面板生成 compose 片段，注册令牌走环境变量 `PLATERELAY_ENROLL_TOKEN`。 |
 | DAE-PKG-04 | Docker 只支持 Linux 主机，含树莓派。Windows 和 macOS 的 Docker Desktop 跑在虚拟机里，host 网络和组播到不了局域网，不支持；Windows 一律装原生服务（Q257）。 |
 | DAE-PKG-05 | 升级只由人执行（NG-10、F-DMN-07）：原生是面板给的命令，换 wheel 和锁文件后重启服务；Docker 是 `docker compose pull && docker compose up -d`。文档写明不要用 Watchtower 一类自动更新。 |
 

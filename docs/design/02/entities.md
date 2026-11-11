@@ -35,18 +35,18 @@
 | `CANCELLED` | S-ORD-CANCELLED |
 | `DISPOSED` | S-ORD-DISPOSED |
 
-### 2.2 打印机状态 `printer_state` 和标记 `printer_flag`
+### 2.2 打印机状态 `printer_state` 和异常原因 `attention_reason`
 
-| 状态值 | 文档 1 | | 标记值 | 文档 1 |
+第二稿（Q396）：四个状态，v1 的八个状态值和 `printer_flag` 枚举删除。
+
+| 状态值 | 文档 1 | | 原因值 | 文档 1 |
 | --- | --- | --- | --- | --- |
-| `OFFLINE` | S-PRN-OFFLINE | | `ATTENTION` | S-FLG-ATTENTION |
-| `IDLE` | S-PRN-IDLE | | | |
-| `PREPARING` | S-PRN-PREPARING | | `LOST` | S-FLG-LOST |
-| `PRINTING` | S-PRN-PRINTING | | `STORAGE_LOW` | S-FLG-STORAGE |
-| `PAUSED` | S-PRN-PAUSED | | `DAEMON_UPGRADE` | S-FLG-UPGRADE |
-| `CLEARING_REQUIRED` | S-PRN-CLEARING | | | |
-| `EXTERNAL` | S-PRN-EXTERNAL | | | |
-| `MAINTENANCE` | S-PRN-MAINT | | | |
+| `AVAILABLE` | S-PRN-AVAILABLE | | `OFFLINE` | S-RSN-OFFLINE |
+| `WORKING` | S-PRN-WORKING | | `ERROR` | S-RSN-ERROR |
+| `ATTENTION` | S-PRN-ATTENTION | | `MAINTENANCE` | S-RSN-MAINT |
+| `CLEARING_REQUIRED` | S-PRN-CLEARING | | `JUDGE` | S-RSN-JUDGE |
+| | | | `SEND_FAILED` | S-RSN-SEND |
+| | | | `DAEMON_UPGRADE` | S-RSN-UPGRADE |
 
 ### 2.3 其他枚举
 
@@ -54,7 +54,7 @@
 | --- | --- | --- |
 | `role` | `APPLICANT` `STAFF` `ADMIN` | E-USER（Q95；访客不是角色，是没登录） |
 | `pause_reason` | `USER` `ERROR` `RUNOUT` | E-PRN（R-PRT-03） |
-| `attention_reason` | `ERROR` `RUNOUT` `START_FAILED` `RECONCILE_MISMATCH` `LATE_START` `UNCLEARED_START` | E-PFLAG（S-FLG-ATTENTION） |
+| `printer_event_kind` | `PAUSED` `RESUMED` `ERROR` `HMS` `CONNECTION_DOWN` `CONNECTION_UP` `REFILL` | E-PEVT（R-PRT-26） |
 | `version_kind` | `SUBMIT` `REPLACE` `REVISION` `RESTORE` | E-VER（R-VER-01、02、06） |
 | `version_state` | `PENDING` `APPROVED` `REJECTED` `WITHDRAWN` `REPLACED` | E-VER |
 | `colour_pref` | `EXACT` `SIMILAR` `ANY` | E-ORD（一致 / 相近 / 无所谓） |
@@ -77,8 +77,10 @@
 | E-DMN | `daemons` | 一个 daemon 和它的公钥 |
 | E-ENR | `daemon_enrollments` | 一次性注册令牌 |
 | E-PRN | `printers` | 一台打印机的配置和业务状态 |
-| E-PFLAG | `printer_flags` | 打印机身上的标记 |
+| E-PRSN | `printer_reasons` | 打印机的异常原因（第二稿取代 E-PFLAG） |
+| E-PEVT | `printer_events` | 打印机事件日志（R-PRT-26） |
 | E-PLIVE | `printer_live` | 最新一份状态快照 |
+| E-TRAY | `tray_grams` | 每个料位的剩余克数（R-DSP-16） |
 | E-PERR | `printer_errors` | 打印机报过的错和处理结果 |
 | E-FILE | `files` | 上传的 `.gcode.3mf` |
 | E-CHK | `file_checks` | 文件解析和安全校验结果 |
@@ -159,7 +161,7 @@
 | `daemon_version` | text | |
 | `platform` | text | `linux` / `windows` / `docker`（F-DMN-06） |
 | `last_seen_at` | timestamptz? | |
-| `revoked_at` | timestamptz? | 吊销后拒绝连接；它名下的打印机挂失联 |
+| `revoked_at` | timestamptz? | 吊销后拒绝连接；它名下的打印机挂联系不上（S-RSN-OFFLINE） |
 | `key_alert_at` | timestamptz? | 疑似私钥泄露告警的时间（R-OPS-02，Q238）：10 分钟内被不同 IP 顶掉 3 次及以上时记下；管理员确认或吊销后清空。被顶掉的记录（时间、新旧 IP）写审计 |
 | `created_by` | uuid | |
 | `created_at` | timestamptz | |
@@ -185,11 +187,10 @@
 | `model_name` | text? | 打印机上报 |
 | `capabilities` | jsonb | 适配器的能力声明和静态命令清单（IF-ADP-02），连上时更新 |
 | `open_to_applicants` | bool | 开放给选手，新加的默认关 |
-| `state` | printer_state | 准备中、打印中、暂停中、待清板，以及任务结束回到空闲，只能经打印任务映射表改（文档 1 §4A） |
+| `state` | printer_state | 由 E-PRSN 有没有行、当前任务和打印机上报一起决定，转换只有文档 1 S-PRN-T20–T26；因任务进出工作、待清板只能经打印任务映射表改（文档 1 §4A） |
 | `state_since` | timestamptz | |
-| `pause_reason` | pause_reason? | `PAUSED` 时有值；准备阶段暂停时打印机仍是 `PREPARING`，也记在这里（Q240、Q310） |
-| `maintenance_reason` | text? | 只在 `MAINTENANCE` 时有值（Q148） |
-| `current_job_id` | uuid? | 正在占用它的打印任务；`CLEARING_REQUIRED` 时指向刚结束的那个 |
+| `current_job_id` | uuid? | 当前系统任务；`CLEARING_REQUIRED` 时指向刚结束的那个；`ATTENTION` 时可能有（任务照常推进） |
+| `external_running` | bool | 打印机上报在跑一个不是当前系统任务的任务（`WORKING` 外部，R-PRT-11） |
 | `bed_type` | text? | 打印机报的板型；报不了时为空（R-DSP-09） |
 | `access_code_cipher` | text? | 浏览器用 daemon 公钥加密的访问码（RSA-OAEP），面板解不开 |
 | `access_code_key_fingerprint` | text? | 用哪把公钥加密的；和 daemon 公钥对不上时要重填 |
@@ -201,20 +202,35 @@
 
 约束：
 
-- `state = 'PAUSED'` ⇒ `pause_reason` 不为空；`pause_reason` 不为空 ⇒ `state in ('PAUSED','PREPARING')`；`state = 'MAINTENANCE'` ⇔ `maintenance_reason` 不为空。
+- `state = 'ATTENTION'` ⇔ 这台打印机在 E-PRSN 里至少有一行。暂停原因记在 E-JOB 上（`pause_reason`），不在打印机上。
 - 移到别的 daemon 只能由管理员显式操作（INV-09、F-PRT-12）。
 
-### E-PFLAG `printer_flags`
+### E-PRSN `printer_reasons`
 
-`id`、`printer_id`、`flag`、`since`、`reason`（`attention_reason`，只给 `ATTENTION`）、`job_id?`、`data jsonb`、`by?`。主键 `id`。`ATTENTION` 每个原因单独一行，各自按自己的规则去掉（Q315）：`unique (printer_id, flag, reason, coalesce(job_id, '00000000-0000-0000-0000-000000000000'))`，同一个原因在同一个任务上不重复挂；其他标记 `unique (printer_id, flag) where flag <> 'ATTENTION'`。界面上合成一个"等待处理"，这台打印机所有 `ATTENTION` 行都没了才消失。
+`id`、`printer_id`、`reason`（`attention_reason`）、`since`、`job_id?`、`note?`（维护原因、放出原因）、`data jsonb`、`by?`。每个原因一行，`unique (printer_id, reason, coalesce(job_id, '00000000-0000-0000-0000-000000000000'))`。任务结束时去掉这个任务的 `ERROR`、`JUDGE` 行（文档 1 §4A.2）；最后一行去掉时打印机按 S-PRN-T23 / T24 离开异常。放出（R-PRT-27）一次删掉这台打印机除 `OFFLINE` 以外的所有行（Q420）。
 
-`data` 的内容：
-
-| 标记 | `data` |
+| 原因 | `data` |
 | --- | --- |
-| `ATTENTION` | `{ errorId? }`，对账不一致时 `{ lastKnown, reported }`。任务 ID 在 `job_id` 列：挂上它时的当前任务（迟到的开打是那个迟到的任务）；任务结束时按它去掉这个任务的 `ERROR`、`RUNOUT` 行，`LATE_START` 在打印机报告这次迟到的运行结束时去掉，也可以人工去掉（dismissAttention，Q340），别的原因的行不动（文档 1 §4A，Q226、Q315） |
-| `STORAGE_LOW` | `{ freeBytes, neededBytes }` |
+| `ERROR` | `{ errorId? }`（E-PERR） |
+| `JUDGE` | `{ lastKnown, reported }` |
+| `SEND_FAILED` | `{ code, attempts }`（MSG-CMD-START 的失败结果） |
 | `DAEMON_UPGRADE` | `{ daemonVersion, protocolVersion }` |
+
+### E-PEVT `printer_events`
+
+只追加。`id`、`printer_id`、`job_id?`、`kind`（`printer_event_kind`）、`at`（打印机或 daemon 报的时间）、`data jsonb`（暂停原因、HMS 代码和等级、续料的前后槽位等）。打印机详情的事件日志读这张表（R-PRT-26）；人在面板上的操作照常记 E-AUD，不重复记这里。保留期和订单记录一样永久（E-GEN-10 的触发器同样适用）。
+
+### E-TRAY `tray_grams`
+
+| 列 | 说明 |
+| --- | --- |
+| `printer_id`、`unit`、`slot` | 主键；外挂料 `unit = -1` |
+| `grams` | integer，剩余克数，不小于 0 |
+| `unconfirmed` | boolean，换料后重置为 CFG-MAP-06 时为 true，人改过克数后为 false |
+| `loaded_tag` | jsonb，上次看到的 `{ present, rfidUid?, material?, colour? }`，用来判断换料（R-DSP-16） |
+| `updated_at`、`updated_by?` | `updated_by` 只在人改时填 |
+
+每次快照比对 `loaded_tag`，变了就重置。任务结束的扣减（R-DSP-17）和任务结束在同一个事务里做；断料、续料（E-PEVT `REFILL`）收到时就改。人改克数记 E-AUD，不写回打印机。
 
 ### E-PLIVE `printer_live`
 
@@ -239,7 +255,7 @@
 
 `id`、`sha256`、`object_key`、`file_name`、`size_bytes`、`uploaded_by`、`uploaded_at`、`submitted_at?`、`purged_at?`。
 
-- 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时他没提交的立刻删（R-ACC-05）。
+- 过了 CFG-SUB-07（默认 2 小时）没提交的删掉（R-SUB-10，`submitted_at` 为空且超时）；用户被停用时不提前删（Q415）。
 - 上传前数这个人没提交、而且校验没被拒的文件，到了 CFG-SUB-08 − 1 个就要人机验证（R-SUB-13，Q236）。
 - 过期按订单算（E-ORD `files_expire_at`，R-FIL-01）。文件对象只在没有任何有效引用时才删：所有引用它的订单版本（含能恢复的旧版本）都过期了，也没有没结束的打印任务用它。删了写 `purged_at`；预览图和元数据留着（Q314）。
 - 复用和清理在同一把锁里做（锁这一行 `files`，`select … for update`）：清理拿锁后重新确认没有引用再删；复用拿锁后看到 `purged_at` 不为空或正在删，就当新文件重新上传，不复用（Q314）。
@@ -338,12 +354,12 @@
 | `mapping_settings_version` | 当时"映射"分区的设置版本（R-DSP-13） |
 | `safety_limits` | jsonb，复核时用的限值（R-DSP-04） |
 | `start_command_id` | E-CMD |
-| `prepared_at?` | 打印机自己第一次报这个 jobRef 准备中的时间（`job.staged` 不算）。不是阶段，只给 R-CMD-04 和对账（R-PRT-16、MSG-RECON）判断"开打到没到"用（Q223）；不决定任务结束后打印机去哪，一律待清板（Q370） |
+| `prepared_at?` | 打印机自己第一次报这个 jobRef 准备中的时间（`job.staged` 不算）。不是阶段，只给 R-CMD-04 判断"开打到没到"用（Q223）；不决定任务结束后打印机去哪，一律待清板（Q370） |
 | `started_at?`、`ended_at?` | 打印机报的开始和结束 |
-| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。R-PRT-16 自动判的 → `SEND_FAILED`。结束后不再改，打印机迟到的开打不挂回（R-PRT-17） |
+| `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。daemon 报传输失败或 `printer_busy` → `SEND_FAILED`。结束后不再改，同一个 jobRef 再跑起来按外部任务处理（R-PRT-11，Q393） |
+| `pause_reason?` | `pause_reason`，`phase = PAUSED` 时有值（R-PRT-03） |
 | `paused_ms` | 暂停累计 |
 | `skipped_parts` | int[]，已跳过的零件 ID，以打印机上报为准（R-SKP-04）；重打是新任务，从空开始（R-SKP-07） |
-| `skip_inflight` | jsonb，`[{ commandId, partIds }]`：已经通过检查、发出了但打印机还没上报的跳过请求。检查"至少留一件"时和 `skipped_parts`、这次请求一起算，都在这一行的锁里做（R-SKP-02，Q316）；命令被拒绝或确定没执行时去掉，打印机上报后去掉已上报的零件。不是命令锁 |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 | `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
 
@@ -516,4 +532,4 @@
 | E-MIG-05 | 改名 = expand 新列 + 双写 + 回填 + 下一版 contract 旧列；不直接 `RENAME`。 |
 | E-MIG-06 | 迁移前自动备份数据库，备份成功才迁移（F-OPS-03）。回滚 = 装回上一版程序；因为只有 expand，上一版能直接在新 schema 上跑，不需要反向迁移。 |
 | E-MIG-07 | 触发器、检查约束、部分唯一索引（INV-02、INV-04、INV-06）写在迁移里，CI 用真 PostgreSQL 跑迁移和这些约束的测试。 |
-| E-MIG-08 | 恢复备份用命令行（F-OPS-03）。恢复完、面板启动前，同一个命令里：所有打印机挂失联；所有没做完的 E-CMD（`QUEUED` `SENT` `ACCEPTED`）改为 `EXPIRED`，永不重发；记下"恢复到的时间"，管理员看到横幅；对象存储里没有 E-FILE 记录的文件交给没提交上传的清理（CFG-SUB-07）（R-OPS-01，Q237）。 |
+| E-MIG-08 | 恢复备份用命令行（F-OPS-03）。恢复完、面板启动前，同一个命令里：所有打印机挂联系不上（S-RSN-OFFLINE）；所有没做完的 E-CMD（`QUEUED` `SENT` `ACCEPTED`）改为 `EXPIRED`，永不重发；记下"恢复到的时间"，管理员看到横幅；对象存储里没有 E-FILE 记录的文件交给没提交上传的清理（CFG-SUB-07）（R-OPS-01，Q237）。 |

@@ -75,7 +75,7 @@
 | 409 | `idempotency_key_reused` | 同一个幂等键带了不同的请求体（API-IDEM-04） |
 | 409 | `idempotency_in_progress` | 同一个幂等键的上一个请求还没处理完 |
 | 409 | `printer_unreachable` | 打印机的 daemon 不在线，命令发不出去 |
-| 409 | `printer_flagged` | 打印机挂了阻止派单的标记、在维护中或已停用，不能派单（R-DSP-15，Q233），`params.flags`（如 `["ATTENTION"]`，维护中为 `MAINTENANCE`，停用为 `DISABLED`） |
+| 409 | `printer_not_available` | 打印机不是可用（工作、异常、待清板）或已停用，不能派单（R-DSP-15，Q233、Q396），`params.state`、`params.reasons`（异常原因列表），停用时 `params.state` 为 `DISABLED` |
 | 410 | `file_expired` | 文件已过保留期被删（R-PRT-10、R-FIL-01） |
 | 413 | `payload_too_large` | 上传超过上限 |
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
@@ -86,7 +86,7 @@
 | 422 | `revision_limit_reached` | 修改次数用完（R-VER-09） |
 | 422 | `order_dispatched` | 订单已派单，不能修改或取消，请现场人员先停止（R-VER-04、R-CAN-03） |
 | 422 | `order_started` | 订单已经开始打印或之后，不能修改或取消（R-VER-08、R-CAN-04），`params.current` 是当前状态 |
-| 422 | `reprint_not_allowed` | 失败订单不能重打（R-PRT-09），`params.reason`：`ARCHIVED` 归档过、`DECLINED` 已标为不重打、`ACCOUNT_DISABLED` 申请者账户已停用 |
+| 422 | `reprint_not_allowed` | 失败订单不能重打（R-PRT-09），`params.reason`：`ARCHIVED` 归档过、`DECLINED` 已标为不重打（不看申请者账户是否停用，Q415） |
 | 422 | `skip_all_parts` | 跳完没有剩下的零件（全跳等于停止） |
 | 422 | `archive_blocked` | 还有已派单或打印中的订单，不能归档（R-ARC-01），`params.orderIds` |
 | 422 | `rule_violation` | 其他违反业务规则、前端不需要单独文案的情况，`detail` 写明是哪条限制 |
@@ -155,7 +155,7 @@
 | API-FILE-01 | 上传：`POST /files`，`multipart/form-data`，单个文件上限默认 200 MB，部署时可以用环境变量改（Q155）。返回文件 ID，解析和安全校验在后台跑（F-SUB-02），完成后推 `file.checked`，也可以轮询 `GET /files/{id}/check`。 |
 | API-FILE-02 | 下载（模型文件、预览图、入库照片、延时摄影）：接口返回 `302` 跳到对象存储的短期签名链接，有效 5 分钟（Q154）；对象存储桶不公开。 |
 | API-FILE-03 | 看延时摄影每次都记审计（F-PRT-10）。 |
-| API-CAM-01 | 实况：`POST /printers/{id}/camera/session` 申请观看。H.264 机型按播放方式（CFG-CAM-11）返回 WebRTC（WHEP）地址、LL-HLS 地址或两者（"自动"时前端先试 WebRTC，不通换 LL-HLS），带一次性令牌；JPEG 帧机型返回一个 WebSocket 地址（Q162、Q173、MSG-MEDIA）。播放器：WHEP 用 mediamtx 自带的读取脚本，LL-HLS 用 hls.js。浏览器关掉播放器或页面时连接断开，面板据此算观众数。用户被停用或改角色时，他手上的观看令牌立刻作废、连接断开（API-AUTH-04，Q235）。 |
+| API-CAM-01 | 实况：`POST /printers/{id}/camera/session` 申请观看。H.264 机型返回 WebRTC（WHEP）地址和 LL-HLS 地址（"自动"时前端先试 WebRTC，不通换 LL-HLS），带一次性令牌；JPEG 帧机型返回一个 WebSocket 地址（Q162、Q173、MSG-MEDIA）。播放器：WHEP 用 mediamtx 自带的读取脚本，LL-HLS 用 hls.js。浏览器关掉播放器或页面时连接断开，面板据此算观众数。用户被停用或改角色时，他手上的观看令牌立刻作废、连接断开（API-AUTH-04，Q235）。 |
 | API-CAM-02 | 没登录时，CFG-UI-01 或 CFG-CAM-01 有一个关着就返回 401（访客只在 CFG-UI-01 开着时存在，Q323）。拿不到实况时返回 409：`stream_unavailable`（机型不支持、断流）或 `camera_limit`（到了 CFG-CAM-05 / CFG-CAM-06 的上限，R-CAM-07），前端改看抓拍（R-CAM-02）。 |
 | API-CAM-03 | 抓拍：`GET /printers/{id}/camera/snapshot`，返回内存里最新一张 JPEG，响应头 `X-Captured-At` 和 `ETag`；带 `If-None-Match` 且没变时返回 304。前端收到 SSE 的 `snapshot.updated` 才去取，不轮询（Q166）。 |
 
