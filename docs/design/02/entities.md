@@ -207,7 +207,7 @@
 
 ### E-PRSN `printer_reasons`
 
-`id`、`printer_id`、`reason`（`attention_reason`）、`since`、`job_id?`、`note?`（维护原因、放出原因）、`data jsonb`、`by?`。每个原因一行，`unique (printer_id, reason, coalesce(job_id, '00000000-0000-0000-0000-000000000000'))`。任务结束时去掉这个任务的 `ERROR`、`JUDGE` 行（文档 1 §4A.2）；最后一行去掉时打印机按 S-PRN-T23 / T24 离开异常。放出（R-PRT-27）一次删掉这台打印机的所有行。
+`id`、`printer_id`、`reason`（`attention_reason`）、`since`、`job_id?`、`note?`（维护原因、放出原因）、`data jsonb`、`by?`。每个原因一行，`unique (printer_id, reason, coalesce(job_id, '00000000-0000-0000-0000-000000000000'))`。任务结束时去掉这个任务的 `ERROR`、`JUDGE` 行（文档 1 §4A.2）；最后一行去掉时打印机按 S-PRN-T23 / T24 离开异常。放出（R-PRT-27）一次删掉这台打印机除 `OFFLINE` 以外的所有行（Q420）。
 
 | 原因 | `data` |
 | --- | --- |
