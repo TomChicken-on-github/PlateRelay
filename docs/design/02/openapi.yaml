@@ -981,6 +981,7 @@ paths:
       x-permission: order:store
       x-transitions: [S-ORD-T16, S-PRN-T25]
       x-rules: [R-PCK-01, INV-12]
+      description: 只要求订单是待入库。打印机在待清板时同一个事务里放行到可用；不在待清板时只入库订单，打印机状态不动（Q424）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1283,7 +1284,7 @@ paths:
       summary: 编辑打印机
       x-permission: printer:manage
       x-rules: [INV-09, F-PRT-12, R-PRT-20]
-      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码；新 daemon 按 MSG-ASSIGN 的 currentJobRef 认领还在打的系统任务（Q228）。disabled=true 停用、false 重新启用（R-PRT-20，Q229）：只在空闲、离线或维护中且没有当前任务时能停用，否则 409 state_conflict；停用后概况页和派单都不显示，记录保留。
+      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码；新 daemon 按 MSG-ASSIGN 的 currentJobRef 认领还在打的系统任务（Q228）。disabled=true 停用、false 重新启用（R-PRT-20，Q229）：只在可用或异常且没有当前任务时能停用，否则 409 state_conflict；停用时挂 OFFLINE，重新启用后按对账走，必经待清板（Q428）；停用后概况页和派单都不显示，记录保留。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1622,7 +1623,7 @@ paths:
       x-permission: printer:operate
       x-transitions: [S-PRN-T24, S-ORD-T13, S-ORD-T14, S-ORD-T09]
       x-rules: [R-PRT-27, R-PRT-08]
-      description: 去掉这台打印机除 OFFLINE 以外的全部异常原因，没有别的原因就进待清板；还联系不上的留在异常，重连后再进待清板（Q420）。打印机最新上报正在运行时返回 409 state_conflict（Q372）。有当前任务时必须带 expectedJobId 和 outcome，没有时两者都不带，否则 422。判没开打时给 daemon 发 job.stop。写审计（Q402）。
+      description: 去掉这台打印机除 OFFLINE 以外的全部异常原因，没有别的原因就进待清板；还联系不上的留在异常，重连后再进待清板（Q420）。打印机连着且最新上报正在运行时返回 409 state_conflict（Q372）；挂着 OFFLINE 时不看旧上报（Q423）。有当前任务时必须带 expectedJobId 和 outcome，没有时两者都不带，否则 422。判没开打时给 daemon 发 job.stop。写审计（Q402）。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
