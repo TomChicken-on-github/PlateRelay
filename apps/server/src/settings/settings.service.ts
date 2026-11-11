@@ -1,55 +1,72 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { DEFAULT_QUEUE_RULES, DEFAULT_RESOURCE_SETTINGS, type QueueRules, type ResourceSettings } from "@platerelay/shared";
 import { eq } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
-import { type Ctx, userId } from "../auth/actor.js";
-import { DB, type Db } from "../db/db.js";
+import { type Ctx, userIdOf } from "../common/ctx.js";
+import { notFound, validationFailed, versionConflict } from "../common/problem.js";
+import { DB, type Db, type Tx } from "../db/db.js";
 import { settings } from "../db/schema.js";
+import { checkValues, defaultsOf, isSection, type Section, SECTIONS, type SectionValues } from "./definitions.js";
 
-/** Panel settings kept as key → JSON. Each key has a default here. */
-export const DEFAULTS = {
-  /** Anyone can create a User account from the sign-in page. */
-  "auth.registration": { enabled: true },
-  /** Queue rule; FIFO is the only one so far (brief §0.6). */
-  "queue.policy": { rule: "fifo" as const },
-  /** 文件与排队: revisions, model switches, skip reminder, plate choice (rules doc §2–4). */
-  "queue.rules": DEFAULT_QUEUE_RULES as QueueRules,
-  /** 可用资源: the submit page's resource table (rules doc §1.5). */
-  resources: DEFAULT_RESOURCE_SETTINGS as ResourceSettings,
-} satisfies Record<string, unknown>;
+export interface SectionRow {
+  section: Section;
+  values: Record<string, unknown>;
+  defaults: Record<string, unknown>;
+  version: number;
+  updatedAt: Date | null;
+  updatedBy: string | null;
+}
 
-export type SettingKey = keyof typeof DEFAULTS;
-export type SettingValue<K extends SettingKey> = (typeof DEFAULTS)[K];
-
+/** System settings, one row per section of the settings page. Reads are cached; a save drops the cache. */
 @Injectable()
 export class SettingsService {
+  private cache = new Map<Section, SectionRow>();
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: AuditService,
   ) {}
 
-  async get<K extends SettingKey>(key: K): Promise<SettingValue<K>> {
-    const [row] = await this.db.select().from(settings).where(eq(settings.key, key));
-    return merge(DEFAULTS[key], row?.value) as SettingValue<K>;
+  /** The section's values with defaults filled in for keys never saved. */
+  async get<S extends Section>(section: S, tx?: Tx): Promise<SectionValues<S>> {
+    return (await this.row(section, tx)).values as SectionValues<S>;
   }
 
-  async set<K extends SettingKey>(ctx: Ctx, key: K, value: SettingValue<K>) {
-    await this.db.transaction(async (tx) => {
-      const [row] = await tx.select().from(settings).where(eq(settings.key, key));
-      await tx
-        .insert(settings)
-        .values({ key, value, updatedBy: userId(ctx), updatedAt: new Date() })
-        .onConflictDoUpdate({ target: settings.key, set: { value, updatedBy: userId(ctx), updatedAt: new Date() } });
-      await this.audit.record(ctx, { action: "settings.update", targetType: "setting", targetId: key, before: row?.value ?? DEFAULTS[key], after: value }, tx);
-    });
+  async row(section: Section, tx?: Tx): Promise<SectionRow> {
+    const hit = !tx && this.cache.get(section);
+    if (hit) return hit;
+    const [r] = await (tx ?? this.db).select().from(settings).where(eq(settings.section, section));
+    const defaults = defaultsOf(section) as Record<string, unknown>;
+    const row: SectionRow = { section, values: { ...defaults, ...((r?.values as Record<string, unknown>) ?? {}) }, defaults, version: r?.version ?? 0, updatedAt: r?.updatedAt ?? null, updatedBy: r?.updatedBy ?? null };
+    if (!tx) this.cache.set(section, row);
+    return row;
+  }
+
+  all(): Promise<SectionRow[]> {
+    return Promise.all(SECTIONS.map((s) => this.row(s)));
+  }
+
+  /** Saves the keys given; the rest of the section stays. The caller sends the version it read. */
+  async save(ctx: Ctx, section: string, version: number, values: Record<string, unknown>, outer?: Tx): Promise<SectionRow> {
+    if (!isSection(section)) throw notFound("settings section");
+    const issues = checkValues(section, values);
+    if (issues.length) throw validationFailed(issues);
+    const run = async (tx: Tx) => {
+      const current = await this.row(section, tx);
+      if (current.version !== version) throw versionConflict(current.version);
+      const stored = Object.fromEntries(Object.entries({ ...current.values, ...values }).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(current.defaults[k])));
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (JSON.stringify(v) === JSON.stringify(current.values[k])) continue;
+        before[k] = current.values[k];
+        after[k] = v;
+      }
+      const row = { section, values: stored, version: version + 1, updatedBy: userIdOf(ctx), updatedAt: new Date() };
+      await tx.insert(settings).values(row).onConflictDoUpdate({ target: settings.section, set: row });
+      await this.audit.record(ctx, { action: "settings.update", targetType: "settings", targetId: section, before, after }, tx);
+    };
+    await (outer ? run(outer) : this.db.transaction(run));
+    this.cache.delete(section);
+    return this.row(section, outer);
   }
 }
-
-/** Stored values over the defaults, one level of nesting deep, so a new rule gets its default on old rows. */
-function merge(def: unknown, stored: unknown): unknown {
-  if (!isObj(def) || !isObj(stored)) return stored ?? def;
-  const out: Record<string, unknown> = { ...def };
-  for (const [k, v] of Object.entries(stored)) out[k] = isObj(def[k]) && isObj(v) && !Array.isArray(v) ? { ...def[k], ...v } : v;
-  return out;
-}
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

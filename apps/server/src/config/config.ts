@@ -18,6 +18,12 @@ export interface AppConfig {
   secureCookies: boolean;
   /** Object storage: local disk under dataDir, or an S3-compatible service such as Aliyun OSS. */
   storage: { kind: "local" } | ({ kind: "s3" } & S3Config);
+  /** scheme://host[:port] the panel is reached at. Browsers' write requests and daemon sign-ins are bound to it. */
+  publicOrigin: string;
+  /** Seconds between heartbeats on a daemon connection; three missed ones mean the daemon is gone. */
+  daemonHeartbeatSeconds: number;
+  /** Development only: a one-time daemon enrollment token created at start, so a daemon can enroll without the admin page. */
+  devEnrollToken: string | null;
 }
 
 export const APP_CONFIG = Symbol("APP_CONFIG");
@@ -42,6 +48,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     secret,
     secureCookies: env.PLATERELAY_SECURE_COOKIES === "1",
     storage: storageConfig(env),
+    publicOrigin: (env.PLATERELAY_PUBLIC_ORIGIN || `http://localhost:${Number(env.PORT) || 3000}`).replace(/\/+$/, ""),
+    daemonHeartbeatSeconds: 15,
+    devEnrollToken: env.NODE_ENV !== "production" ? env.PLATERELAY_DEV_ENROLL_TOKEN || null : null,
   };
 }
 

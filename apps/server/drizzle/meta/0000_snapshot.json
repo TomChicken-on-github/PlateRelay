@@ -1,5 +1,5 @@
 {
-  "id": "cb0c79ed-c511-467c-98a4-8d7ba11e1816",
+  "id": "29d368bd-6690-4752-83cd-86cf8dcbd111",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -72,11 +72,16 @@
         },
         "result": {
           "name": "result",
-          "type": "audit_result",
-          "typeSchema": "public",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'ok'"
+          "default": "'OK'"
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "ip": {
           "name": "ip",
@@ -84,31 +89,16 @@
           "primaryKey": false,
           "notNull": false
         },
-        "device": {
-          "name": "device",
+        "user_agent": {
+          "name": "user_agent",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "audit_at": {
-          "name": "audit_at",
-          "columns": [
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_target": {
-          "name": "audit_target",
+        "audit_log_by_target": {
+          "name": "audit_log_by_target",
           "columns": [
             {
               "expression": "target_type",
@@ -127,12 +117,129 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.daemon_commands": {
+      "name": "daemon_commands",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
         },
-        "audit_actor": {
-          "name": "audit_actor",
+        "daemon_id": {
+          "name": "daemon_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "class": {
+          "name": "class",
+          "type": "command_class",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_by": {
+          "name": "requested_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "command_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'QUEUED'"
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "daemon_commands_outbox": {
+          "name": "daemon_commands_outbox",
           "columns": [
             {
-              "expression": "actor_id",
+              "expression": "daemon_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "daemon_commands_by_job": {
+          "name": "daemon_commands_by_job",
+          "columns": [
+            {
+              "expression": "job_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -144,6 +251,169 @@
           "with": {}
         }
       },
+      "foreignKeys": {
+        "daemon_commands_daemon_id_daemons_id_fk": {
+          "name": "daemon_commands_daemon_id_daemons_id_fk",
+          "tableFrom": "daemon_commands",
+          "tableTo": "daemons",
+          "columnsFrom": [
+            "daemon_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "daemon_commands_printer_id_printers_id_fk": {
+          "name": "daemon_commands_printer_id_printers_id_fk",
+          "tableFrom": "daemon_commands",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "daemon_commands_requested_by_users_id_fk": {
+          "name": "daemon_commands_requested_by_users_id_fk",
+          "tableFrom": "daemon_commands",
+          "tableTo": "users",
+          "columnsFrom": [
+            "requested_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.daemon_enrollments": {
+      "name": "daemon_enrollments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "daemon_id": {
+          "name": "daemon_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "daemon_enrollments_daemon_id_daemons_id_fk": {
+          "name": "daemon_enrollments_daemon_id_daemons_id_fk",
+          "tableFrom": "daemon_enrollments",
+          "tableTo": "daemons",
+          "columnsFrom": [
+            "daemon_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "daemon_enrollments_created_by_users_id_fk": {
+          "name": "daemon_enrollments_created_by_users_id_fk",
+          "tableFrom": "daemon_enrollments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "daemon_enrollments_token_hash_unique": {
+          "name": "daemon_enrollments_token_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.daemon_inbox": {
+      "name": "daemon_inbox",
+      "schema": "",
+      "columns": {
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "daemon_id": {
+          "name": "daemon_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "received_at": {
+          "name": "received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -159,8 +429,7 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "name": {
           "name": "name",
@@ -168,30 +437,47 @@
           "primaryKey": false,
           "notNull": true
         },
-        "network": {
-          "name": "network",
+        "public_key": {
+          "name": "public_key",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_fingerprint": {
+          "name": "key_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "protocol_version": {
+          "name": "protocol_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "daemon_version": {
+          "name": "daemon_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform": {
+          "name": "platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "text",
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
-        },
-        "token_tail": {
-          "name": "token_tail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
+          "notNull": false
         },
         "created_by": {
           "name": "created_by",
@@ -206,11 +492,12 @@
           "notNull": true,
           "default": "now()"
         },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
+        "version": {
+          "name": "version",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": 1
         }
       },
       "indexes": {},
@@ -231,11 +518,11 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "daemons_token_hash_unique": {
-          "name": "daemons_token_hash_unique",
+        "daemons_key_fingerprint_unique": {
+          "name": "daemons_key_fingerprint_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "token_hash"
+            "key_fingerprint"
           ]
         }
       },
@@ -243,73 +530,72 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.external_identities": {
-      "name": "external_identities",
+    "public.file_checks": {
+      "name": "file_checks",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
+        "file_id": {
+          "name": "file_id",
           "type": "uuid",
           "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": "'QUEUED'"
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "issuer": {
-          "name": "issuer",
+        "parser_version": {
+          "name": "parser_version",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'1'"
         },
-        "subject": {
-          "name": "subject",
+        "plates": {
+          "name": "plates",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "findings": {
+          "name": "findings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "verdict": {
+          "name": "verdict",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
+        "limits": {
+          "name": "limits",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "finished_at": {
+          "name": "finished_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         }
       },
-      "indexes": {
-        "external_identities_iss_sub": {
-          "name": "external_identities_iss_sub",
-          "columns": [
-            {
-              "expression": "issuer",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "subject",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
-        "external_identities_user_id_users_id_fk": {
-          "name": "external_identities_user_id_users_id_fk",
-          "tableFrom": "external_identities",
-          "tableTo": "users",
+        "file_checks_file_id_files_id_fk": {
+          "name": "file_checks_file_id_files_id_fk",
+          "tableFrom": "file_checks",
+          "tableTo": "files",
           "columnsFrom": [
-            "user_id"
+            "file_id"
           ],
           "columnsTo": [
             "id"
@@ -332,8 +618,7 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "sha256": {
           "name": "sha256",
@@ -341,8 +626,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "key": {
-          "name": "key",
+        "object_key": {
+          "name": "object_key",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -365,15 +650,49 @@
           "primaryKey": false,
           "notNull": true
         },
-        "created_at": {
-          "name": "created_at",
+        "uploaded_at": {
+          "name": "uploaded_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purged_at": {
+          "name": "purged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "files_by_uploader": {
+          "name": "files_by_uploader",
+          "columns": [
+            {
+              "expression": "uploaded_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sha256",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "files_uploaded_by_users_id_fk": {
           "name": "files_uploaded_by_users_id_fk",
@@ -401,7 +720,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "uuid",
           "primaryKey": true,
           "notNull": true
         },
@@ -447,19 +766,97 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.order_events": {
-      "name": "order_events",
+    "public.idempotency_keys": {
+      "name": "idempotency_keys",
+      "schema": "",
+      "columns": {
+        "principal": {
+          "name": "principal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "route": {
+          "name": "route",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_code": {
+          "name": "status_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "idempotency_keys_principal_method_route_key_pk": {
+          "name": "idempotency_keys_principal_method_route_key_pk",
+          "columns": [
+            "principal",
+            "method",
+            "route",
+            "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.order_records": {
+      "name": "order_records",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigserial",
+          "type": "uuid",
           "primaryKey": true,
           "notNull": true
         },
         "order_id": {
           "name": "order_id",
-          "type": "integer",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -469,6 +866,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "node": {
+          "name": "node",
+          "type": "process_node",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "actor_type": {
           "name": "actor_type",
@@ -482,12 +892,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
         },
         "from_status": {
           "name": "from_status",
@@ -503,16 +907,42 @@
           "primaryKey": false,
           "notNull": false
         },
+        "version_n": {
+          "name": "version_n",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note_visible": {
+          "name": "note_visible",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "data": {
           "name": "data",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'{}'::jsonb"
         }
       },
       "indexes": {
-        "order_events_order": {
-          "name": "order_events_order",
+        "order_records_by_order": {
+          "name": "order_records_by_order",
           "columns": [
             {
               "expression": "order_id",
@@ -521,7 +951,7 @@
               "nulls": "last"
             },
             {
-              "expression": "at",
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -534,9 +964,9 @@
         }
       },
       "foreignKeys": {
-        "order_events_order_id_orders_id_fk": {
-          "name": "order_events_order_id_orders_id_fk",
-          "tableFrom": "order_events",
+        "order_records_order_id_orders_id_fk": {
+          "name": "order_records_order_id_orders_id_fk",
+          "tableFrom": "order_records",
           "tableTo": "orders",
           "columnsFrom": [
             "order_id"
@@ -554,28 +984,48 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.orders": {
-      "name": "orders",
+    "public.order_versions": {
+      "name": "order_versions",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "uuid",
           "primaryKey": true,
           "notNull": true
         },
-        "status": {
-          "name": "status",
-          "type": "order_status",
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n": {
+          "name": "n",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "version_kind",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
-        "owner_id": {
-          "name": "owner_id",
+        "restored_from_id": {
+          "name": "restored_from_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "version_state",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
         },
         "file_id": {
           "name": "file_id",
@@ -602,17 +1052,17 @@
           "notNull": true,
           "default": "''"
         },
-        "printer_model": {
-          "name": "printer_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "printer_model_id": {
-          "name": "printer_model_id",
+        "model_id": {
+          "name": "model_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "model_name": {
+          "name": "model_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "nozzles": {
           "name": "nozzles",
@@ -634,9 +1084,15 @@
         },
         "weight_grams": {
           "name": "weight_grams",
-          "type": "real",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "sliced_bed_type": {
+          "name": "sliced_bed_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "thumbnail_key": {
           "name": "thumbnail_key",
@@ -644,48 +1100,230 @@
           "primaryKey": false,
           "notNull": false
         },
-        "form_version_id": {
-          "name": "form_version_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "answers": {
-          "name": "answers",
+        "parts": {
+          "name": "parts",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'[]'::jsonb"
         },
-        "queue_seq": {
-          "name": "queue_seq",
-          "type": "bigint",
+        "parts_top_key": {
+          "name": "parts_top_key",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "submitted_at": {
-          "name": "submitted_at",
+        "parts_pick_key": {
+          "name": "parts_pick_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delta_seconds": {
+          "name": "delta_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "places_back": {
+          "name": "places_back",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "counted": {
+          "name": "counted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "model_switch": {
+          "name": "model_switch",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "reviewed_by": {
-          "name": "reviewed_by",
+        "decided_by": {
+          "name": "decided_by",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "reviewed_at": {
-          "name": "reviewed_at",
+        "decided_at": {
+          "name": "decided_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "reject_reason": {
-          "name": "reject_reason",
+        "reason": {
+          "name": "reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "order_versions_order_id_orders_id_fk": {
+          "name": "order_versions_order_id_orders_id_fk",
+          "tableFrom": "order_versions",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "order_versions_file_id_files_id_fk": {
+          "name": "order_versions_file_id_files_id_fk",
+          "tableFrom": "order_versions",
+          "tableTo": "files",
+          "columnsFrom": [
+            "file_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "order_versions_decided_by_users_id_fk": {
+          "name": "order_versions_decided_by_users_id_fk",
+          "tableFrom": "order_versions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "order_versions_n": {
+          "name": "order_versions_n",
+          "nullsNotDistinct": false,
+          "columns": [
+            "order_id",
+            "n"
+          ]
+        },
+        "order_versions_owner": {
+          "name": "order_versions_owner",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.orders": {
+      "name": "orders",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "order_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING_REVIEW'"
+        },
+        "sort_key": {
+          "name": "sort_key",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active_version_id": {
+          "name": "active_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pending_version_id": {
+          "name": "pending_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "colour_pref": {
+          "name": "colour_pref",
+          "type": "colour_pref",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'SIMILAR'"
+        },
+        "bed_type": {
+          "name": "bed_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "form_version_id": {
+          "name": "form_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "answers": {
+          "name": "answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "revision_count": {
+          "name": "revision_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "model_switch_count": {
+          "name": "model_switch_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "printer_id": {
           "name": "printer_id",
@@ -693,33 +1331,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "printed_at": {
-          "name": "printed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_paused_ms": {
-          "name": "error_paused_ms",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "stored_by": {
-          "name": "stored_by",
+        "current_job_id": {
+          "name": "current_job_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "stored_at": {
-          "name": "stored_at",
+        "bypassed_since": {
+          "name": "bypassed_since",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -736,83 +1355,60 @@
           "primaryKey": false,
           "notNull": false
         },
-        "redeemed_by": {
-          "name": "redeemed_by",
-          "type": "uuid",
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "now()"
         },
-        "redeemed_at": {
-          "name": "redeemed_at",
+        "closed_at": {
+          "name": "closed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "cancelled_by": {
-          "name": "cancelled_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_at": {
-          "name": "cancelled_at",
+        "archived_at": {
+          "name": "archived_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "cancel_reason": {
-          "name": "cancel_reason",
+        "reprint_declined_at": {
+          "name": "reprint_declined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reprint_declined_by": {
+          "name": "reprint_declined_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reprint_declined_reason": {
+          "name": "reprint_declined_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "failed_by": {
-          "name": "failed_by",
-          "type": "uuid",
+        "reprint_declined_reason_visible": {
+          "name": "reprint_declined_reason_visible",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": true
         },
-        "failed_at": {
-          "name": "failed_at",
+        "files_expire_at": {
+          "name": "files_expire_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failure_reason": {
-          "name": "failure_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attribution": {
-          "name": "attribution",
-          "type": "failure_attribution",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attributed_by": {
-          "name": "attributed_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attributed_at": {
-          "name": "attributed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_of": {
-          "name": "retry_of",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "orders_status_queue": {
-          "name": "orders_status_queue",
+        "orders_queue": {
+          "name": "orders_queue",
           "columns": [
             {
               "expression": "status",
@@ -821,7 +1417,22 @@
               "nulls": "last"
             },
             {
-              "expression": "queue_seq",
+              "expression": "sort_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "orders_by_owner": {
+          "name": "orders_by_owner",
+          "columns": [
+            {
+              "expression": "owner_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -837,42 +1448,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "orders_owner": {
-          "name": "orders_owner",
-          "columns": [
-            {
-              "expression": "owner_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "submitted_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "orders_retry_of": {
-          "name": "orders_retry_of",
-          "columns": [
-            {
-              "expression": "retry_of",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -882,19 +1457,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "orders_file_id_files_id_fk": {
-          "name": "orders_file_id_files_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "files",
-          "columnsFrom": [
-            "file_id"
           ],
           "columnsTo": [
             "id"
@@ -915,19 +1477,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "orders_reviewed_by_users_id_fk": {
-          "name": "orders_reviewed_by_users_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "users",
-          "columnsFrom": [
-            "reviewed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "orders_printer_id_printers_id_fk": {
           "name": "orders_printer_id_printers_id_fk",
           "tableFrom": "orders",
@@ -938,67 +1487,15 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "orders_stored_by_users_id_fk": {
-          "name": "orders_stored_by_users_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "users",
-          "columnsFrom": [
-            "stored_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "orders_redeemed_by_users_id_fk": {
-          "name": "orders_redeemed_by_users_id_fk",
+        "orders_reprint_declined_by_users_id_fk": {
+          "name": "orders_reprint_declined_by_users_id_fk",
           "tableFrom": "orders",
           "tableTo": "users",
           "columnsFrom": [
-            "redeemed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "orders_cancelled_by_users_id_fk": {
-          "name": "orders_cancelled_by_users_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "users",
-          "columnsFrom": [
-            "cancelled_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "orders_failed_by_users_id_fk": {
-          "name": "orders_failed_by_users_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "users",
-          "columnsFrom": [
-            "failed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "orders_attributed_by_users_id_fk": {
-          "name": "orders_attributed_by_users_id_fk",
-          "tableFrom": "orders",
-          "tableTo": "users",
-          "columnsFrom": [
-            "attributed_by"
+            "reprint_declined_by"
           ],
           "columnsTo": [
             "id"
@@ -1008,7 +1505,15 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "orders_number_unique": {
+          "name": "orders_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1021,18 +1526,17 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "code": {
-          "name": "code",
-          "type": "text",
-          "primaryKey": false,
           "notNull": true
         },
         "order_id": {
           "name": "order_id",
-          "type": "integer",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
@@ -1060,26 +1564,17 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "redeemed_by": {
+          "name": "redeemed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "pickup_codes_code": {
-          "name": "pickup_codes_code",
-          "columns": [
-            {
-              "expression": "code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pickup_codes_order": {
-          "name": "pickup_codes_order",
+        "pickup_codes_by_order": {
+          "name": "pickup_codes_by_order",
           "columns": [
             {
               "expression": "order_id",
@@ -1105,6 +1600,792 @@
           "columnsTo": [
             "id"
           ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pickup_codes_redeemed_by_users_id_fk": {
+          "name": "pickup_codes_redeemed_by_users_id_fk",
+          "tableFrom": "pickup_codes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "redeemed_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pickup_codes_code_hash_unique": {
+          "name": "pickup_codes_code_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.print_jobs": {
+      "name": "print_jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "job_phase",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'TRANSFERRING'"
+        },
+        "phase_since": {
+          "name": "phase_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "paused_from": {
+          "name": "paused_from",
+          "type": "job_phase",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dispatched_by": {
+          "name": "dispatched_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dispatched_at": {
+          "name": "dispatched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "suggested": {
+          "name": "suggested",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "bypassed_order_ids": {
+          "name": "bypassed_order_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "bed_type": {
+          "name": "bed_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mapping": {
+          "name": "mapping",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mapping_settings_version": {
+          "name": "mapping_settings_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "safety_limits": {
+          "name": "safety_limits",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "start_command_id": {
+          "name": "start_command_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prepared_at": {
+          "name": "prepared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "job_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pause_reason": {
+          "name": "pause_reason",
+          "type": "pause_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "paused_ms": {
+          "name": "paused_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "skipped_parts": {
+          "name": "skipped_parts",
+          "type": "integer[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
+        },
+        "last_percent": {
+          "name": "last_percent",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_photo_key": {
+          "name": "end_photo_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_photo_at": {
+          "name": "end_photo_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fail_reason": {
+          "name": "fail_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "print_jobs_by_printer": {
+          "name": "print_jobs_by_printer",
+          "columns": [
+            {
+              "expression": "printer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dispatched_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "print_jobs_by_order": {
+          "name": "print_jobs_by_order",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attempt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "print_jobs_one_per_printer": {
+          "name": "print_jobs_one_per_printer",
+          "columns": [
+            {
+              "expression": "printer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"print_jobs\".\"phase\" <> 'ENDED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "print_jobs_one_per_order": {
+          "name": "print_jobs_one_per_order",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"print_jobs\".\"phase\" <> 'ENDED'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "print_jobs_order_id_orders_id_fk": {
+          "name": "print_jobs_order_id_orders_id_fk",
+          "tableFrom": "print_jobs",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "print_jobs_version_id_order_versions_id_fk": {
+          "name": "print_jobs_version_id_order_versions_id_fk",
+          "tableFrom": "print_jobs",
+          "tableTo": "order_versions",
+          "columnsFrom": [
+            "version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "print_jobs_printer_id_printers_id_fk": {
+          "name": "print_jobs_printer_id_printers_id_fk",
+          "tableFrom": "print_jobs",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "print_jobs_dispatched_by_users_id_fk": {
+          "name": "print_jobs_dispatched_by_users_id_fk",
+          "tableFrom": "print_jobs",
+          "tableTo": "users",
+          "columnsFrom": [
+            "dispatched_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.printer_errors": {
+      "name": "printer_errors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_id": {
+          "name": "error_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vendor_code": {
+          "name": "vendor_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "severity": {
+          "name": "severity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "module": {
+          "name": "module",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "help_url": {
+          "name": "help_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "blocks_job": {
+          "name": "blocks_job",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "actions": {
+          "name": "actions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "raised_at": {
+          "name": "raised_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cleared_at": {
+          "name": "cleared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cleared_by": {
+          "name": "cleared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_action": {
+          "name": "resolved_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "command_id": {
+          "name": "command_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "printer_errors_printer_id_printers_id_fk": {
+          "name": "printer_errors_printer_id_printers_id_fk",
+          "tableFrom": "printer_errors",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "printer_errors_resolved_by_users_id_fk": {
+          "name": "printer_errors_resolved_by_users_id_fk",
+          "tableFrom": "printer_errors",
+          "tableTo": "users",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "printer_errors_one": {
+          "name": "printer_errors_one",
+          "nullsNotDistinct": false,
+          "columns": [
+            "printer_id",
+            "error_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.printer_events": {
+      "name": "printer_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "printer_event_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "printer_events_by_printer": {
+          "name": "printer_events_by_printer",
+          "columns": [
+            {
+              "expression": "printer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "printer_events_printer_id_printers_id_fk": {
+          "name": "printer_events_printer_id_printers_id_fk",
+          "tableFrom": "printer_events",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.printer_live": {
+      "name": "printer_live",
+      "schema": "",
+      "columns": {
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "snapshot": {
+          "name": "snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "boot_id": {
+          "name": "boot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reconciled_seq": {
+          "name": "reconciled_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_seq": {
+          "name": "run_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "reported_at": {
+          "name": "reported_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "printer_live_printer_id_printers_id_fk": {
+          "name": "printer_live_printer_id_printers_id_fk",
+          "tableFrom": "printer_live",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.printer_reasons": {
+      "name": "printer_reasons",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "printer_id": {
+          "name": "printer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "attention_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "since": {
+          "name": "since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "by": {
+          "name": "by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "printer_reasons_one_each": {
+          "name": "printer_reasons_one_each",
+          "columns": [
+            {
+              "expression": "printer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "reason",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"job_id\", '00000000-0000-0000-0000-000000000000'::uuid)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "printer_reasons_printer_id_printers_id_fk": {
+          "name": "printer_reasons_printer_id_printers_id_fk",
+          "tableFrom": "printer_reasons",
+          "tableTo": "printers",
+          "columnsFrom": [
+            "printer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "printer_reasons_by_users_id_fk": {
+          "name": "printer_reasons_by_users_id_fk",
+          "tableFrom": "printer_reasons",
+          "tableTo": "users",
+          "columnsFrom": [
+            "by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1123,11 +2404,10 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
-        "name": {
-          "name": "name",
+        "brand": {
+          "name": "brand",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1138,8 +2418,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "ip": {
-          "name": "ip",
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1148,13 +2428,13 @@
           "name": "daemon_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "model": {
-          "name": "model",
+        "host": {
+          "name": "host",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "model_id": {
           "name": "model_id",
@@ -1162,23 +2442,25 @@
           "primaryKey": false,
           "notNull": false
         },
-        "nozzles": {
-          "name": "nozzles",
-          "type": "jsonb",
+        "model_name": {
+          "name": "model_name",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "storage": {
-          "name": "storage",
+        "capabilities": {
+          "name": "capabilities",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": "'{}'::jsonb"
         },
-        "telemetry": {
-          "name": "telemetry",
-          "type": "jsonb",
+        "open_to_applicants": {
+          "name": "open_to_applicants",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": false
         },
         "state": {
           "name": "state",
@@ -1186,7 +2468,7 @@
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'OFFLINE'"
+          "default": "'ATTENTION'"
         },
         "state_since": {
           "name": "state_since",
@@ -1195,21 +2477,40 @@
           "notNull": true,
           "default": "now()"
         },
-        "error": {
-          "name": "error",
-          "type": "jsonb",
+        "current_job_id": {
+          "name": "current_job_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "maintenance_reason": {
-          "name": "maintenance_reason",
+        "external_running": {
+          "name": "external_running",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "bed_type": {
+          "name": "bed_type",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "current_order_id": {
-          "name": "current_order_id",
-          "type": "integer",
+        "access_code_cipher": {
+          "name": "access_code_cipher",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_code_key_fingerprint": {
+          "name": "access_code_key_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_code_set_at": {
+          "name": "access_code_set_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1220,11 +2521,18 @@
           "notNull": true,
           "default": false
         },
-        "last_seen_at": {
-          "name": "last_seen_at",
+        "disabled_at": {
+          "name": "disabled_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1246,7 +2554,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -1259,52 +2567,15 @@
             "name"
           ]
         },
-        "printers_serial_unique": {
-          "name": "printers_serial_unique",
+        "printers_brand_serial": {
+          "name": "printers_brand_serial",
           "nullsNotDistinct": false,
           "columns": [
+            "brand",
             "serial"
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.roles": {
-      "name": "roles",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "builtin": {
-          "name": "builtin",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "permissions": {
-          "name": "permissions",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1338,6 +2609,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
         "ip": {
           "name": "ip",
           "type": "text",
@@ -1351,23 +2629,7 @@
           "notNull": false
         }
       },
-      "indexes": {
-        "sessions_user": {
-          "name": "sessions_user",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
@@ -1379,7 +2641,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -1393,17 +2655,25 @@
       "name": "settings",
       "schema": "",
       "columns": {
-        "key": {
-          "name": "key",
+        "section": {
+          "name": "section",
           "type": "text",
           "primaryKey": true,
           "notNull": true
         },
-        "value": {
-          "name": "value",
+        "values": {
+          "name": "values",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "updated_by": {
           "name": "updated_by",
@@ -1415,8 +2685,7 @@
           "name": "updated_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1441,38 +2710,70 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.user_roles": {
-      "name": "user_roles",
+    "public.tray_grams": {
+      "name": "tray_grams",
       "schema": "",
       "columns": {
-        "user_id": {
-          "name": "user_id",
+        "printer_id": {
+          "name": "printer_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'global'"
-        },
-        "role_id": {
-          "name": "role_id",
-          "type": "text",
+        "unit": {
+          "name": "unit",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "slot": {
+          "name": "slot",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grams": {
+          "name": "grams",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unconfirmed": {
+          "name": "unconfirmed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "loaded_tag": {
+          "name": "loaded_tag",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
       "foreignKeys": {
-        "user_roles_user_id_users_id_fk": {
-          "name": "user_roles_user_id_users_id_fk",
-          "tableFrom": "user_roles",
-          "tableTo": "users",
+        "tray_grams_printer_id_printers_id_fk": {
+          "name": "tray_grams_printer_id_printers_id_fk",
+          "tableFrom": "tray_grams",
+          "tableTo": "printers",
           "columnsFrom": [
-            "user_id"
+            "printer_id"
           ],
           "columnsTo": [
             "id"
@@ -1480,12 +2781,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "user_roles_role_id_roles_id_fk": {
-          "name": "user_roles_role_id_roles_id_fk",
-          "tableFrom": "user_roles",
-          "tableTo": "roles",
+        "tray_grams_updated_by_users_id_fk": {
+          "name": "tray_grams_updated_by_users_id_fk",
+          "tableFrom": "tray_grams",
+          "tableTo": "users",
           "columnsFrom": [
-            "role_id"
+            "updated_by"
           ],
           "columnsTo": [
             "id"
@@ -1495,11 +2796,12 @@
         }
       },
       "compositePrimaryKeys": {
-        "user_roles_user_id_scope_pk": {
-          "name": "user_roles_user_id_scope_pk",
+        "tray_grams_printer_id_unit_slot_pk": {
+          "name": "tray_grams_printer_id_unit_slot_pk",
           "columns": [
-            "user_id",
-            "scope"
+            "printer_id",
+            "unit",
+            "slot"
           ]
         }
       },
@@ -1516,8 +2818,7 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "username": {
           "name": "username",
@@ -1531,11 +2832,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "password_hash": {
           "name": "password_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "role": {
+          "name": "role",
+          "type": "role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'APPLICANT'"
         },
         "avatar_key": {
           "name": "avatar_key",
@@ -1543,12 +2864,25 @@
           "primaryKey": false,
           "notNull": false
         },
-        "disabled": {
-          "name": "disabled",
-          "type": "boolean",
+        "locale": {
+          "name": "locale",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": false
+          "default": "'zh-CN'"
+        },
+        "disabled_at": {
+          "name": "disabled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1588,27 +2922,75 @@
       "name": "actor_type",
       "schema": "public",
       "values": [
-        "user",
-        "system",
-        "daemon",
-        "printer"
+        "USER",
+        "SYSTEM",
+        "DAEMON",
+        "PRINTER"
       ]
     },
-    "public.audit_result": {
-      "name": "audit_result",
+    "public.attention_reason": {
+      "name": "attention_reason",
       "schema": "public",
       "values": [
-        "ok",
-        "failed",
-        "denied"
+        "OFFLINE",
+        "ERROR",
+        "MAINTENANCE",
+        "JUDGE",
+        "SEND_FAILED",
+        "DAEMON_UPGRADE"
       ]
     },
-    "public.failure_attribution": {
-      "name": "failure_attribution",
+    "public.colour_pref": {
+      "name": "colour_pref",
       "schema": "public",
       "values": [
-        "machine",
-        "model"
+        "EXACT",
+        "SIMILAR",
+        "ANY"
+      ]
+    },
+    "public.command_class": {
+      "name": "command_class",
+      "schema": "public",
+      "values": [
+        "CONTROL",
+        "SETPOINT",
+        "READ"
+      ]
+    },
+    "public.command_status": {
+      "name": "command_status",
+      "schema": "public",
+      "values": [
+        "QUEUED",
+        "SENT",
+        "ACCEPTED",
+        "REJECTED",
+        "EXPIRED",
+        "FAILED",
+        "DONE"
+      ]
+    },
+    "public.job_outcome": {
+      "name": "job_outcome",
+      "schema": "public",
+      "values": [
+        "SEND_FAILED",
+        "START_FAILED",
+        "STOPPED_BEFORE_START",
+        "FAILED",
+        "FINISHED"
+      ]
+    },
+    "public.job_phase": {
+      "name": "job_phase",
+      "schema": "public",
+      "values": [
+        "TRANSFERRING",
+        "PREPARING",
+        "PRINTING",
+        "PAUSED",
+        "ENDED"
       ]
     },
     "public.order_status": {
@@ -1618,42 +3000,93 @@
         "PENDING_REVIEW",
         "REJECTED",
         "QUEUED",
+        "DISPATCHED",
         "PRINTING",
-        "PRINTED_AWAITING_STORAGE",
-        "STORED_READY_PICKUP",
-        "COMPLETED",
         "FAILED",
-        "CANCELLED"
+        "PRINTED",
+        "READY",
+        "COMPLETED",
+        "CANCELLED",
+        "DISPOSED"
+      ]
+    },
+    "public.pause_reason": {
+      "name": "pause_reason",
+      "schema": "public",
+      "values": [
+        "USER",
+        "ERROR",
+        "RUNOUT"
+      ]
+    },
+    "public.printer_event_kind": {
+      "name": "printer_event_kind",
+      "schema": "public",
+      "values": [
+        "PAUSED",
+        "RESUMED",
+        "ERROR",
+        "HMS",
+        "CONNECTION_DOWN",
+        "CONNECTION_UP",
+        "REFILL"
       ]
     },
     "public.printer_state": {
       "name": "printer_state",
       "schema": "public",
       "values": [
-        "OFFLINE",
-        "IDLE",
-        "PREPARING",
-        "PRINTING",
-        "ERROR_PAUSED",
-        "CLEARING_REQUIRED",
-        "UNMANAGED_PRINTING",
-        "MAINTENANCE"
+        "AVAILABLE",
+        "WORKING",
+        "ATTENTION",
+        "CLEARING_REQUIRED"
+      ]
+    },
+    "public.process_node": {
+      "name": "process_node",
+      "schema": "public",
+      "values": [
+        "SUBMIT",
+        "REVIEW",
+        "QUEUE",
+        "PRINT",
+        "STORE",
+        "PICKUP"
+      ]
+    },
+    "public.role": {
+      "name": "role",
+      "schema": "public",
+      "values": [
+        "APPLICANT",
+        "STAFF",
+        "ADMIN"
+      ]
+    },
+    "public.version_kind": {
+      "name": "version_kind",
+      "schema": "public",
+      "values": [
+        "SUBMIT",
+        "REPLACE",
+        "REVISION",
+        "RESTORE"
+      ]
+    },
+    "public.version_state": {
+      "name": "version_state",
+      "schema": "public",
+      "values": [
+        "PENDING",
+        "APPROVED",
+        "REJECTED",
+        "WITHDRAWN",
+        "REPLACED"
       ]
     }
   },
   "schemas": {},
-  "sequences": {
-    "public.order_queue_seq": {
-      "name": "order_queue_seq",
-      "schema": "public",
-      "increment": "1",
-      "startWith": "1",
-      "minValue": "1",
-      "maxValue": "9223372036854775807",
-      "cache": "1",
-      "cycle": false
-    }
-  },
+  "sequences": {},
   "roles": {},
   "policies": {},
   "views": {},
