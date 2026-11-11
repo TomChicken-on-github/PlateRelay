@@ -1,0 +1,2316 @@
+// 自动生成，不要手改。来源在 packages/shared/schema/，用 `pnpm --filter @platerelay/shared generate` 重新生成。
+
+/** 合成后的 daemon 协议 Schema，运行时校验消息用。 */
+export const daemonProtocolSchema: Record<string, unknown> = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/bundle.schema.json",
+  "title": "DaemonProtocol",
+  "description": "daemon 协议的全部消息，由 schema/daemon/v1/ 下的文件合成。",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC 时间"
+    },
+    "NormalizedState": {
+      "type": "string",
+      "description": "适配器上报的标准设备状态，不是面板的打印机状态；换算只在面板做。",
+      "enum": [
+        "OFFLINE",
+        "NOT_READY",
+        "IDLE",
+        "BUSY",
+        "PREPARING",
+        "PRINTING",
+        "PAUSED",
+        "ERROR_PAUSED",
+        "FINISHED",
+        "FAILED",
+        "CANCELLED",
+        "FAULT",
+        "UNKNOWN"
+      ]
+    },
+    "Substage": {
+      "type": "string",
+      "description": "标准子阶段，只用于展示。",
+      "enum": [
+        "heating_bed",
+        "heating_nozzle",
+        "heating_chamber",
+        "cooling",
+        "homing",
+        "leveling",
+        "calibrating",
+        "cleaning_nozzle",
+        "inspecting_first_layer",
+        "identifying_plate",
+        "changing_filament",
+        "loading_filament",
+        "unloading_filament",
+        "other"
+      ]
+    },
+    "StandardErrorAction": {
+      "type": "string",
+      "description": "报错可选的标准动作。",
+      "enum": [
+        "RESUME",
+        "RESUME_ACCEPT_DEFECTS",
+        "RESUME_PROBLEM_SOLVED",
+        "RETRY",
+        "CONFIRM_DONE",
+        "IGNORE",
+        "IGNORE_PERMANENTLY",
+        "ACKNOWLEDGE",
+        "STOP",
+        "ABORT_OPERATION",
+        "SILENCE_ALARM",
+        "RECHECK",
+        "FIRMWARE_RESTART",
+        "EMERGENCY_STOP"
+      ]
+    },
+    "ErrorActionOption": {
+      "title": "ErrorActionOption",
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/StandardErrorAction"
+        },
+        "vendorActionId": {
+          "type": [
+            "string",
+            "integer"
+          ],
+          "description": "厂商原始按钮 ID，排查用"
+        },
+        "label": {
+          "type": "string"
+        },
+        "requiresOnSite": {
+          "type": "boolean",
+          "description": "必须有人在机器旁处理过才能点"
+        },
+        "destructive": {
+          "type": "boolean",
+          "description": "会终止任务"
+        }
+      },
+      "required": [
+        "action",
+        "label",
+        "requiresOnSite",
+        "destructive"
+      ]
+    },
+    "ActiveError": {
+      "title": "ActiveError",
+      "type": "object",
+      "properties": {
+        "errorId": {
+          "type": "string",
+          "description": "本次报错的唯一 ID，适配器生成"
+        },
+        "vendorCode": {
+          "type": "string",
+          "description": "厂商原始码"
+        },
+        "channel": {
+          "type": "string",
+          "description": "报错来源通道，如 print_error、hms"
+        },
+        "severity": {
+          "title": "ErrorSeverity",
+          "type": "string",
+          "enum": [
+            "fatal",
+            "error",
+            "warning",
+            "info"
+          ]
+        },
+        "module": {
+          "type": "string",
+          "description": "如 ams、toolhead"
+        },
+        "message": {
+          "type": "string"
+        },
+        "helpUrl": {
+          "type": "string"
+        },
+        "blocksJob": {
+          "type": "boolean",
+          "description": "是否卡住了当前任务"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ErrorActionOption"
+          }
+        },
+        "raisedAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "description": "打印机上一条还没消失的报错。",
+      "required": [
+        "errorId",
+        "vendorCode",
+        "channel",
+        "severity",
+        "blocksJob",
+        "actions",
+        "raisedAt"
+      ]
+    },
+    "AssignedPrinter": {
+      "title": "AssignedPrinter",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "brand": {
+          "type": "string",
+          "description": "适配器品牌，如 bambu"
+        },
+        "serial": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string",
+          "description": "打印机在局域网里的地址"
+        },
+        "accessCodeCipher": {
+          "type": "string",
+          "description": "浏览器用 daemon 公钥加密的访问码密文（base64）。面板解不开，只是转交；daemon 只在内存里解密，不落盘、不进日志。"
+        },
+        "keyFingerprint": {
+          "type": "string",
+          "description": "加密时用的 daemon 公钥指纹；对不上说明 daemon 换过密钥，要重填访问码"
+        },
+        "currentJobRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid",
+              "description": "面板记的这台打印机的当前任务，没有为 null"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanupJobRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "description": "已结束、但打印机上可能还留着文件要收尾的任务"
+        },
+        "knownRunSeq": {
+          "type": "integer",
+          "description": "面板已知的这台打印机的最大运行序号；daemon 丢了本地状态时从比它大的数重新开始"
+        }
+      },
+      "description": "分配给这个 daemon 的一台打印机。是不是系统任务以面板下发的为准。",
+      "required": [
+        "printerId",
+        "brand",
+        "serial",
+        "host",
+        "accessCodeCipher",
+        "keyFingerprint",
+        "currentJobRef",
+        "cleanupJobRefs"
+      ]
+    },
+    "DaemonConfig": {
+      "title": "DaemonConfig",
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "title": "SnapshotConfig",
+          "type": "object",
+          "properties": {
+            "watchedSeconds": {
+              "type": "integer",
+              "description": "有人在看时的抓拍间隔"
+            },
+            "unwatchedSeconds": {
+              "type": "integer",
+              "description": "没人看时的抓拍间隔"
+            },
+            "staggerSeconds": {
+              "type": "integer",
+              "description": "多台打印机之间错开的秒数"
+            },
+            "uploadKbps": {
+              "type": "integer",
+              "description": "抓拍上传的总速率上限"
+            }
+          },
+          "required": [
+            "watchedSeconds",
+            "unwatchedSeconds",
+            "staggerSeconds",
+            "uploadKbps"
+          ]
+        },
+        "transferTimeoutSeconds": {
+          "type": "integer",
+          "description": "下载或上传文件每次尝试的超时，从真正开始传起算"
+        },
+        "downloadConcurrency": {
+          "type": "integer",
+          "description": "同时下载的文件数"
+        },
+        "discoveryEnabled": {
+          "type": "boolean",
+          "description": "是否被动监听局域网里的打印机广播"
+        }
+      },
+      "description": "面板下发给 daemon 的参数。",
+      "required": [
+        "snapshot",
+        "transferTimeoutSeconds",
+        "downloadConcurrency",
+        "discoveryEnabled"
+      ]
+    },
+    "Ack": {
+      "title": "Ack",
+      "description": "接收方处理完一条需要确认的消息后回。重复收到的消息也直接回 ack，不再处理。",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "被确认的那条消息的 id"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "Auth": {
+      "title": "Auth",
+      "description": "daemon 用私钥对挑战签名。",
+      "type": "object",
+      "properties": {
+        "signature": {
+          "type": "string",
+          "description": "RSA-PSS（SHA-256，盐长 32）签名的 base64。签的是 UTF-8 字符串 \"platerelay-daemon-auth/v1\\n\" + daemonId + \"\\n\" + nonce + \"\\n\" + 面板的 origin"
+        }
+      },
+      "required": [
+        "signature"
+      ]
+    },
+    "Challenge": {
+      "title": "Challenge",
+      "description": "面板对 hello 的回应。",
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "description": "32 字节随机数的 base64，只能用一次，30 秒内有效"
+        },
+        "serverTime": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "nonce",
+        "serverTime"
+      ]
+    },
+    "CommandResult": {
+      "title": "CommandResult",
+      "description": "daemon 对一条命令的回复。",
+      "type": "object",
+      "properties": {
+        "commandId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "status": {
+          "title": "CommandStatus",
+          "type": "string",
+          "enum": [
+            "accepted",
+            "done",
+            "rejected",
+            "expired",
+            "failed"
+          ],
+          "description": "accepted = 打印机收下了，不代表做完，结果看后面的事件；done = 命令本身就是结果；rejected = daemon 没执行；expired = 收到时已过期，没执行，也保证以后不再执行；failed = 执行了但失败。一条命令可能先回 accepted 再回 done 或 failed，以最后一次为准。"
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "机器可读的原因，如 unsupported_command、printer_busy、daemon_restarted"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "固件或打印机原样返回的内容"
+        },
+        "data": {
+          "type": "object",
+          "description": "按命令类型：job.start 的 step（queued / download / upload）和 attempts，storage.list 的 media 和 files 等"
+        }
+      },
+      "required": [
+        "commandId",
+        "status"
+      ]
+    },
+    "Command": {
+      "title": "Command",
+      "description": "面板发给 daemon 的命令。daemon 只执行这里列出的类型，别的一律 rejected。同一个 commandId 最多执行一次：执行前先把它写进硬盘，daemon 重启也一样。",
+      "oneOf": [
+        {
+          "title": "JobStartCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "job.start"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "JobStartParams",
+              "type": "object",
+              "properties": {
+                "jobRef": {
+                  "$ref": "#/$defs/Uuid"
+                },
+                "expectedRunSeq": {
+                  "type": "integer",
+                  "description": "面板派单时见到的运行序号；发开打指令前对不上就拒绝，什么都不发"
+                },
+                "file": {
+                  "title": "JobFile",
+                  "type": "object",
+                  "properties": {
+                    "fileId": {
+                      "$ref": "#/$defs/Uuid"
+                    },
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "fileId",
+                    "sha256",
+                    "sizeBytes"
+                  ]
+                },
+                "plateIndex": {
+                  "type": "integer"
+                },
+                "bedType": {
+                  "type": "string"
+                },
+                "mapping": {
+                  "type": "array",
+                  "items": {
+                    "title": "FilamentMapping",
+                    "type": "object",
+                    "properties": {
+                      "sliceSlot": {
+                        "type": "integer",
+                        "description": "切片文件里的耗材槽"
+                      },
+                      "extruder": {
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "type": "integer"
+                      },
+                      "slot": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "sliceSlot",
+                      "extruder",
+                      "unit",
+                      "slot"
+                    ]
+                  }
+                },
+                "timelapse": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "jobRef",
+                "expectedRunSeq",
+                "file",
+                "plateIndex",
+                "bedType",
+                "mapping",
+                "timelapse"
+              ]
+            }
+          },
+          "description": "下载文件、放到打印机上并开打。进了下载队列就算开始执行。下载和上传各自最多试 3 次；开打指令发出之后不再重试任何一步。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "JobStopCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "job.stop"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "oneOf": [
+                {
+                  "title": "StopJobParams",
+                  "type": "object",
+                  "properties": {
+                    "jobRef": {
+                      "$ref": "#/$defs/Uuid"
+                    }
+                  },
+                  "required": [
+                    "jobRef"
+                  ]
+                },
+                {
+                  "title": "StopExternalParams",
+                  "type": "object",
+                  "properties": {
+                    "external": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "external"
+                  ]
+                }
+              ]
+            }
+          },
+          "description": "停止任务。传文件、准备中、打印中都用它；只在打印机正在跑这个任务时才发给打印机。external = 停掉打印机上正在跑的外部任务。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "JobSkipPartsCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "job.skip_parts"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "JobSkipPartsParams",
+              "type": "object",
+              "properties": {
+                "jobRef": {
+                  "$ref": "#/$defs/Uuid"
+                },
+                "partIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "required": [
+                "jobRef",
+                "partIds"
+              ]
+            }
+          },
+          "description": "打印中跳过零件。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "ErrorResolveCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "error.resolve"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "ErrorResolveParams",
+              "type": "object",
+              "properties": {
+                "errorId": {
+                  "type": "string"
+                },
+                "action": {
+                  "$ref": "#/$defs/StandardErrorAction"
+                }
+              },
+              "required": [
+                "errorId",
+                "action"
+              ]
+            }
+          },
+          "description": "对一条报错选一个动作。动作是停止时按 job.stop 处理。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "ControlCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "control"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "ControlParams",
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "必须在这台打印机机型的静态命令清单里"
+                },
+                "args": {
+                  "type": "object",
+                  "description": "设定值一律是目标值，不用切换或加减"
+                }
+              },
+              "required": [
+                "action",
+                "args"
+              ]
+            }
+          },
+          "description": "设备控制：灯、温度、风扇、速度、暂停、继续、进退料等。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "RefreshCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "refresh"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          },
+          "description": "让打印机重新上报一次完整状态（只读）。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "StorageListCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "storage.list"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          },
+          "description": "列出打印机存储里的文件（只读，不删不下载）。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "CameraOpenCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "camera.open"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "oneOf": [
+                {
+                  "title": "VideoStreamParams",
+                  "type": "object",
+                  "properties": {
+                    "srtUrl": {
+                      "type": "string"
+                    },
+                    "rtspsUrl": {
+                      "type": "string"
+                    },
+                    "publishToken": {
+                      "type": "string"
+                    },
+                    "latencyMs": {
+                      "type": "integer"
+                    },
+                    "expiresAt": {
+                      "$ref": "#/$defs/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "srtUrl",
+                    "rtspsUrl",
+                    "publishToken",
+                    "latencyMs",
+                    "expiresAt"
+                  ]
+                },
+                {
+                  "title": "JpegFramesParams",
+                  "type": "object",
+                  "properties": {
+                    "framesUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "framesUrl"
+                  ]
+                }
+              ]
+            }
+          },
+          "description": "开始往媒体服务推实况。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "CameraCloseCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "camera.close"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          },
+          "description": "停止推实况。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "SnapshotModeCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "snapshot.mode"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "SnapshotModeParams",
+              "type": "object",
+              "properties": {
+                "watched": {
+                  "type": "boolean",
+                  "description": "这台打印机现在有没有人在看"
+                }
+              },
+              "required": [
+                "watched"
+              ]
+            }
+          },
+          "description": "切换抓拍频率。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "SnapshotNowCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "snapshot.now"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "SnapshotNowParams",
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "title": "SnapshotReason",
+                  "type": "string",
+                  "enum": [
+                    "FIRST_VIEWER",
+                    "ERROR"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "description": "立刻抓拍一张。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        },
+        {
+          "title": "TimelapseCollectCommand",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "const": "timelapse.collect"
+            },
+            "expiresAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "必须在这之前开始执行；收到时已过期的回 expired，不执行"
+            },
+            "params": {
+              "title": "TimelapseCollectParams",
+              "type": "object",
+              "properties": {
+                "jobRef": {
+                  "$ref": "#/$defs/Uuid"
+                }
+              },
+              "required": [
+                "jobRef"
+              ]
+            }
+          },
+          "description": "取回并上传这个任务的延时摄影。",
+          "required": [
+            "commandId",
+            "printerId",
+            "kind",
+            "expiresAt",
+            "params"
+          ]
+        }
+      ]
+    },
+    "ConfigUpdate": {
+      "title": "ConfigUpdate",
+      "description": "面板设置变了且和 daemon 有关时下发。",
+      "$ref": "#/$defs/DaemonConfig"
+    },
+    "DiscoveryReport": {
+      "title": "DiscoveryReport",
+      "description": "被动监听局域网广播听到的打印机，每次是完整列表，有变化时发，最多每 10 秒一次。只听不发。",
+      "type": "object",
+      "properties": {
+        "printers": {
+          "type": "array",
+          "items": {
+            "title": "DiscoveredPrinter",
+            "type": "object",
+            "properties": {
+              "brand": {
+                "type": "string"
+              },
+              "serial": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "modelId": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "lastSeenAt": {
+                "$ref": "#/$defs/Timestamp"
+              }
+            },
+            "required": [
+              "brand",
+              "serial",
+              "host",
+              "lastSeenAt"
+            ]
+          }
+        }
+      },
+      "required": [
+        "printers"
+      ]
+    },
+    "EnrollRequest": {
+      "title": "EnrollRequest",
+      "description": "POST /daemon/v1/enroll 的请求体。",
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "一次性注册令牌，15 分钟有效，用一次就作废"
+        },
+        "publicKey": {
+          "type": "string",
+          "description": "daemon 公钥，SPKI DER 的 base64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "daemonVersion": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        }
+      },
+      "required": [
+        "token",
+        "publicKey",
+        "name",
+        "platform",
+        "daemonVersion",
+        "protocolVersion"
+      ]
+    },
+    "EnrollResponse": {
+      "title": "EnrollResponse",
+      "description": "POST /daemon/v1/enroll 的响应体。",
+      "type": "object",
+      "properties": {
+        "daemonId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "daemonId"
+      ]
+    },
+    "Envelope": {
+      "title": "Envelope",
+      "description": "控制通道上每个 JSON 文本帧的信封。",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "每条消息唯一，接收方按它去重"
+        },
+        "type": {
+          "type": "string",
+          "description": "消息类型，如 printer.event；不认识的类型回 ack 后忽略"
+        },
+        "ts": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "body": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "ts",
+        "body"
+      ]
+    },
+    "Hello": {
+      "title": "Hello",
+      "description": "daemon 连上后发的第一条消息。",
+      "type": "object",
+      "properties": {
+        "daemonId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "protocolVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "description": "主.次，如 1.0"
+        },
+        "daemonVersion": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "description": "linux / windows / docker 等"
+        },
+        "bootId": {
+          "$ref": "#/$defs/Uuid",
+          "description": "daemon 进程每次启动生成"
+        },
+        "adapters": {
+          "type": "array",
+          "items": {
+            "title": "AdapterInfo",
+            "type": "object",
+            "properties": {
+              "brand": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "brand",
+              "version"
+            ]
+          }
+        }
+      },
+      "required": [
+        "daemonId",
+        "protocolVersion",
+        "daemonVersion",
+        "platform",
+        "bootId",
+        "adapters"
+      ]
+    },
+    "Ping": {
+      "title": "Ping",
+      "description": "心跳。",
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "Pong": {
+      "title": "Pong",
+      "description": "心跳回应。",
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "PrinterEvent": {
+      "title": "PrinterEvent",
+      "description": "打印机上的一个离散事件。面板靠事件推进状态，用快照对账。同一台打印机的事件按 seq 顺序处理。",
+      "oneOf": [
+        {
+          "title": "ConnectionUpEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "connection.up"
+            },
+            "data": {
+              "type": "object"
+            }
+          },
+          "description": "daemon 重新连上打印机；面板随后按最新快照对账。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind"
+          ]
+        },
+        {
+          "title": "ConnectionDownEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "connection.down"
+            },
+            "data": {
+              "title": "ConnectionDownData",
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "description": "如 access_code_key_mismatch"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "description": "daemon 连不上这台打印机。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "JobStagedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.staged"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "type": "object"
+            }
+          },
+          "description": "文件已经放到打印机上，开打指令已发出。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef"
+          ]
+        },
+        {
+          "title": "JobStartedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.started"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "type": "object"
+            }
+          },
+          "description": "打印机报告开始打印。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef"
+          ]
+        },
+        {
+          "title": "JobPausedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.paused"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "JobPausedData",
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "title": "PauseReason",
+                  "type": "string",
+                  "enum": [
+                    "USER",
+                    "ERROR",
+                    "RUNOUT"
+                  ]
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            }
+          },
+          "description": "任务暂停。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef",
+            "data"
+          ]
+        },
+        {
+          "title": "JobResumedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.resumed"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "type": "object"
+            }
+          },
+          "description": "任务从暂停恢复。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef"
+          ]
+        },
+        {
+          "title": "JobFinishedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.finished"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "type": "object"
+            }
+          },
+          "description": "打印机报告打完。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef"
+          ]
+        },
+        {
+          "title": "JobFailedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.failed"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "JobFailedData",
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string"
+                },
+                "beforeStart": {
+                  "type": "boolean",
+                  "description": "true = 开打前就失败了"
+                }
+              },
+              "required": [
+                "reason",
+                "beforeStart"
+              ]
+            }
+          },
+          "description": "打印机报告任务失败。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef",
+            "data"
+          ]
+        },
+        {
+          "title": "JobCancelledEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.cancelled"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "JobCancelledData",
+              "type": "object",
+              "properties": {
+                "commandId": {
+                  "$ref": "#/$defs/Uuid",
+                  "description": "带着 = 面板发的停止生效了；没有 = 有人在打印机屏幕上停的"
+                },
+                "beforeStart": {
+                  "type": "boolean",
+                  "description": "true = 没开打就停下了。订单去向只看这个字段"
+                }
+              },
+              "required": [
+                "beforeStart"
+              ]
+            }
+          },
+          "description": "任务被停止。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef",
+            "data"
+          ]
+        },
+        {
+          "title": "JobPartsSkippedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "job.parts_skipped"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "JobPartsSkippedData",
+              "type": "object",
+              "properties": {
+                "partIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "description": "打印机上报的已跳过零件的完整列表"
+                }
+              },
+              "required": [
+                "partIds"
+              ]
+            }
+          },
+          "description": "已跳过的零件变了。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef",
+            "data"
+          ]
+        },
+        {
+          "title": "ExternalStartedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "external.started"
+            },
+            "data": {
+              "title": "ExternalStartedData",
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "description": "打印机开始跑一个不是系统下发的任务。一个已结束任务又跑起来也报成这个。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "ExternalEndedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "external.ended"
+            },
+            "data": {
+              "title": "ExternalEndedData",
+              "type": "object",
+              "properties": {
+                "result": {
+                  "type": "string",
+                  "description": "FINISHED / FAILED / CANCELLED"
+                }
+              },
+              "required": [
+                "result"
+              ]
+            }
+          },
+          "description": "外部任务结束。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "ErrorRaisedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "error.raised"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "ErrorRaisedData",
+              "type": "object",
+              "properties": {
+                "error": {
+                  "$ref": "#/$defs/ActiveError"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          },
+          "description": "打印机出现一条新报错。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "ErrorClearedEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "error.cleared"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "ErrorClearedData",
+              "type": "object",
+              "properties": {
+                "errorId": {
+                  "type": "string"
+                },
+                "clearedBy": {
+                  "title": "ErrorClearedBy",
+                  "type": "string",
+                  "enum": [
+                    "PANEL",
+                    "DEVICE",
+                    "UNKNOWN"
+                  ]
+                }
+              },
+              "required": [
+                "errorId",
+                "clearedBy"
+              ]
+            }
+          },
+          "description": "一条报错消失了。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "FilamentRefilledEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "filament.refilled"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "type": "object",
+              "description": "fromSlot、toSlot；具体字段等真机实测后再定"
+            }
+          },
+          "description": "固件自动续料换了槽，只记日志。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "data"
+          ]
+        },
+        {
+          "title": "TimelapseReadyEvent",
+          "type": "object",
+          "properties": {
+            "printerId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "bootId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kind": {
+              "const": "timelapse.ready"
+            },
+            "jobRef": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "data": {
+              "title": "TimelapseReadyData",
+              "type": "object",
+              "properties": {
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "title": "TimelapseFile",
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "sizeBytes"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "files"
+              ]
+            }
+          },
+          "description": "延时摄影文件已经生成，等 daemon 上传。",
+          "required": [
+            "printerId",
+            "bootId",
+            "seq",
+            "kind",
+            "jobRef",
+            "data"
+          ]
+        }
+      ]
+    },
+    "PrinterSnapshot": {
+      "title": "PrinterSnapshot",
+      "description": "整台打印机的完整状态（不是增量），变化时发，同一台最多每秒一次。不确认、不重发，下一份会覆盖它。拿不到的字段省略，不填假值。",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "#/$defs/Uuid",
+          "description": "daemon 这次启动的标识"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "这台打印机在这次启动里单调递增；面板丢掉比已处理的更旧的快照"
+        },
+        "connected": {
+          "type": "boolean",
+          "description": "daemon 现在连不连得上这台打印机"
+        },
+        "state": {
+          "$ref": "#/$defs/NormalizedState"
+        },
+        "substage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Substage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "job": {
+          "title": "SnapshotJob",
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "jobRef": {
+              "$ref": "#/$defs/Uuid",
+              "description": "系统任务的打印任务 ID；外部任务没有"
+            },
+            "external": {
+              "type": "boolean",
+              "description": "true = 不是系统下发的任务"
+            },
+            "name": {
+              "type": "string",
+              "description": "打印机上的任务名或文件名"
+            },
+            "percent": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "remainingSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "layer": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "totalLayers": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "skippedParts": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "description": "打印机上报的已跳过零件"
+            }
+          },
+          "description": "打印机正在跑或刚结束的任务，没有为 null。",
+          "required": [
+            "external"
+          ]
+        },
+        "pendingStarts": {
+          "type": "array",
+          "items": {
+            "title": "PendingStart",
+            "type": "object",
+            "properties": {
+              "jobRef": {
+                "$ref": "#/$defs/Uuid"
+              },
+              "stage": {
+                "title": "PendingStartStage",
+                "type": "string",
+                "enum": [
+                  "QUEUED",
+                  "DOWNLOADING",
+                  "UPLOADING"
+                ]
+              }
+            },
+            "required": [
+              "jobRef",
+              "stage"
+            ]
+          },
+          "description": "daemon 手里还没发出开打指令的任务；已经停下、不会再开打的不列。对账靠它认出任务还在进行。"
+        },
+        "temps": {
+          "type": "object",
+          "description": "键如 nozzle1、bed、chamber",
+          "additionalProperties": {
+            "title": "Temperature",
+            "type": "object",
+            "properties": {
+              "current": {
+                "type": "number"
+              },
+              "target": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "current"
+            ]
+          }
+        },
+        "nozzles": {
+          "type": "array",
+          "items": {
+            "title": "SnapshotNozzle",
+            "type": "object",
+            "properties": {
+              "extruder": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "diameterMm": {
+                "type": "number"
+              },
+              "flow": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "extruder",
+              "diameterMm"
+            ]
+          }
+        },
+        "trays": {
+          "type": "array",
+          "items": {
+            "title": "SnapshotTray",
+            "type": "object",
+            "properties": {
+              "unit": {
+                "type": "integer",
+                "description": "AMS 编号；外挂料 = -1"
+              },
+              "slot": {
+                "type": "integer"
+              },
+              "label": {
+                "type": "string"
+              },
+              "material": {
+                "type": "string"
+              },
+              "subType": {
+                "type": "string"
+              },
+              "colour": {
+                "type": "string",
+                "description": "#RRGGBB"
+              },
+              "rfidUid": {
+                "type": "string",
+                "description": "RFID 卷的唯一号，非 RFID 卷省略；面板拿它判断是否换过料"
+              },
+              "remainingPercent": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "打印机自己估的余量，照传但面板不用来算"
+              },
+              "extruders": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "description": "这个料位能供给的挤出机"
+              }
+            },
+            "required": [
+              "unit",
+              "slot"
+            ]
+          }
+        },
+        "bedType": {
+          "type": "string"
+        },
+        "storage": {
+          "type": "array",
+          "items": {
+            "title": "StorageMedium",
+            "type": "object",
+            "properties": {
+              "medium": {
+                "type": "string",
+                "description": "internal / usb / sdcard 等"
+              },
+              "present": {
+                "type": "boolean"
+              },
+              "writable": {
+                "type": "boolean"
+              },
+              "freeBytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "medium",
+              "present"
+            ]
+          }
+        },
+        "activeErrors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActiveError"
+          }
+        },
+        "controls": {
+          "type": "object",
+          "description": "设定值类控制的当前值，如灯、速度档"
+        },
+        "camera": {
+          "title": "CameraCapabilities",
+          "type": "object",
+          "properties": {
+            "stream": {
+              "type": "boolean"
+            },
+            "snapshot": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "stream",
+            "snapshot"
+          ]
+        },
+        "deviceBoot": {
+          "type": "string",
+          "description": "适配器给的打印机这次开机的标识，拿不到就省略；只用于显示"
+        },
+        "runSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "daemon 给这台打印机记的运行序号，落盘、只增不减：每看到打印机开始一次运行加一；有一段时间看不到打印机、证明不了它没跑过东西的也加一。只用于开打前检查和确认任务没开打。"
+        }
+      },
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "connected",
+        "state",
+        "runSeq"
+      ]
+    },
+    "PrintersAssign": {
+      "title": "PrintersAssign",
+      "description": "这个 daemon 负责哪些打印机，每次都是完整列表。列表里没有的打印机，daemon 断开它并删掉它的本地状态。",
+      "type": "object",
+      "properties": {
+        "printers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssignedPrinter"
+          }
+        }
+      },
+      "required": [
+        "printers"
+      ]
+    },
+    "TokenRenew": {
+      "title": "TokenRenew",
+      "description": "HTTP 令牌到期前面板换新的。",
+      "type": "object",
+      "properties": {
+        "httpToken": {
+          "type": "string"
+        },
+        "httpTokenExpiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "httpToken",
+        "httpTokenExpiresAt"
+      ]
+    },
+    "UpgradeRequired": {
+      "title": "UpgradeRequired",
+      "description": "daemon 的协议版本太老，面板发完这条就断开。",
+      "type": "object",
+      "properties": {
+        "minProtocolVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        },
+        "upgradeCommand": {
+          "type": "string",
+          "description": "给人执行的升级命令；daemon 只记进日志，不自动升级"
+        }
+      },
+      "required": [
+        "minProtocolVersion",
+        "upgradeCommand"
+      ]
+    },
+    "Welcome": {
+      "title": "Welcome",
+      "description": "认证通过。daemon 用 serverTime 算出和面板的时钟差，之后按面板的时间判断命令是否过期。",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "protocolVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        },
+        "serverTime": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "heartbeatSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "httpToken": {
+          "type": "string",
+          "description": "调 HTTP 接口用的令牌，和这条连接同生共死"
+        },
+        "httpTokenExpiresAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "printers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssignedPrinter"
+          }
+        },
+        "config": {
+          "$ref": "#/$defs/DaemonConfig"
+        }
+      },
+      "required": [
+        "sessionId",
+        "protocolVersion",
+        "heartbeatSeconds",
+        "httpToken",
+        "httpTokenExpiresAt",
+        "printers",
+        "config"
+      ]
+    }
+  }
+};
+
+/** 协议里的消息清单：方向、要不要确认。 */
+export const daemonMessages = [
+  {
+    "type": "hello",
+    "schema": "hello.schema.json",
+    "title": "Hello",
+    "direction": "daemon-to-panel",
+    "needsAck": false
+  },
+  {
+    "type": "challenge",
+    "schema": "challenge.schema.json",
+    "title": "Challenge",
+    "direction": "panel-to-daemon",
+    "needsAck": false
+  },
+  {
+    "type": "auth",
+    "schema": "auth.schema.json",
+    "title": "Auth",
+    "direction": "daemon-to-panel",
+    "needsAck": false
+  },
+  {
+    "type": "welcome",
+    "schema": "welcome.schema.json",
+    "title": "Welcome",
+    "direction": "panel-to-daemon",
+    "needsAck": false
+  },
+  {
+    "type": "ack",
+    "schema": "ack.schema.json",
+    "title": "Ack",
+    "direction": "both",
+    "needsAck": false
+  },
+  {
+    "type": "ping",
+    "schema": "ping.schema.json",
+    "title": "Ping",
+    "direction": "both",
+    "needsAck": false
+  },
+  {
+    "type": "pong",
+    "schema": "pong.schema.json",
+    "title": "Pong",
+    "direction": "both",
+    "needsAck": false
+  },
+  {
+    "type": "printer.snapshot",
+    "schema": "printer.snapshot.schema.json",
+    "title": "PrinterSnapshot",
+    "direction": "daemon-to-panel",
+    "needsAck": false
+  },
+  {
+    "type": "printer.event",
+    "schema": "printer.event.schema.json",
+    "title": "PrinterEvent",
+    "direction": "daemon-to-panel",
+    "needsAck": true
+  },
+  {
+    "type": "command.result",
+    "schema": "command.result.schema.json",
+    "title": "CommandResult",
+    "direction": "daemon-to-panel",
+    "needsAck": true
+  },
+  {
+    "type": "discovery.report",
+    "schema": "discovery.report.schema.json",
+    "title": "DiscoveryReport",
+    "direction": "daemon-to-panel",
+    "needsAck": true
+  },
+  {
+    "type": "printers.assign",
+    "schema": "printers.assign.schema.json",
+    "title": "PrintersAssign",
+    "direction": "panel-to-daemon",
+    "needsAck": true
+  },
+  {
+    "type": "command",
+    "schema": "command.schema.json",
+    "title": "Command",
+    "direction": "panel-to-daemon",
+    "needsAck": true
+  },
+  {
+    "type": "config.update",
+    "schema": "config.update.schema.json",
+    "title": "ConfigUpdate",
+    "direction": "panel-to-daemon",
+    "needsAck": true
+  },
+  {
+    "type": "token.renew",
+    "schema": "token.renew.schema.json",
+    "title": "TokenRenew",
+    "direction": "panel-to-daemon",
+    "needsAck": true
+  },
+  {
+    "type": "upgrade_required",
+    "schema": "upgrade_required.schema.json",
+    "title": "UpgradeRequired",
+    "direction": "panel-to-daemon",
+    "needsAck": false
+  }
+] as const;
+
+export const daemonProtocolVersion = "1.0";

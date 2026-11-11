@@ -1,0 +1,667 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/printer.event.schema.json",
+  "title": "PrinterEvent",
+  "description": "打印机上的一个离散事件。面板靠事件推进状态，用快照对账。同一台打印机的事件按 seq 顺序处理。",
+  "oneOf": [
+    {
+      "title": "ConnectionUpEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "connection.up"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "description": "daemon 重新连上打印机；面板随后按最新快照对账。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind"
+      ]
+    },
+    {
+      "title": "ConnectionDownEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "connection.down"
+        },
+        "data": {
+          "title": "ConnectionDownData",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "如 access_code_key_mismatch"
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "description": "daemon 连不上这台打印机。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "JobStagedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.staged"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "description": "文件已经放到打印机上，开打指令已发出。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef"
+      ]
+    },
+    {
+      "title": "JobStartedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.started"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "description": "打印机报告开始打印。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef"
+      ]
+    },
+    {
+      "title": "JobPausedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.paused"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "JobPausedData",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "title": "PauseReason",
+              "type": "string",
+              "enum": [
+                "USER",
+                "ERROR",
+                "RUNOUT"
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ]
+        }
+      },
+      "description": "任务暂停。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef",
+        "data"
+      ]
+    },
+    {
+      "title": "JobResumedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.resumed"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "description": "任务从暂停恢复。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef"
+      ]
+    },
+    {
+      "title": "JobFinishedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.finished"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "description": "打印机报告打完。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef"
+      ]
+    },
+    {
+      "title": "JobFailedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.failed"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "JobFailedData",
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "beforeStart": {
+              "type": "boolean",
+              "description": "true = 开打前就失败了"
+            }
+          },
+          "required": [
+            "reason",
+            "beforeStart"
+          ]
+        }
+      },
+      "description": "打印机报告任务失败。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef",
+        "data"
+      ]
+    },
+    {
+      "title": "JobCancelledEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.cancelled"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "JobCancelledData",
+          "type": "object",
+          "properties": {
+            "commandId": {
+              "$ref": "common.schema.json#/$defs/Uuid",
+              "description": "带着 = 面板发的停止生效了；没有 = 有人在打印机屏幕上停的"
+            },
+            "beforeStart": {
+              "type": "boolean",
+              "description": "true = 没开打就停下了。订单去向只看这个字段"
+            }
+          },
+          "required": [
+            "beforeStart"
+          ]
+        }
+      },
+      "description": "任务被停止。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef",
+        "data"
+      ]
+    },
+    {
+      "title": "JobPartsSkippedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "job.parts_skipped"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "JobPartsSkippedData",
+          "type": "object",
+          "properties": {
+            "partIds": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "description": "打印机上报的已跳过零件的完整列表"
+            }
+          },
+          "required": [
+            "partIds"
+          ]
+        }
+      },
+      "description": "已跳过的零件变了。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef",
+        "data"
+      ]
+    },
+    {
+      "title": "ExternalStartedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "external.started"
+        },
+        "data": {
+          "title": "ExternalStartedData",
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      },
+      "description": "打印机开始跑一个不是系统下发的任务。一个已结束任务又跑起来也报成这个。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "ExternalEndedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "external.ended"
+        },
+        "data": {
+          "title": "ExternalEndedData",
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "description": "FINISHED / FAILED / CANCELLED"
+            }
+          },
+          "required": [
+            "result"
+          ]
+        }
+      },
+      "description": "外部任务结束。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "ErrorRaisedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "error.raised"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "ErrorRaisedData",
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "common.schema.json#/$defs/ActiveError"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      },
+      "description": "打印机出现一条新报错。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "ErrorClearedEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "error.cleared"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "ErrorClearedData",
+          "type": "object",
+          "properties": {
+            "errorId": {
+              "type": "string"
+            },
+            "clearedBy": {
+              "title": "ErrorClearedBy",
+              "type": "string",
+              "enum": [
+                "PANEL",
+                "DEVICE",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "errorId",
+            "clearedBy"
+          ]
+        }
+      },
+      "description": "一条报错消失了。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "FilamentRefilledEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "filament.refilled"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "type": "object",
+          "description": "fromSlot、toSlot；具体字段等真机实测后再定"
+        }
+      },
+      "description": "固件自动续料换了槽，只记日志。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "data"
+      ]
+    },
+    {
+      "title": "TimelapseReadyEvent",
+      "type": "object",
+      "properties": {
+        "printerId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "bootId": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "const": "timelapse.ready"
+        },
+        "jobRef": {
+          "$ref": "common.schema.json#/$defs/Uuid"
+        },
+        "data": {
+          "title": "TimelapseReadyData",
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "title": "TimelapseFile",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "sizeBytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "name",
+                  "sizeBytes"
+                ]
+              }
+            }
+          },
+          "required": [
+            "files"
+          ]
+        }
+      },
+      "description": "延时摄影文件已经生成，等 daemon 上传。",
+      "required": [
+        "printerId",
+        "bootId",
+        "seq",
+        "kind",
+        "jobRef",
+        "data"
+      ]
+    }
+  ]
+}

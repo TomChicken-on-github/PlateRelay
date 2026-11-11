@@ -1,0 +1,13 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d88",
+  "type": "printer.snapshot",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+    "bootId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d02",
+    "seq": 1050,
+    "connected": false,
+    "state": "OFFLINE",
+    "runSeq": 17
+  }
+}

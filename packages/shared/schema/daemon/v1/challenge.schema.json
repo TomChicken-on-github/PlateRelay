@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/challenge.schema.json",
+  "title": "Challenge",
+  "description": "面板对 hello 的回应。",
+  "type": "object",
+  "properties": {
+    "nonce": {
+      "type": "string",
+      "description": "32 字节随机数的 base64，只能用一次，30 秒内有效"
+    },
+    "serverTime": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    }
+  },
+  "required": [
+    "nonce",
+    "serverTime"
+  ]
+}

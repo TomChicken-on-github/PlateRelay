@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/welcome.schema.json",
+  "title": "Welcome",
+  "description": "认证通过。daemon 用 serverTime 算出和面板的时钟差，之后按面板的时间判断命令是否过期。",
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "$ref": "common.schema.json#/$defs/Uuid"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "serverTime": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "heartbeatSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "httpToken": {
+      "type": "string",
+      "description": "调 HTTP 接口用的令牌，和这条连接同生共死"
+    },
+    "httpTokenExpiresAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp"
+    },
+    "printers": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/AssignedPrinter"
+      }
+    },
+    "config": {
+      "$ref": "common.schema.json#/$defs/DaemonConfig"
+    }
+  },
+  "required": [
+    "sessionId",
+    "protocolVersion",
+    "heartbeatSeconds",
+    "httpToken",
+    "httpTokenExpiresAt",
+    "printers",
+    "config"
+  ]
+}

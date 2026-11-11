@@ -1,17 +1,13 @@
-# 设计层文档 2 · 接口契约。由人维护；改接口先改这里（Q150）。
+# PlateRelay HTTP 接口契约。由人维护，是接口的唯一来源；改接口先改这里，再重新生成代码。
 openapi: 3.1.0
 info:
   title: PlateRelay API
   version: 1.0.0-draft
   description: |-
-    设计层文档 2 的接口契约，设计先行、手写，是接口的唯一来源（Q150）。
+    接口契约，设计先行、手写，是接口的唯一来源。服务端的请求校验和前端客户端都从这里生成。
 
-    - 通用约定（认证、错误、幂等、并发、分页、实时推送）见 http-api.md，这里不重复。
-    - `x-permission`：文档 1 §2.2 的权限节点，或 public / guest / authenticated（API-PERM）。数组表示满足任意一个；`order:submit` 出现在需要"本人"的操作上时，服务端还会检查订单所有者。
-    - `x-transitions`：可能触发的文档 1 状态转换（API-CONC-03）。
-    - `x-rules`：相关的文档 0 / 1 / 2 编号。
-    - `x-requires`：字段级权限裁剪，没权限时字段不出现（API-PERM-04）。
-    - 重写时实体结构挪到 packages/shared/schema/，这里改成 $ref（README.md）。
+    - `x-permission`：调用这个接口需要的权限节点，或 public / guest / authenticated。数组表示满足任意一个；`order:submit` 出现在需要"本人"的操作上时，服务端还会检查订单所有者。
+    - `x-requires`：字段级权限裁剪，没权限时字段不出现。
   license: {name: GPL-3.0-only, identifier: GPL-3.0-only}
 servers:
 - {url: /api/v1}
@@ -35,7 +31,6 @@ paths:
       tags: [auth]
       summary: 可用的注册和登录方式
       x-permission: public
-      x-rules: [R-ACC-01]
       responses:
         '200':
           description: 成功
@@ -49,7 +44,7 @@ paths:
       tags: [auth]
       summary: 初始化向导：创建第一个管理员
       x-permission: public
-      description: 只在系统里还没有用户时可用，之后返回 404（F-ACC-04）。
+      description: 只在系统里还没有用户时可用，之后返回 404。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -79,8 +74,7 @@ paths:
       tags: [auth]
       summary: 用户名密码登录
       x-permission: public
-      x-rules: [R-ACC-04, API-RATE-01, API-AUTH-06]
-      description: 成功时设置会话 Cookie（API-AUTH-01）。
+      description: 成功时设置会话 Cookie。
       requestBody:
         required: true
         content:
@@ -150,8 +144,7 @@ paths:
       tags: [auth]
       summary: 发送短信或邮件验证码
       x-permission: public
-      x-rules: [R-ACC-02, R-ACC-03, API-RATE-02]
-      description: 短信一律要 captcha；邮件按 CFG-ACC-03，需要而没带时返回 422 captcha_required。
+      description: 短信一律要 captcha；邮件按「发邮件验证码前的人机验证」设置，需要而没带时返回 422 captcha_required。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -182,7 +175,6 @@ paths:
       tags: [auth]
       summary: 注册
       x-permission: public
-      x-rules: [R-ACC-01]
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -335,7 +327,6 @@ paths:
       tags: [me]
       summary: 个人通知设置
       x-permission: authenticated
-      x-rules: [R-NTF-02]
       responses:
         '200':
           description: 成功
@@ -350,7 +341,6 @@ paths:
       tags: [me]
       summary: 保存个人通知设置
       x-permission: authenticated
-      x-rules: [R-NTF-02]
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -380,8 +370,7 @@ paths:
       tags: [files]
       summary: 上传 .gcode.3mf
       x-permission: order:submit
-      x-rules: [R-SUB-01, R-SUB-02, R-SUB-10, R-SUB-13, API-FILE-01]
-      description: 返回时校验通常还没完成，等 file.checked 推送或轮询。这个人手上已有 CFG-SUB-08 − 1 个没提交的文件（校验被拒的和已提交的不算）时要带 captcha（先调 issueCaptcha），没带返回 422 captcha_required，和登录一样（R-SUB-13，Q236）。没提交的文件过了 CFG-SUB-07 自动删除，没有删除接口。
+      description: 返回时校验通常还没完成，等 file.checked 推送或轮询。这个人手上没提交的文件达到设置的个数（默认从第 3 个起；校验被拒的和已提交的不算）时要带 captcha（先调 issueCaptcha），没带返回 422 captcha_required，和登录一样。没提交的文件过了设置的保留时间（默认 2 小时）自动删除，没有删除接口。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -428,9 +417,7 @@ paths:
       tags: [orders]
       summary: 提交：每盘一个订单
       x-permission: order:submit
-      x-transitions: [S-ORD-T01]
-      x-rules: [R-SUB-02, R-SUB-05, R-SUB-06, R-SUB-07, R-SUB-08, R-SUB-09, R-ARB-05]
-      description: 多盘一次提交，超过排队上限整次拒绝（R-ARB-05）。表单版本不是最新时返回 409 version_conflict。
+      description: 多盘一次提交，超过排队上限整次拒绝。表单版本不是最新时返回 409 version_conflict。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -478,7 +465,7 @@ paths:
       tags: [orders]
       summary: 全部订单（订单管理）
       x-permission: order:view:any
-      description: 按提交时间倒序（Q99）。
+      description: 按提交时间倒序。
       parameters:
       - {$ref: '#/components/parameters/Limit'}
       - {$ref: '#/components/parameters/Cursor'}
@@ -554,7 +541,7 @@ paths:
       tags: [orders]
       summary: 订单详情
       x-permission: ['order:submit', 'order:view:any']
-      description: 本人或 order:view:any；看不到返回 404（API-PERM-05）。
+      description: 本人或 order:view:any；看不到返回 404。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       responses:
@@ -570,7 +557,6 @@ paths:
       tags: [orders]
       summary: 订单时间线记录
       x-permission: ['order:submit', 'order:view:any']
-      x-rules: [R-NTE-01, R-NTE-02, R-VIS-07]
       description: 按时间正序。申请者只收到选手可见的备注。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -588,8 +574,7 @@ paths:
       tags: [orders]
       summary: 给"在设备端停止"补一条备注
       x-permission: printer:operate
-      x-rules: [R-NTE-01, R-NTE-03]
-      description: 只能指向 kind=print.stopped_on_device 的记录。记录只追加（E-GEN-10），所以备注是一条新记录 note.added，data.refRecordId 指向原记录，归在"打印"节点下（Q217）。
+      description: 只能指向 kind=print.stopped_on_device 的记录。记录只追加，所以备注是一条新记录 note.added，data.refRecordId 指向原记录，归在"打印"节点下。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -618,12 +603,11 @@ paths:
       tags: [orders]
       summary: 下载某个版本的文件
       x-permission: ['order:submit', 'order:view:any']
-      x-rules: [R-FIL-01]
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/VersionN'}
       responses:
-        '302': {description: 跳到签名链接（API-FILE-02）}
+        '302': {description: 跳到签名链接}
         default: {$ref: '#/components/responses/Problem'}
   /orders/{orderId}/parts:
     get:
@@ -658,8 +642,6 @@ paths:
       tags: [orders]
       summary: 审核通过
       x-permission: order:review
-      x-transitions: [S-ORD-T02]
-      x-rules: [R-REV-01, R-REV-04, R-REV-05]
       description: versionId 是审核人看到的那个待审版本，防止审了一个版本却通过了另一个。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -673,7 +655,7 @@ paths:
               properties:
                 expectedStatus: {$ref: '#/components/schemas/OrderStatus'}
                 versionId: {type: string, format: uuid}
-                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
+                note: {type: [string, 'null'], maxLength: 2000, description: 备注}
               required: [expectedStatus, versionId]
               additionalProperties: false
       responses:
@@ -689,8 +671,6 @@ paths:
       tags: [orders]
       summary: 驳回（新提交或修改）
       x-permission: order:review
-      x-transitions: [S-ORD-T03, S-ORD-T04]
-      x-rules: [R-REV-02, R-REV-03]
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -720,9 +700,7 @@ paths:
       tags: [orders]
       summary: 修改文件（上传新版本）
       x-permission: order:submit
-      x-transitions: [S-ORD-T06]
-      x-rules: [R-VER-01, R-VER-02, R-VER-04, R-VER-07, R-VER-08, R-VER-09, R-VER-10, CFG-REV-01]
-      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单返回 422 order_dispatched（R-VER-04，Q207），开始打印及之后返回 422 order_started（R-VER-08）；次数用完返回 422 revision_limit_reached（R-VER-09）。
+      description: 只限本人。第一次审核前是替换；已派单返回 422 order_dispatched，开始打印及之后返回 422 order_started；次数用完返回 422 revision_limit_reached。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -751,8 +729,6 @@ paths:
       tags: [orders]
       summary: 撤回修改
       x-permission: order:submit
-      x-transitions: [S-ORD-T05]
-      x-rules: [R-VER-05]
       description: 只限本人。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -781,8 +757,6 @@ paths:
       tags: [orders]
       summary: 恢复旧版本
       x-permission: order:submit
-      x-transitions: [S-ORD-T07]
-      x-rules: [R-VER-06, R-VER-07, R-VER-09]
       description: 只限本人。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -811,9 +785,7 @@ paths:
       tags: [orders]
       summary: 取消订单
       x-permission: ['order:cancel:own', 'order:cancel:any']
-      x-transitions: [S-ORD-T18]
-      x-rules: [R-CAN-01, R-CAN-02, R-CAN-03, R-CAN-04, R-CAN-05]
-      description: 只有待审核、排队中能取消。已派单返回 422 order_dispatched（R-CAN-03，请现场人员先停止）；打印中、失败、打完的单返回 422 order_started（R-CAN-04）。
+      description: 只有待审核、排队中能取消。已派单返回 422 order_dispatched（请现场人员先停止）；打印中、失败、打完的单返回 422 order_started。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -842,9 +814,7 @@ paths:
       tags: [orders]
       summary: 重打
       x-permission: order:reprint
-      x-transitions: [S-ORD-T15]
-      x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 reprint_not_allowed，params.reason 为 ARCHIVED / DECLINED（R-PRT-09；不看申请者账户是否停用，Q415）。
+      description: 文件过期返回 410 file_expired；归档过或被标为不重打的失败订单返回 422 reprint_not_allowed，params.reason 为 ARCHIVED / DECLINED（不看申请者账户是否停用）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -856,7 +826,7 @@ paths:
               type: object
               properties:
                 expectedStatus: {type: string, enum: [FAILED]}
-                note: {type: [string, 'null'], maxLength: 2000, description: 备注（R-NTE-03）}
+                note: {type: [string, 'null'], maxLength: 2000, description: 备注}
               required: [expectedStatus]
               additionalProperties: false
       responses:
@@ -872,8 +842,7 @@ paths:
       tags: [orders]
       summary: 不重打，请选手重新提交
       x-permission: order:reprint
-      x-rules: [R-PRT-18, F-PRT-07]
-      description: 只用于选手模型本身的问题（Q224）。订单仍是失败，记下不重打，重打按钮隐藏，移出现场人员待办，通知申请者并带原因。时间线记 reprint.declined，挂在打印节点下，原因默认选手可见。归档过或已经标过返回 409 state_conflict。
+      description: 只用于选手模型本身的问题。订单仍是失败，记下不重打，重打按钮隐藏，移出现场人员待办，通知申请者并带原因。时间线记 reprint.declined，挂在打印节点下，原因默认选手可见。归档过或已经标过返回 409 state_conflict。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -901,7 +870,6 @@ paths:
       tags: [orders]
       summary: 撤销不重打
       x-permission: order:reprint:restore
-      x-rules: [R-PRT-19]
       description: 只有管理员。清掉不重打标记，重打按钮恢复，订单回现场人员待办；时间线记 reprint.decline_revoked，记审计。没标过或归档过返回 409 state_conflict。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -919,9 +887,7 @@ paths:
       tags: [orders]
       summary: 人工判定：判失败、判打完或判没开打
       x-permission: printer:operate
-      x-transitions: [S-ORD-T13, S-ORD-T14, S-ORD-T09]
-      x-rules: [R-PRT-08]
-      description: 只在这个任务的打印机挂着 JUDGE 原因时可用（R-PRT-07 第 ③ 种、R-CMD-04），否则 409 state_conflict；放出异常打印机时的判定走 releasePrinter。打印机上报这个任务正在运行时不能判，返回 409 state_conflict（Q359）。判没开打（NOT_STARTED）：任务以 STOPPED_BEFORE_START 结束，订单回排队原位，打印机进待清板，面板给 daemon 发 job.stop 让它记下不再开打（Q360）。
+      description: 只在这个任务的打印机挂着 JUDGE 原因时可用（对账分不清任务结局，或开打指令可能没到），否则 409 state_conflict；放出异常打印机时的判定走 releasePrinter。打印机上报这个任务正在运行时不能判，返回 409 state_conflict。判没开打（NOT_STARTED）：任务以 STOPPED_BEFORE_START 结束，订单回排队原位，打印机进待清板，面板给 daemon 发 job.stop 让它记下不再开打。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -932,9 +898,9 @@ paths:
             schema:
               type: object
               properties:
-                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账（S-ORD-T13、T14，Q318）}
+                expectedStatus: {type: string, enum: [DISPATCHED, PRINTING], description: 已派单也能人工对账}
                 outcome: {type: string, enum: [FAILED, PRINTED, NOT_STARTED]}
-                note: {type: string, minLength: 1, maxLength: 2000, description: 原因，必填，写审计（R-PRT-08、R-NTE-03）}
+                note: {type: string, minLength: 1, maxLength: 2000, description: 原因，必填，写审计}
               required: [expectedStatus, outcome, note]
               additionalProperties: false
       responses:
@@ -950,8 +916,7 @@ paths:
       tags: [orders]
       summary: 跳过零件
       x-permission: ['order:skip-parts:own', 'order:skip-parts:any']
-      x-rules: [F-SUB-07, R-SKP-01, R-SKP-02, R-SKP-03, R-SKP-06]
-      description: 只在任务打印中或暂停中可用（准备中 409 state_conflict）；跳完至少剩一个没跳的零件，否则 422 skip_all_parts（全跳等于停止，NG-11）。不能撤回，前端先二次确认。是控制命令，没有命令锁（Q243）。已跳过列表以打印机上报为准写进 E-JOB skipped_parts；时间线打印节点记 parts.skipped，默认选手可见，现场人员只显示角色（R-SKP-06）。
+      description: 只在任务打印中或暂停中可用（准备中 409 state_conflict）；跳完至少剩一个没跳的零件，否则 422 skip_all_parts（全跳等于停止，申请者不能停止打印）。不能撤回，前端先二次确认。是控制命令，没有命令锁。已跳过列表以打印机上报为准写进打印任务的 skipped_parts；时间线打印节点记 parts.skipped，默认选手可见，现场人员只显示角色。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -963,7 +928,7 @@ paths:
               type: object
               properties:
                 expectedStatus: {type: string, enum: [PRINTING]}
-                expectedJobId: {type: string, format: uuid, description: 防止跳到重打后的新任务上；对不上 409 job_mismatch（R-SKP-07，Q313）}
+                expectedJobId: {type: string, format: uuid, description: 防止跳到重打后的新任务上；对不上 409 job_mismatch}
                 partIds:
                   type: array
                   items: {type: integer}
@@ -979,9 +944,7 @@ paths:
       tags: [orders]
       summary: 铲件入库
       x-permission: order:store
-      x-transitions: [S-ORD-T16, S-PRN-T25]
-      x-rules: [R-PCK-01, INV-12]
-      description: 只要求订单是待入库。打印机在待清板时同一个事务里放行到可用；不在待清板时只入库订单，打印机状态不动（Q424）。
+      description: 只要求订单是待入库。打印机在待清板时同一个事务里放行到可用；不在待清板时只入库订单，打印机状态不动。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1011,9 +974,7 @@ paths:
       tags: [orders]
       summary: 标为已处置
       x-permission: order:dispose
-      x-transitions: [S-ORD-T21]
-      x-rules: [R-PCK-05]
-      description: Q160。
+      description: 长期没取走的待取件订单由管理员标为已处置，必须填原因。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1042,7 +1003,6 @@ paths:
       tags: [pickup]
       summary: 签发取件码
       x-permission: order:submit
-      x-rules: [R-PCK-04, API-RATE-05]
       description: 只限本人。新码作废旧码。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -1070,7 +1030,6 @@ paths:
       tags: [orders]
       summary: 延时摄影列表
       x-permission: ['order:submit', 'order:view:any']
-      x-rules: [R-VIS-06]
       description: 本人、现场人员、管理员。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
@@ -1089,7 +1048,6 @@ paths:
       tags: [orders]
       summary: 看延时摄影
       x-permission: ['order:submit', 'order:view:any']
-      x-rules: [R-VIS-06, R-CAM-04]
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - name: timelapseId
@@ -1097,7 +1055,7 @@ paths:
         required: true
         schema: {type: string, format: uuid}
       responses:
-        '302': {description: 跳到签名链接；每次记审计（API-FILE-03）}
+        '302': {description: 跳到签名链接；每次记审计}
         default: {$ref: '#/components/responses/Problem'}
   /queue:
     get:
@@ -1105,8 +1063,7 @@ paths:
       tags: [queue]
       summary: 完整队列（含冻结的）
       x-permission: order:view:any
-      x-rules: [R-QUE-01, INV-10]
-      description: 按排序值升序，不分页（API-PAGE-04）。申请者看自己的排位用 /orders/mine。
+      description: 按排序值升序，不分页。申请者看自己的排位用 /orders/mine。
       responses:
         '200':
           description: 成功
@@ -1122,7 +1079,6 @@ paths:
       tags: [queue]
       summary: 拖拽调整顺序
       x-permission: order:reorder
-      x-rules: [R-QUE-02]
       description: afterOrderId 为 null 表示放到队首。不填备注，只记审计。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1153,7 +1109,6 @@ paths:
       tags: [queue]
       summary: 派单建议
       x-permission: order:dispatch
-      x-rules: [R-DSP-01]
       responses:
         '200':
           description: 成功
@@ -1169,8 +1124,7 @@ paths:
       tags: [queue]
       summary: 某单派到某台的可行性和映射建议
       x-permission: order:dispatch
-      x-rules: [R-DSP-03, R-DSP-04, R-DSP-05, R-DSP-06, R-DSP-07, R-DSP-09, R-DSP-10, R-DSP-12, R-DSP-15]
-      description: 打印机不是可用或已停用时返回 409 printer_not_available，params.state 和 params.reasons 列出原因（R-DSP-15，Q233、Q396）。
+      description: 打印机不是可用或已停用时返回 409 printer_not_available，params.state 和 params.reasons 列出原因。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - name: orderId
@@ -1189,9 +1143,7 @@ paths:
       tags: [queue]
       summary: 派单
       x-permission: order:dispatch
-      x-transitions: [S-ORD-T08, S-PRN-T20]
-      x-rules: [R-DSP-02, R-DSP-03, R-DSP-04, R-DSP-06, R-DSP-07, R-DSP-08, R-DSP-09, R-DSP-11, R-DSP-13, R-DSP-15, R-ARB-10]
-      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机不是可用或已停用返回 409 printer_not_available（params.state、params.reasons），手动派单也一样（R-DSP-15，Q233）。
+      description: 服务端按提交的映射重新校验；有 BLOCK 项返回 422，有 WARN 项但没填原因也返回 422。打印机不是可用或已停用返回 409 printer_not_available（params.state、params.reasons），手动派单也一样。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1235,7 +1187,6 @@ paths:
       tags: [printers]
       summary: 添加打印机
       x-permission: printer:manage
-      x-rules: [INV-08, INV-09, F-PRT-12]
       description: 新加的默认不开放给选手。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1251,7 +1202,7 @@ paths:
                 serial: {type: string}
                 host: {type: string}
                 name: {type: string}
-                accessCodeCipher: {type: string, description: 浏览器用 daemon 公钥加密（INV-07）}
+                accessCodeCipher: {type: string, description: 浏览器用 daemon 公钥加密，面板只存密文}
                 keyFingerprint: {type: string}
               required: [daemonId, brand, serial, host, name, accessCodeCipher, keyFingerprint]
               additionalProperties: false
@@ -1268,7 +1219,6 @@ paths:
       tags: [printers]
       summary: 打印机详情
       x-permission: printer:operate
-      x-rules: [R-VIS-04]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       responses:
@@ -1283,8 +1233,7 @@ paths:
       tags: [printers]
       summary: 编辑打印机
       x-permission: printer:manage
-      x-rules: [INV-09, F-PRT-12, R-PRT-20]
-      description: 改 daemonId = 显式把打印机移到另一个 daemon（INV-09），必须同时重填访问码；新 daemon 按 MSG-ASSIGN 的 currentJobRef 认领还在打的系统任务（Q228）。disabled=true 停用、false 重新启用（R-PRT-20，Q229）：只在可用或异常且没有当前任务时能停用，否则 409 state_conflict；停用时挂 OFFLINE，重新启用后按对账走，必经待清板（Q428）；停用后概况页和派单都不显示，记录保留。
+      description: 改 daemonId = 显式把打印机移到另一个 daemon（一台打印机同一时间只归一个 daemon），必须同时重填访问码；新 daemon 按下发的 currentJobRef 认领还在打的系统任务。disabled=true 停用、false 重新启用：只在可用或异常且没有当前任务时能停用，否则 409 state_conflict；停用时挂 OFFLINE，重新启用后按对账走，必经待清板；停用后概况页和派单都不显示，记录保留。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1316,7 +1265,7 @@ paths:
       tags: [printers]
       summary: 删除打印机
       x-permission: printer:manage
-      description: 只能删从没派过单的；派过单的返回 422（E-GEN-06）。
+      description: 只能删从没派过单的；派过单的返回 422。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1421,8 +1370,7 @@ paths:
       tags: [printers]
       summary: 挂上维护原因
       x-permission: printer:maintenance
-      x-transitions: [S-PRN-T22]
-      description: 给打印机挂异常原因 MAINTENANCE（S-RSN-MAINT），任何状态都能挂；有当前任务时任务照常推进（Q397）。
+      description: 给打印机挂异常原因 MAINTENANCE，任何状态都能挂；有当前任务时任务照常推进。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1450,8 +1398,7 @@ paths:
       tags: [printers]
       summary: 去掉维护原因
       x-permission: printer:maintenance
-      x-transitions: [S-PRN-T23, S-PRN-T24]
-      description: 去掉 MAINTENANCE 原因。没有别的原因时，打印机还在跑东西（如测试打印）进工作，否则进待清板，由人确认清板后才可用（Q397）；不再需要勾"热床已清理"。
+      description: 去掉 MAINTENANCE 原因。没有别的原因时，打印机还在跑东西（如测试打印）进工作，否则进待清板，由人确认清板后才可用；不再需要勾"热床已清理"。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1478,9 +1425,7 @@ paths:
       tags: [printers]
       summary: 停止打印
       x-permission: printer:stop
-      x-transitions: [S-ORD-T09, S-ORD-T13]
-      x-rules: [R-PRT-04, R-PRT-05, R-CMD-04, R-CMD-05, P-01]
-      description: 前端先让人选原因并二次确认。任务在传文件（daemon 中止传输并确认没开打，Q223）、准备中、打印中、暂停中都发 job.stop（Q203），没有命令锁；打印机还报打印中或暂停中时可以再点（R-CMD-05，Q243）。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或 daemon 确认没开打后才回原位；daemon 确认不了时打印机挂 JUDGE，由人判（R-CMD-04，Q395）。
+      description: 前端先让人选原因并二次确认。任务在传文件（daemon 中止传输并确认没开打）、准备中、打印中、暂停中都发 job.stop，没有命令锁；打印机还报打印中或暂停中时可以再点。打印机报告没开打就停下 → 订单回原位；开打后停下 → 失败。"开打可能没到"待办里的"停止并退回队列"也是调这个接口：订单只在打印机报已停止 / 已取消，或 daemon 确认没开打后才回原位；daemon 确认不了时打印机挂 JUDGE，由人判。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1492,7 +1437,7 @@ paths:
               type: object
               properties:
                 expectedState: {$ref: '#/components/schemas/PrinterState'}
-                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch（Q313）。外部任务时不带（Q326、Q377）}
+                expectedJobId: {type: string, format: uuid, description: 用户看到的当前任务；锁行后和状态一起核对，对不上 409 job_mismatch。外部任务时不带}
                 reason: {type: string, minLength: 1}
                 reasonVisible: {type: boolean, default: true}
               required: [expectedState, reason]
@@ -1506,7 +1451,6 @@ paths:
       tags: [printers]
       summary: 处理报错
       x-permission: printer:operate
-      x-rules: [R-PRT-14]
       description: 同一条报错只接受第一个处理动作，后到的返回 409。requiresOnSite 的选项要 onSiteConfirmed=true。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
@@ -1535,7 +1479,6 @@ paths:
       tags: [printers]
       summary: 设备控制
       x-permission: printer:control
-      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08, R-DSP-14]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1559,7 +1502,6 @@ paths:
       tags: [printers]
       summary: 刷新机器状态（只读）
       x-permission: printer:refresh
-      x-rules: [R-PRT-12, API-RATE-03]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1580,7 +1522,6 @@ paths:
       tags: [printers]
       summary: 打印机存储（只读）
       x-permission: printer:operate
-      x-rules: [R-PRT-22, F-PRT-11]
       description: 面板向 daemon 发一次 storage.list，等结果（最多 10 秒）再返回。daemon 不在线或超时返回 503。只读，没有删除和下载。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
@@ -1613,7 +1554,7 @@ paths:
                         name: {type: string, description: 打印机上的路径}
                         sizeBytes: {type: integer}
                         modifiedAt: {type: string, format: date-time}
-                        system: {type: boolean, description: 是否系统文件（MSG-JOBREF-02）}
+                        system: {type: boolean, description: 是否系统文件}
         default: {$ref: '#/components/responses/Problem'}
   /printers/{printerId}/release:
     post:
@@ -1621,9 +1562,7 @@ paths:
       tags: [printers]
       summary: 放出异常的打印机
       x-permission: printer:operate
-      x-transitions: [S-PRN-T24, S-ORD-T13, S-ORD-T14, S-ORD-T09]
-      x-rules: [R-PRT-27, R-PRT-08]
-      description: 去掉这台打印机除 OFFLINE 以外的全部异常原因，没有别的原因就进待清板；还联系不上的留在异常，重连后再进待清板（Q420）。打印机连着且最新上报正在运行时返回 409 state_conflict（Q372）；挂着 OFFLINE 时不看旧上报（Q423）。有当前任务时必须带 expectedJobId 和 outcome，没有时两者都不带，否则 422。判没开打时给 daemon 发 job.stop。写审计（Q402）。
+      description: 去掉这台打印机除 OFFLINE 以外的全部异常原因，没有别的原因就进待清板；还联系不上的留在异常，重连后再进待清板。打印机连着且最新上报正在运行时返回 409 state_conflict；挂着 OFFLINE 时不看旧上报。有当前任务时必须带 expectedJobId 和 outcome，没有时两者都不带，否则 422。判没开打时给 daemon 发 job.stop。写审计。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1653,7 +1592,6 @@ paths:
       tags: [printers]
       summary: 打印机事件日志
       x-permission: printer:operate
-      x-rules: [R-PRT-26]
       description: 最新的在前，游标分页。只读。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
@@ -1690,8 +1628,6 @@ paths:
       tags: [printers]
       summary: 确认清板
       x-permission: order:store
-      x-transitions: [S-PRN-T25]
-      x-rules: [R-PCK-02, INV-01]
       description: 这台打印机上还有待入库的订单时返回 422，要走铲件入库。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
@@ -1756,8 +1692,7 @@ paths:
       tags: [printers]
       summary: 打印机详情页在场心跳
       x-permission: printer:operate
-      x-rules: [R-VIS-10, R-CMD-10, API-RT-07]
-      description: 详情页打开时每 20 秒调一次，45 秒没续上就算离开。只在内存里记，不进数据库（Q245）。只是提示，不挡任何操作。
+      description: 详情页打开时每 20 秒调一次，45 秒没续上就算离开。只在内存里记，不进数据库。只是提示，不挡任何操作。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       requestBody:
@@ -1778,7 +1713,6 @@ paths:
       tags: [printers]
       summary: 离开打印机详情页
       x-permission: printer:operate
-      x-rules: [R-VIS-10, API-RT-07]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - name: streamId
@@ -1794,8 +1728,7 @@ paths:
       tags: [printers]
       summary: 打印机的打印记录
       x-permission: printer:operate
-      x-rules: [R-VIS-04, R-CAM-11]
-      description: 打印机详情里的"打印记录"：这台打印机的打印任务，最新派的在前（按 dispatchedAt 倒序），游标翻页。任务不单独成页，也没有跨打印机的任务列表（文档 1 §4A，Q221）。每条点开进订单详情。申请者按通常的可见性规则返回（R-VIS）。
+      description: 打印机详情里的"打印记录"：这台打印机的打印任务，最新派的在前（按 dispatchedAt 倒序），游标翻页。任务不单独成页，也没有跨打印机的任务列表。每条点开进订单详情。申请者按通常的可见性规则返回。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/Limit'}
@@ -1832,7 +1765,7 @@ paths:
                           type: [object, 'null']
                           properties:
                             capturedAt: {type: string, format: date-time}
-                            url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                            url: {type: string, format: uri, description: 短期签名链接}
                           required: [capturedAt, url]
                           additionalProperties: false
                       required: [jobId, attempt, orderId, orderNumber, owner, phase, outcome, dispatchedAt, startedAt, endedAt, endPhoto]
@@ -1847,8 +1780,7 @@ paths:
       tags: [printers]
       summary: 申请看实况
       x-permission: [guest, 'printer:camera:stream']
-      x-rules: [R-CAM-01, R-CAM-02, R-CAM-06, R-CAM-07, API-CAM-01, API-CAM-02]
-      description: 没登录的访客要 CFG-UI-01 和 CFG-CAM-01 都开，否则 401（Q323）。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
+      description: 没登录的访客要「概况页公开」和「访客可看实况」两个设置都开，否则 401。拿不到返回 409 stream_unavailable，到上限返回 409 camera_limit，前端改看抓拍。
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1878,7 +1810,7 @@ paths:
                     transport: {type: [string, 'null'], enum: [srt, rtsps]}
                   required: [kind, whepUrl, hlsUrl, prefer, token, expiresAt, transport]
                   additionalProperties: false
-                  description: 两个地址都给，prefer=webrtc（固定，Q391）
+                  description: 两个地址都给，prefer=webrtc（固定）
                 - type: object
                   properties:
                     kind: {type: string, enum: [jpeg-frames]}
@@ -1893,7 +1825,6 @@ paths:
       tags: [printers]
       summary: 最新一张抓拍
       x-permission: [guest, 'printer:camera:snapshot']
-      x-rules: [R-CAM-02, R-CAM-03, API-CAM-03]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - name: If-None-Match
@@ -1902,7 +1833,7 @@ paths:
       responses:
         '304': {description: 没变}
         '200':
-          description: 内存里最新一张 JPEG（R-CAM-03）
+          description: 内存里最新一张 JPEG
           headers:
             X-Captured-At:
               schema: {type: string, format: date-time}
@@ -1949,7 +1880,6 @@ paths:
       tags: [pickup]
       summary: 扫码查单
       x-permission: order:redeem
-      x-rules: [R-PCK-03]
       description: 码无效、过期、已作废都返回 404。
       parameters:
       - name: code
@@ -1969,8 +1899,6 @@ paths:
       tags: [pickup]
       summary: 核销
       x-permission: order:redeem
-      x-transitions: [S-ORD-T17]
-      x-rules: [R-PCK-03, INV-05]
       parameters:
       - name: code
         in: path
@@ -2000,7 +1928,6 @@ paths:
       tags: [overview]
       summary: 概况页
       x-permission: [guest, 'overview:view']
-      x-rules: [F-UI-01, R-VIS-02, R-VIS-03, R-VIS-04]
       responses:
         '200':
           description: 成功
@@ -2014,7 +1941,6 @@ paths:
       tags: [overview]
       summary: 提交页可用资源
       x-permission: resource:view
-      x-rules: [R-SUB-11, R-QUE-04, CFG-SUB-04, CFG-SUB-05]
       responses:
         '200':
           description: 成功
@@ -2028,7 +1954,7 @@ paths:
       tags: [overview]
       summary: 待办
       x-permission: ['order:review', 'printer:operate']
-      description: 按权限过滤：管理员看到待审核，现场人员看到打印机相关的。从状态实时算（entities.md §3）。
+      description: 按权限过滤：管理员看到待审核，现场人员看到打印机相关的。从状态实时算。
       responses:
         '200':
           description: 成功
@@ -2058,7 +1984,6 @@ paths:
       tags: [catalog]
       summary: 加库存行
       x-permission: filament:catalog
-      x-rules: [R-SUB-12]
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -2188,7 +2113,6 @@ paths:
       tags: [catalog]
       summary: 设置某个机型本场能用的板型（整组替换）
       x-permission: filament:catalog
-      x-rules: [R-SUB-11]
       parameters:
       - name: modelId
         in: path
@@ -2250,8 +2174,7 @@ paths:
       tags: [admin]
       summary: 改角色、停用
       x-permission: user:manage
-      x-rules: [INV-13, API-AUTH-04, R-ACC-05]
-      description: disabled=true 时前端先在确认框列出他还没打完的订单（R-ACC-05，Q230）。停用只管登录和提交，不连带取消订单，要取消的由管理员另外取消（Q415）。
+      description: disabled=true 时前端先在确认框列出他还没打完的订单。停用只管登录和提交，不连带取消订单，要取消的由管理员另外取消。
       parameters:
       - name: userId
         in: path
@@ -2355,7 +2278,6 @@ paths:
       tags: [admin]
       summary: 生成安装命令
       x-permission: daemon:manage
-      x-rules: [F-DMN-01]
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -2411,7 +2333,7 @@ paths:
       tags: [admin]
       summary: 吊销
       x-permission: daemon:manage
-      description: 立刻断开它的连接；它名下的打印机挂失联，要管理员移到别的 daemon（INV-09）。
+      description: 立刻断开它的连接；它名下的打印机挂失联，要管理员移到别的 daemon。
       parameters:
       - name: daemonId
         in: path
@@ -2466,7 +2388,6 @@ paths:
       tags: [admin]
       summary: 这个 daemon 听到的打印机
       x-permission: printer:manage
-      x-rules: [F-PRT-12]
       parameters:
       - name: daemonId
         in: path
@@ -2499,7 +2420,7 @@ paths:
       tags: [admin]
       summary: 保存申请表单（新版本）
       x-permission: form:configure
-      description: basedOnVersionId 不是最新版本时返回 409 version_conflict（E-FORM）。
+      description: basedOnVersionId 不是最新版本时返回 409 version_conflict。
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -2557,7 +2478,6 @@ paths:
       tags: [admin]
       summary: 按分区保存
       x-permission: ['settings:manage', 'resource:configure']
-      x-rules: [F-OPS-06, P-04]
       description: mapping 分区要 resource:configure，其他要 settings:manage。范围和关联校验失败返回 422。
       parameters:
       - name: section
@@ -2574,7 +2494,7 @@ paths:
               properties:
                 version: {type: integer}
                 values: {type: object, additionalProperties: true}
-                confirm: {type: string, enum: ['true'], description: 前端已显示改前改后并经确认（F-OPS-06）}
+                confirm: {type: string, enum: ['true'], description: 前端已显示改前改后并经确认}
               required: [version, values, confirm]
               additionalProperties: false
       responses:
@@ -2633,8 +2553,6 @@ paths:
       tags: [admin]
       summary: 归档本期
       x-permission: settings:manage
-      x-transitions: [S-ORD-T21, S-ORD-T22]
-      x-rules: [R-ARC-01, R-ARC-02, R-ARB-01, R-ARB-02]
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -2719,14 +2637,13 @@ paths:
       tags: [stream]
       summary: 实时推送（SSE）
       x-permission: [guest, authenticated]
-      x-rules: [API-RT-01, API-RT-04, API-RT-06]
       parameters:
       - name: Last-Event-ID
         in: header
         schema: {type: string}
       responses:
         '200':
-          description: text/event-stream；事件见 http-api.md §9
+          description: text/event-stream
           content:
             text/event-stream:
               schema: {type: string}
@@ -2739,7 +2656,7 @@ components:
         type: {type: string, format: uri}
         title: {type: string}
         status: {type: integer}
-        code: {type: string, description: 错误码，见 http-api.md §4.2}
+        code: {type: string, description: 英文错误码，前端靠它查文案}
         detail: {type: string}
         params: {type: object, additionalProperties: true}
         requestId: {type: string}
@@ -2762,7 +2679,7 @@ components:
         printerId: {type: string, format: uuid}
       required: [commandId, printerId]
       additionalProperties: false
-      description: API-ASYNC-01：命令已记下并发出。结果通过实时推送到达。
+      description: 命令已记下并发出。结果通过实时推送到达。
     Person:
       type: object
       properties:
@@ -2787,22 +2704,22 @@ components:
       - COMPLETED
       - CANCELLED
       - DISPOSED
-      description: entities.md §2.1。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算（文档 1 S-ORD-DISPATCHED，Q248）
+      description: 订单状态。DISPATCHED = 订单有一个指定了打印机的当前任务，打印机还没报开始打印，传文件和准备中都算
     PrinterState:
       type: string
       enum: [AVAILABLE, WORKING, ATTENTION, CLEARING_REQUIRED]
-      description: entities.md §2.2；第二稿四个状态（Q396）。准备中、打印中、暂停中看 job.phase
+      description: 打印机的四个状态。准备中、打印中、暂停中看 job.phase
     AttentionReason:
       type: string
       enum: [OFFLINE, ERROR, MAINTENANCE, JUDGE, SEND_FAILED, DAEMON_UPGRADE]
-      description: 文档 1 §4.2 异常原因
+      description: 打印机处于异常的原因，可以同时有多个
     PauseReason: {type: string, enum: [USER, ERROR, RUNOUT]}
     ColourPref: {type: string, enum: [EXACT, SIMILAR, ANY]}
     ProcessNode: {type: string, enum: [SUBMIT, REVIEW, QUEUE, PRINT, STORE, PICKUP]}
     NodeState: {type: string, enum: [NOT_REACHED, ACTIVE, DONE, PROBLEM]}
     VersionKind: {type: string, enum: [SUBMIT, REPLACE, REVISION, RESTORE]}
     VersionState: {type: string, enum: [PENDING, APPROVED, REJECTED, WITHDRAWN, REPLACED]}
-    Permission: {type: string, description: 文档 1 §2.2 的权限节点}
+    Permission: {type: string, description: '权限节点，如 order:view:any'}
     Nozzle:
       type: object
       properties:
@@ -2849,7 +2766,7 @@ components:
         parts:
           type: array
           items: {$ref: '#/components/schemas/Part'}
-        submittable: {type: boolean, description: 机型、喷嘴能对上开放的打印机（R-SUB-05）}
+        submittable: {type: boolean, description: 机型、喷嘴能对上开放的打印机}
         hints:
           type: array
           items:
@@ -2859,7 +2776,7 @@ components:
               params: {type: object, additionalProperties: true}
             required: [code, params]
             additionalProperties: false
-          description: 提交页提示：耗材不在目录（R-SUB-06）、颜色缺失（R-SUB-07）、双喷头只用一个……
+          description: 提交页提示：耗材不在目录、颜色缺失、双喷头只用一个……
       required:
       - index
       - name
@@ -2898,7 +2815,7 @@ components:
         findings:
           type: array
           items: {$ref: '#/components/schemas/Finding'}
-          description: 申请者只看到拒收项；警告项只给审核人（R-VIS-08）
+          description: 申请者只看到拒收项；警告项只给审核人
       required: [fileId, fileName, sizeBytes, status, verdict, plates, findings]
       additionalProperties: false
     Answer:
@@ -2938,7 +2855,7 @@ components:
       additionalProperties: false
     OrderSummaryFields:
       type: object
-      description: OrderSummary 和 OrderDetail 共用的字段，本身不封闭；封闭在组合外层用 unevaluatedProperties（Q312）
+      description: OrderSummary 和 OrderDetail 共用的字段，本身不封闭；封闭在组合外层用 unevaluatedProperties
       properties:
         id: {type: string, format: uuid}
         number: {type: integer}
@@ -2965,7 +2882,7 @@ components:
               additionalProperties: false
           required: [position, ahead, wait]
           additionalProperties: false
-          description: 申请者只看到自己的排位和前面几单（R-VIS-01）；wait 受 queue:wait:view
+          description: 申请者只看到自己的排位和前面几单；wait 受 queue:wait:view
         printer:
           type: [object, 'null']
           properties:
@@ -3015,7 +2932,7 @@ components:
           answers:
             type: array
             items: {$ref: '#/components/schemas/Answer'}
-            description: 本人、审核人、管理员可见（R-VIS-05）
+            description: 本人、审核人、管理员可见
           revisions:
             type: object
             properties:
@@ -3028,17 +2945,17 @@ components:
           nodes:
             type: array
             items: {$ref: '#/components/schemas/TimelineNode'}
-            description: 6 个流程节点（R-NTE-02）
+            description: 6 个流程节点
           findings:
             type: array
             items: {$ref: '#/components/schemas/Finding'}
-            description: 'x-requires: order:review（R-VIS-08）'
+            description: 'x-requires: order:review'
           storage:
             type: [object, 'null']
-            description: 入库信息。入库照片订单本人也能看，前端放在入库节点下（R-VIS-09）
+            description: 入库信息。入库照片订单本人也能看，前端放在入库节点下
             properties:
               slot: {type: string}
-              photoUrl: {type: [string, 'null'], format: uri, description: 短期签名链接（API-FILE-02），本人、现场人员、管理员可见（R-VIS-09）}
+              photoUrl: {type: [string, 'null'], format: uri, description: 短期签名链接，本人、现场人员、管理员可见}
             required: [slot, photoUrl]
             additionalProperties: false
           parts:
@@ -3057,7 +2974,7 @@ components:
             description: 当前用户此刻能做的操作的 operationId，前端据此显示按钮
           printJobs:
             type: array
-            description: 打印记录：这个订单的每个打印任务，最新的在前（E-JOB、R-CAM-11、Q217、Q218）。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下；默认只展开最新一次，之前的折叠（R-VIS-09、Q222）
+            description: 打印记录：这个订单的每个打印任务，最新的在前。任务阶段不单独显示。endPhoto 订单本人也能看，前端放在打印节点下；默认只展开最新一次，之前的折叠
             items:
               type: object
               properties:
@@ -3073,15 +2990,15 @@ components:
                   type: [object, 'null']
                   properties:
                     capturedAt: {type: string, format: date-time}
-                    url: {type: string, format: uri, description: 短期签名链接（API-FILE-02）}
+                    url: {type: string, format: uri, description: 短期签名链接}
                   required: [capturedAt, url]
                   additionalProperties: false
               required: [jobId, attempt, printerName, startedAt, endedAt, outcome, endPhoto]
               additionalProperties: false
-          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired（R-PRT-10）、archived（R-PRT-09）、declined（R-PRT-18）}
+          reprintBlockedReason: {type: [string, 'null'], description: 如 file_expired、archived、declined}
           reprintDeclined:
             type: [object, 'null']
-            description: 现场人员点了不重打（R-PRT-18）。reason 按 reasonVisible 对申请者裁剪（R-VIS-07）
+            description: 现场人员点了不重打。reason 按 reasonVisible 对申请者裁剪
             properties:
               at: {type: string, format: date-time}
               by:
@@ -3098,7 +3015,7 @@ components:
         id: {type: string, format: uuid}
         at: {type: string, format: date-time}
         node: {$ref: '#/components/schemas/ProcessNode'}
-        kind: {type: string, description: 如 order.approved，见 E-REC}
+        kind: {type: string, description: 记录类型，如 order.approved}
         actor:
           oneOf:
           - {$ref: '#/components/schemas/Person'}
@@ -3113,7 +3030,7 @@ components:
           - {type: 'null'}
         versionN: {type: [integer, 'null']}
         note: {type: [string, 'null']}
-        noteVisible: {type: boolean, description: 申请者只收到 noteVisible=true 的备注（R-VIS-07）}
+        noteVisible: {type: boolean, description: 申请者只收到 noteVisible=true 的备注}
         data: {type: object, additionalProperties: true}
       required: [id, at, node, kind, noteVisible, data]
       additionalProperties: false
@@ -3160,8 +3077,8 @@ components:
         colour: {type: [string, 'null']}
         remainingGrams: {type: integer, description: 面板记的槽位克数，不是打印机估的余量}
         gramsUnconfirmed: {type: boolean, description: 换料后重置为默认净重、还没人确认}
-        rfid: {type: boolean, description: 料位信息是否来自 RFID 识别；RFID 料位只能查看，不能改（R-DSP-14）}
-        serial: {type: [string, 'null'], description: RFID 耗材卷的序列号（拓竹 `tray_uuid`），只读显示；非 RFID 料位为 null（Q353）}
+        rfid: {type: boolean, description: 料位信息是否来自 RFID 识别；RFID 料位只能查看，不能改}
+        serial: {type: [string, 'null'], description: RFID 耗材卷的序列号（拓竹 `tray_uuid`），只读显示；非 RFID 料位为 null}
         extruders:
           type: array
           items: {type: integer}
@@ -3177,14 +3094,14 @@ components:
         deltaE: {type: [number, 'null']}
       required: [rule, result]
       additionalProperties: false
-      description: BLOCK = 物理约束（R-DSP-06）或配置为拦下（R-DSP-07）；物理约束没有放行
+      description: BLOCK = 物理约束或配置为拦下；物理约束没有放行
     MappingEntry:
       type: object
       properties:
         sliceSlot: {type: integer}
         extruder: {type: [integer, 'null']}
         tray: {$ref: '#/components/schemas/TrayRef'}
-        mismatchReason: {type: [string, 'null'], description: CFG-MAP-05 里的一项；有 WARN 时必选}
+        mismatchReason: {type: [string, 'null'], description: 设置里「映射不符的原因列表」中的一项；有 WARN 时必选}
         reasonVisibleToApplicant: {type: boolean, default: true}
       required: [sliceSlot, tray]
       additionalProperties: false
@@ -3212,7 +3129,7 @@ components:
             needsConfirmation: {type: boolean}
           required: [reported, required, needsConfirmation]
           additionalProperties: false
-          description: R-DSP-09
+          description: 板型。打印机没报板型时由现场人员确认；和订单要求不一致时要二次确认
         trays:
           type: array
           items: {$ref: '#/components/schemas/Tray'}
@@ -3236,11 +3153,11 @@ components:
               items: {$ref: '#/components/schemas/Finding'}
           required: [verdict, findings]
           additionalProperties: false
-          description: 按当前限值复核（R-DSP-04）
+          description: 按当前限值复核
         bypasses:
           type: array
           items: {type: string, format: uuid}
-          description: 派这一单会越过的排队中订单（R-DSP-02）
+          description: 派这一单会越过的排队中订单
       required: [printerId, orderId, feasible, blockers, bedType, trays, proposal, safety, bypasses]
       additionalProperties: false
     ActiveError:
@@ -3276,12 +3193,12 @@ components:
           enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion, tray]
         args: {type: object, additionalProperties: true, description: 参数的 JSON Schema}
         destructive: {type: boolean}
-        enabled: {type: boolean, description: 按 IF-ADP-05 算出的此刻能不能点}
+        enabled: {type: boolean, description: 按控制的类别和打印机上报的状态算出的此刻能不能点}
       required: [action, category, args, destructive, enabled]
       additionalProperties: false
     PrinterCardFields:
       type: object
-      description: PrinterCard 和 PrinterDetail 共用的字段，本身不封闭（Q312）
+      description: PrinterCard 和 PrinterDetail 共用的字段，本身不封闭
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
@@ -3295,7 +3212,7 @@ components:
         reasons:
           type: array
           items: {$ref: '#/components/schemas/AttentionReason'}
-          description: 异常原因（S-RSN-*）；空 = 不在异常
+          description: 异常原因；空 = 不在异常
         externalRunning: {type: boolean, description: 工作（外部任务）}
         starred: {type: boolean}
         openToApplicants: {type: boolean}
@@ -3308,7 +3225,7 @@ components:
               oneOf:
               - {$ref: '#/components/schemas/Person'}
               - {type: 'null'}
-            fileName: {type: string, description: 'x-requires: overview:filename:view（访客看 CFG-UI-02）。本系统派的任务 = 选手上传时的原文件名，不是打印机上的 pr-<jobRef 后 12 位> 文件名；external 为 true 时是打印机上报的文件名，只给 order:view:any（R-VIS-02，Q246）'}
+            fileName: {type: string, description: 'x-requires: overview:filename:view（访客看「访客可看打印中的文件名」设置）。本系统派的任务 = 选手上传时的原文件名，不是打印机上的 pr-<jobRef 后 12 位> 文件名；external 为 true 时是打印机上报的文件名，只给 order:view:any'}
             external: {type: boolean}
             percent: {type: [integer, 'null']}
             remainingSeconds: {type: [integer, 'null'], minimum: 0}
@@ -3332,8 +3249,8 @@ components:
             snapshotAt: {type: [string, 'null'], format: date-time}
           required: [stream, snapshotAt]
           additionalProperties: false
-          description: 卡片平时显示抓拍，点播放才申请实况（R-CAM-05）
-        openable: {type: boolean, description: 能不能点开详情（R-VIS-04）}
+          description: 卡片平时显示抓拍，点播放才申请实况
+        openable: {type: boolean, description: 能不能点开详情}
       required: [id, name, state, stateSince, flags, starred, openToApplicants, camera, openable]
     PrinterCard:
       allOf:
@@ -3356,7 +3273,7 @@ components:
               online: {type: boolean}
             required: [id, name, online]
             additionalProperties: false
-          disabledAt: {type: [string, 'null'], format: date-time, description: 停用时间（R-PRT-20）}
+          disabledAt: {type: [string, 'null'], format: date-time, description: 停用时间}
           modelId: {type: [string, 'null']}
           nozzles:
             type: array
@@ -3378,7 +3295,7 @@ components:
               additionalProperties: false
           attention:
             type: array
-            description: 异常的全部原因，每个原因一条；界面合成一个异常，点开列出（Q315、Q396）
+            description: 异常的全部原因，每个原因一条；界面合成一个异常，点开列出
             items:
               type: object
               properties:
@@ -3402,7 +3319,7 @@ components:
               keyMatches: {type: boolean}
             required: [set, keyMatches]
             additionalProperties: false
-            description: 只说有没有，永远不返回访问码（INV-07）
+            description: 只说有没有，永远不返回访问码
           currentDispatchId: {type: [string, 'null'], format: uuid}
           version: {type: integer}
           lastReportAt: {type: [string, 'null'], format: date-time}
@@ -3428,7 +3345,7 @@ components:
     PickupCode:
       type: object
       properties:
-        code: {type: string, description: 只在签发时返回一次（E-PCK）}
+        code: {type: string, description: 只在签发时返回一次}
         expiresAt: {type: string, format: date-time}
       required: [code, expiresAt]
       additionalProperties: false
@@ -3452,7 +3369,7 @@ components:
           properties:
             waiting: {type: integer}
             pendingReview: {type: integer, description: 'x-requires: order:review'}
-            restoredTo: {type: [string, 'null'], format: date-time, description: 'x-requires: settings:manage。数据恢复到的时间，有值时管理员看到横幅"数据已恢复到 <时间>，之后提交的订单需要选手重新提交"（R-OPS-01，Q237）'}
+            restoredTo: {type: [string, 'null'], format: date-time, description: 'x-requires: settings:manage。数据恢复到的时间，有值时管理员看到横幅"数据已恢复到 <时间>，之后提交的订单需要选手重新提交"'}
           required: [waiting]
           additionalProperties: false
       required: [printers, queue]
@@ -3470,7 +3387,7 @@ components:
         subType: {type: [string, 'null']}
         colour: {type: string}
         colourName: {type: [string, 'null']}
-        loaded: {type: boolean, description: 已装上 / 需要换料（R-SUB-11）}
+        loaded: {type: boolean, description: 已装上 / 需要换料}
         hidden: {type: boolean}
         sort: {type: integer}
         note: {type: [string, 'null']}
@@ -3495,7 +3412,7 @@ components:
               bedTypes:
                 type: array
                 items: {type: string}
-                description: 这个机型本场能用的板型（E-BED，R-SUB-11）
+                description: 这个机型本场能用的板型
             required: [modelId, modelName, nozzles, count, available, bedTypes]
             additionalProperties: false
         catalog:
@@ -3511,7 +3428,7 @@ components:
         bedTypes:
           type: [array, 'null']
           items: {type: string}
-          description: 自选板打开时为各机型板型的并集；提交页按选中各盘的机型取交集（CFG-QUE-09、R-SUB-09）
+          description: 自选板打开时为各机型板型的并集；提交页按选中各盘的机型取交集
       required: [printers, catalog, wait, bedTypes]
       additionalProperties: false
     TodoItem:
@@ -3558,7 +3475,7 @@ components:
         permissions:
           type: array
           items: {$ref: '#/components/schemas/Permission'}
-          description: 按文档 1 §2.2 和开关算好的
+          description: 按角色和设置开关算好的权限节点
       required: [user, locale, permissions]
       additionalProperties: false
     AuthMethods:
@@ -3606,7 +3523,7 @@ components:
         platform: {type: [string, 'null']}
         lastSeenAt: {type: [string, 'null'], format: date-time}
         revokedAt: {type: [string, 'null'], format: date-time}
-        keyAlertAt: {type: [string, 'null'], format: date-time, description: 疑似私钥泄露告警（R-OPS-02），不自动吊销}
+        keyAlertAt: {type: [string, 'null'], format: date-time, description: 疑似私钥泄露告警，不自动吊销}
         keyFingerprint: {type: string}
         printerCount: {type: integer}
         needsUpgrade: {type: boolean}
@@ -3638,7 +3555,7 @@ components:
             docker: {type: string}
           required: [linux, windows, docker]
           additionalProperties: false
-          description: 一次性令牌放在环境变量里（MSG-ENR）；只在创建时返回
+          description: 一次性令牌放在环境变量里；只在创建时返回
       required: [id, expiresAt, commands]
       additionalProperties: false
     FormFieldType: {type: string, enum: [text, textarea, single, multi, number]}
@@ -3671,7 +3588,7 @@ components:
           type: string
           enum: [general, ui, camera, submit, queue, revision, mapping, printing, pickup, files, accounts, notifications,
             ops]
-        values: {type: object, additionalProperties: true, description: 键是 CFG 参数的英文名；定义表见代码，和文档 1 §6 一一对应}
+        values: {type: object, additionalProperties: true, description: 键是参数的英文名，定义表见代码}
         defaults: {type: object, additionalProperties: true}
         version: {type: integer}
         updatedAt: {type: [string, 'null'], format: date-time}
@@ -3730,7 +3647,7 @@ components:
         event: {type: string}
         channel: {type: string, enum: [IN_APP, EMAIL, FEISHU]}
         enabled: {type: boolean}
-        locked: {type: boolean, description: 驳回、可取件的站内通知关不掉（R-NTF-02）}
+        locked: {type: boolean, description: 驳回、可取件的站内通知关不掉}
       required: [event, channel, enabled]
       additionalProperties: false
   parameters:
@@ -3761,16 +3678,16 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: API-IDEM
+      description: 幂等键，客户端生成，一次用户意图一个；网络重试和连点都用同一个
       schema: {type: string, minLength: 8, maxLength: 128}
   responses:
     Problem:
-      description: 错误（http-api.md §4）
+      description: 错误
       content:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
     Accepted:
-      description: 命令已发出（API-ASYNC）
+      description: 命令已发出
       content:
         application/json:
           schema: {$ref: '#/components/schemas/CommandAccepted'}

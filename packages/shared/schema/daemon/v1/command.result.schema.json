@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/command.result.schema.json",
+  "title": "CommandResult",
+  "description": "daemon 对一条命令的回复。",
+  "type": "object",
+  "properties": {
+    "commandId": {
+      "$ref": "common.schema.json#/$defs/Uuid"
+    },
+    "status": {
+      "title": "CommandStatus",
+      "type": "string",
+      "enum": [
+        "accepted",
+        "done",
+        "rejected",
+        "expired",
+        "failed"
+      ],
+      "description": "accepted = 打印机收下了，不代表做完，结果看后面的事件；done = 命令本身就是结果；rejected = daemon 没执行；expired = 收到时已过期，没执行，也保证以后不再执行；failed = 执行了但失败。一条命令可能先回 accepted 再回 done 或 failed，以最后一次为准。"
+    },
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "机器可读的原因，如 unsupported_command、printer_busy、daemon_restarted"
+    },
+    "message": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "固件或打印机原样返回的内容"
+    },
+    "data": {
+      "type": "object",
+      "description": "按命令类型：job.start 的 step（queued / download / upload）和 attempts，storage.list 的 media 和 files 等"
+    }
+  },
+  "required": [
+    "commandId",
+    "status"
+  ]
+}

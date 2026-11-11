@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/auth.schema.json",
+  "title": "Auth",
+  "description": "daemon 用私钥对挑战签名。",
+  "type": "object",
+  "properties": {
+    "signature": {
+      "type": "string",
+      "description": "RSA-PSS（SHA-256，盐长 32）签名的 base64。签的是 UTF-8 字符串 \"platerelay-daemon-auth/v1\\n\" + daemonId + \"\\n\" + nonce + \"\\n\" + 面板的 origin"
+    }
+  },
+  "required": [
+    "signature"
+  ]
+}

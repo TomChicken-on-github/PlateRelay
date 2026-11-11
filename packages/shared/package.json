@@ -12,19 +12,39 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./api": {
+      "types": "./src/contract/api-client.ts",
+      "default": "./dist/contract/api-client.js"
+    },
+    "./contract/http": {
+      "types": "./src/contract/http.ts",
+      "default": "./dist/contract/http.js"
+    },
+    "./contract/daemon": {
+      "types": "./src/contract/daemon.ts",
+      "default": "./dist/contract/daemon.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate": "node scripts/generate-contract.mjs",
+    "check:contract": "node scripts/check-contract.mjs"
   },
   "dependencies": {
-    "fflate": "0.8.3"
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "fflate": "0.8.3",
+    "openapi-fetch": "0.17.0"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "json-schema-to-typescript": "16.0.0",
+    "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
-    "vitest": "5.0.5"
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
   }
 }

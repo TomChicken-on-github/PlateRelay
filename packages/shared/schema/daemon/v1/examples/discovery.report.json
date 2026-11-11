@@ -1,0 +1,17 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d92",
+  "type": "discovery.report",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "printers": [
+      {
+        "brand": "bambu",
+        "serial": "00M00A000000000",
+        "host": "192.168.0.104",
+        "modelId": "X2D",
+        "name": "X2D-1",
+        "lastSeenAt": "2026-11-04T12:00:00.000Z"
+      }
+    ]
+  }
+}

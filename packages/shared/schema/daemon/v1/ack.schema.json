@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/ack.schema.json",
+  "title": "Ack",
+  "description": "接收方处理完一条需要确认的消息后回。重复收到的消息也直接回 ack，不再处理。",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "common.schema.json#/$defs/Uuid",
+      "description": "被确认的那条消息的 id"
+    }
+  },
+  "required": [
+    "id"
+  ]
+}

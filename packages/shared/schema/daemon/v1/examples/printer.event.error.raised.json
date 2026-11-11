@@ -1,0 +1,39 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d8d",
+  "type": "printer.event",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+    "bootId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d02",
+    "seq": 1047,
+    "kind": "error.raised",
+    "jobRef": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d03",
+    "data": {
+      "error": {
+        "errorId": "e-1",
+        "vendorCode": "07008011",
+        "channel": "print_error",
+        "severity": "error",
+        "module": "ams",
+        "message": "AMS 耗材用尽",
+        "blocksJob": true,
+        "actions": [
+          {
+            "action": "RESUME_PROBLEM_SOLVED",
+            "vendorActionId": 2,
+            "label": "已装好新耗材，继续",
+            "requiresOnSite": true,
+            "destructive": false
+          },
+          {
+            "action": "STOP",
+            "label": "停止打印",
+            "requiresOnSite": false,
+            "destructive": true
+          }
+        ],
+        "raisedAt": "2026-11-04T12:00:00.000Z"
+      }
+    }
+  }
+}

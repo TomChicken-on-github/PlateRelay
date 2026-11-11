@@ -1,0 +1,22 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d93",
+  "type": "printers.assign",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "printers": [
+      {
+        "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+        "brand": "bambu",
+        "serial": "00M00A000000000",
+        "host": "192.168.0.106",
+        "accessCodeCipher": "Y2lwaGVy",
+        "keyFingerprint": "ab:cd:ef",
+        "currentJobRef": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d03",
+        "cleanupJobRefs": [
+          "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d09"
+        ],
+        "knownRunSeq": 17
+      }
+    ]
+  }
+}

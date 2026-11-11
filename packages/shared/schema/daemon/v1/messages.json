@@ -1,0 +1,117 @@
+{
+  "protocolVersion": "1.0",
+  "messages": [
+    {
+      "type": "hello",
+      "schema": "hello.schema.json",
+      "title": "Hello",
+      "direction": "daemon-to-panel",
+      "needsAck": false
+    },
+    {
+      "type": "challenge",
+      "schema": "challenge.schema.json",
+      "title": "Challenge",
+      "direction": "panel-to-daemon",
+      "needsAck": false
+    },
+    {
+      "type": "auth",
+      "schema": "auth.schema.json",
+      "title": "Auth",
+      "direction": "daemon-to-panel",
+      "needsAck": false
+    },
+    {
+      "type": "welcome",
+      "schema": "welcome.schema.json",
+      "title": "Welcome",
+      "direction": "panel-to-daemon",
+      "needsAck": false
+    },
+    {
+      "type": "ack",
+      "schema": "ack.schema.json",
+      "title": "Ack",
+      "direction": "both",
+      "needsAck": false
+    },
+    {
+      "type": "ping",
+      "schema": "ping.schema.json",
+      "title": "Ping",
+      "direction": "both",
+      "needsAck": false
+    },
+    {
+      "type": "pong",
+      "schema": "pong.schema.json",
+      "title": "Pong",
+      "direction": "both",
+      "needsAck": false
+    },
+    {
+      "type": "printer.snapshot",
+      "schema": "printer.snapshot.schema.json",
+      "title": "PrinterSnapshot",
+      "direction": "daemon-to-panel",
+      "needsAck": false
+    },
+    {
+      "type": "printer.event",
+      "schema": "printer.event.schema.json",
+      "title": "PrinterEvent",
+      "direction": "daemon-to-panel",
+      "needsAck": true
+    },
+    {
+      "type": "command.result",
+      "schema": "command.result.schema.json",
+      "title": "CommandResult",
+      "direction": "daemon-to-panel",
+      "needsAck": true
+    },
+    {
+      "type": "discovery.report",
+      "schema": "discovery.report.schema.json",
+      "title": "DiscoveryReport",
+      "direction": "daemon-to-panel",
+      "needsAck": true
+    },
+    {
+      "type": "printers.assign",
+      "schema": "printers.assign.schema.json",
+      "title": "PrintersAssign",
+      "direction": "panel-to-daemon",
+      "needsAck": true
+    },
+    {
+      "type": "command",
+      "schema": "command.schema.json",
+      "title": "Command",
+      "direction": "panel-to-daemon",
+      "needsAck": true
+    },
+    {
+      "type": "config.update",
+      "schema": "config.update.schema.json",
+      "title": "ConfigUpdate",
+      "direction": "panel-to-daemon",
+      "needsAck": true
+    },
+    {
+      "type": "token.renew",
+      "schema": "token.renew.schema.json",
+      "title": "TokenRenew",
+      "direction": "panel-to-daemon",
+      "needsAck": true
+    },
+    {
+      "type": "upgrade_required",
+      "schema": "upgrade_required.schema.json",
+      "title": "UpgradeRequired",
+      "direction": "panel-to-daemon",
+      "needsAck": false
+    }
+  ]
+}

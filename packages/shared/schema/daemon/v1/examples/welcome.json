@@ -1,0 +1,37 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d83",
+  "type": "welcome",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "sessionId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d06",
+    "protocolVersion": "1.0",
+    "serverTime": "2026-11-04T12:00:00.000Z",
+    "heartbeatSeconds": 15,
+    "httpToken": "token",
+    "httpTokenExpiresAt": "2026-11-04T13:00:00Z",
+    "printers": [
+      {
+        "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+        "brand": "bambu",
+        "serial": "00M00A000000000",
+        "host": "192.168.0.106",
+        "accessCodeCipher": "Y2lwaGVy",
+        "keyFingerprint": "ab:cd:ef",
+        "currentJobRef": null,
+        "cleanupJobRefs": [],
+        "knownRunSeq": 17
+      }
+    ],
+    "config": {
+      "snapshot": {
+        "watchedSeconds": 5,
+        "unwatchedSeconds": 60,
+        "staggerSeconds": 1,
+        "uploadKbps": 512
+      },
+      "transferTimeoutSeconds": 180,
+      "downloadConcurrency": 2,
+      "discoveryEnabled": true
+    }
+  }
+}

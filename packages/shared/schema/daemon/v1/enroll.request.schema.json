@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/enroll.request.schema.json",
+  "title": "EnrollRequest",
+  "description": "POST /daemon/v1/enroll 的请求体。",
+  "type": "object",
+  "properties": {
+    "token": {
+      "type": "string",
+      "description": "一次性注册令牌，15 分钟有效，用一次就作废"
+    },
+    "publicKey": {
+      "type": "string",
+      "description": "daemon 公钥，SPKI DER 的 base64"
+    },
+    "name": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "string"
+    },
+    "daemonVersion": {
+      "type": "string"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    }
+  },
+  "required": [
+    "token",
+    "publicKey",
+    "name",
+    "platform",
+    "daemonVersion",
+    "protocolVersion"
+  ]
+}

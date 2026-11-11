@@ -1,0 +1,86 @@
+{
+  "id": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d87",
+  "type": "printer.snapshot",
+  "ts": "2026-11-04T12:00:00.000Z",
+  "body": {
+    "printerId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d01",
+    "bootId": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d02",
+    "seq": 1042,
+    "connected": true,
+    "state": "PRINTING",
+    "substage": null,
+    "job": {
+      "jobRef": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d03",
+      "external": false,
+      "name": "pr-3f5a6b7c8d03.gcode.3mf",
+      "percent": 37,
+      "remainingSeconds": 3120,
+      "layer": 58,
+      "totalLayers": 210,
+      "skippedParts": [
+        3
+      ]
+    },
+    "pendingStarts": [
+      {
+        "jobRef": "0192f3c1-7b2e-7c4a-9d1e-3f5a6b7c8d08",
+        "stage": "DOWNLOADING"
+      }
+    ],
+    "temps": {
+      "nozzle1": {
+        "current": 220,
+        "target": 220
+      },
+      "bed": {
+        "current": 55,
+        "target": 55
+      },
+      "chamber": {
+        "current": 31
+      }
+    },
+    "nozzles": [
+      {
+        "extruder": 1,
+        "diameterMm": 0.4,
+        "flow": "standard"
+      }
+    ],
+    "trays": [
+      {
+        "unit": 0,
+        "slot": 0,
+        "label": "AMS 1 · 1",
+        "material": "PLA",
+        "subType": "PLA Basic",
+        "colour": "#FFFFFF",
+        "rfidUid": "A1B2C3D4",
+        "remainingPercent": 80,
+        "extruders": [
+          1
+        ]
+      }
+    ],
+    "bedType": "textured_pei",
+    "storage": [
+      {
+        "medium": "internal",
+        "present": true,
+        "writable": true,
+        "freeBytes": 1234567890
+      }
+    ],
+    "activeErrors": [],
+    "controls": {
+      "light": "on",
+      "speedLevel": 2
+    },
+    "camera": {
+      "stream": true,
+      "snapshot": true
+    },
+    "deviceBoot": "2026-11-04T08:00:00Z",
+    "runSeq": 17
+  }
+}

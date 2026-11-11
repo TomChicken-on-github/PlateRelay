@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://platerelay.dev/schema/daemon/v1/printers.assign.schema.json",
+  "title": "PrintersAssign",
+  "description": "这个 daemon 负责哪些打印机，每次都是完整列表。列表里没有的打印机，daemon 断开它并删掉它的本地状态。",
+  "type": "object",
+  "properties": {
+    "printers": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/AssignedPrinter"
+      }
+    }
+  },
+  "required": [
+    "printers"
+  ]
+}
