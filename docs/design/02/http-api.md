@@ -49,14 +49,13 @@
   "status": 409,
   "code": "state_conflict",
   "detail": "order is QUEUED, expected PENDING_REVIEW",
-  "rule": "S-ORD-T02",
   "params": { "current": "QUEUED" },
   "requestId": "0192f3c1-…"
 }
 ```
 
 - `code`：英文错误码，前端靠它查文案。
-- `rule`：违反的是哪条规则，填文档 1 的编号（如 `R-VER-09`）；和具体规则无关时不带。
+- 响应里没有规则编号字段（Q358）：文档编号只用来在文档之间互相引用，不进代码、不进接口。前端要区分的情况一律给单独的 `code`；排查时看 `detail` 和 `requestId`。
 - `params`：显示文案要用的参数。
 - `detail`：给开发者看的英文说明，前端不显示。
 - 参数校验失败时多一个 `errors: [{ path, code, params }]`。
@@ -82,7 +81,15 @@
 | 415 | `unsupported_file` | 不是 `.gcode.3mf`（R-SUB-01） |
 | 422 | `validation_failed` | 参数校验失败，带 `errors` |
 | 422 | `captcha_required` | 这次请求需要先过人机验证（R-ACC-02–04；上传见 R-SUB-13） |
-| 422 | `rule_violation` | 违反业务规则，带 `rule`（如超过修改次数 `R-VER-09`、超过排队上限 `R-SUB-08`） |
+| 422 | `model_not_supported` | 机型或喷嘴和开放的打印机都对不上（R-SUB-05） |
+| 422 | `queue_limit_reached` | 超过排队上限，整次拒绝（R-SUB-08） |
+| 422 | `revision_limit_reached` | 修改次数用完（R-VER-09） |
+| 422 | `order_dispatched` | 订单已派单，不能修改或取消，请现场人员先停止（R-VER-04、R-CAN-03） |
+| 422 | `order_started` | 订单已经开始打印或之后，不能修改或取消（R-VER-08、R-CAN-04），`params.current` 是当前状态 |
+| 422 | `reprint_not_allowed` | 失败订单不能重打（R-PRT-09），`params.reason`：`ARCHIVED` 归档过、`DECLINED` 已标为不重打（不看申请者账户是否停用，Q415） |
+| 422 | `skip_all_parts` | 跳完没有剩下的零件（全跳等于停止） |
+| 422 | `archive_blocked` | 还有已派单或打印中的订单，不能归档（R-ARC-01），`params.orderIds` |
+| 422 | `rule_violation` | 其他违反业务规则、前端不需要单独文案的情况，`detail` 写明是哪条限制 |
 | 428 | `idempotency_key_required` | 写请求没带幂等键 |
 | 429 | `rate_limited` | 限频，带 `Retry-After` |
 | 500 | `internal` | 服务端错误，只带 `requestId` |

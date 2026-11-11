@@ -722,7 +722,7 @@ paths:
       x-permission: order:submit
       x-transitions: [S-ORD-T06]
       x-rules: [R-VER-01, R-VER-02, R-VER-04, R-VER-07, R-VER-08, R-VER-09, R-VER-10, CFG-REV-01]
-      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单及之后不能修改，返回 422 rule_violation（R-VER-04、R-VER-08，Q207）。
+      description: 只限本人。第一次审核前是替换（R-VER-01）；已派单返回 422 order_dispatched（R-VER-04，Q207），开始打印及之后返回 422 order_started（R-VER-08）；次数用完返回 422 revision_limit_reached（R-VER-09）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -813,7 +813,7 @@ paths:
       x-permission: ['order:cancel:own', 'order:cancel:any']
       x-transitions: [S-ORD-T18]
       x-rules: [R-CAN-01, R-CAN-02, R-CAN-03, R-CAN-04, R-CAN-05]
-      description: 只有待审核、排队中能取消。已派单返回 422 rule_violation（R-CAN-03，请现场人员先停止）；打印中、失败、打完的单也是 422（R-CAN-04）。
+      description: 只有待审核、排队中能取消。已派单返回 422 order_dispatched（R-CAN-03，请现场人员先停止）；打印中、失败、打完的单返回 422 order_started（R-CAN-04）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -844,7 +844,7 @@ paths:
       x-permission: order:reprint
       x-transitions: [S-ORD-T15]
       x-rules: [R-PRT-09, R-PRT-10, R-PRT-18, R-VER-11, R-ARC-02]
-      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 rule_violation（R-PRT-09）。
+      description: 文件过期返回 410 file_expired；归档过或被标为不重打（R-PRT-18）的失败订单返回 422 reprint_not_allowed，params.reason 为 ARCHIVED / DECLINED（R-PRT-09；不看申请者账户是否停用，Q415）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -951,7 +951,7 @@ paths:
       summary: 跳过零件
       x-permission: ['order:skip-parts:own', 'order:skip-parts:any']
       x-rules: [F-SUB-07, R-SKP-01, R-SKP-02, R-SKP-03, R-SKP-06]
-      description: 只在任务打印中或暂停中可用（准备中 409 state_conflict）；跳完至少剩一个没跳的零件，否则 422 rule_violation（全跳等于停止，NG-11）。不能撤回，前端先二次确认。是控制命令，没有命令锁（Q243）。已跳过列表以打印机上报为准写进 E-JOB skipped_parts；时间线打印节点记 parts.skipped，默认选手可见，现场人员只显示角色（R-SKP-06）。
+      description: 只在任务打印中或暂停中可用（准备中 409 state_conflict）；跳完至少剩一个没跳的零件，否则 422 skip_all_parts（全跳等于停止，NG-11）。不能撤回，前端先二次确认。是控制命令，没有命令锁（Q243）。已跳过列表以打印机上报为准写进 E-JOB skipped_parts；时间线打印节点记 parts.skipped，默认选手可见，现场人员只显示角色（R-SKP-06）。
       parameters:
       - {$ref: '#/components/parameters/OrderId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -1534,7 +1534,7 @@ paths:
       tags: [printers]
       summary: 设备控制
       x-permission: printer:control
-      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08]
+      x-rules: [R-PRT-15, IF-ADP-05, INV-14, R-ARB-07, R-ARB-08, R-DSP-14]
       parameters:
       - {$ref: '#/components/parameters/PrinterId'}
       - {$ref: '#/components/parameters/IdempotencyKey'}
@@ -2740,7 +2740,6 @@ components:
         status: {type: integer}
         code: {type: string, description: 错误码，见 http-api.md §4.2}
         detail: {type: string}
-        rule: {type: string, description: 违反的文档 1 规则编号，如 R-VER-09}
         params: {type: object, additionalProperties: true}
         requestId: {type: string}
         errors:
@@ -3160,10 +3159,12 @@ components:
         colour: {type: [string, 'null']}
         remainingGrams: {type: integer, description: 面板记的槽位克数，不是打印机估的余量}
         gramsUnconfirmed: {type: boolean, description: 换料后重置为默认净重、还没人确认}
+        rfid: {type: boolean, description: 料位信息是否来自 RFID 识别；RFID 料位只能查看，不能改（R-DSP-14）}
+        serial: {type: [string, 'null'], description: RFID 耗材卷的序列号（拓竹 `tray_uuid`），只读显示；非 RFID 料位为 null（Q353）}
         extruders:
           type: array
           items: {type: integer}
-      required: [unit, slot, label, remainingGrams, gramsUnconfirmed, extruders]
+      required: [unit, slot, label, remainingGrams, gramsUnconfirmed, rfid, serial, extruders]
       additionalProperties: false
     MappingCheck:
       type: object
@@ -3271,7 +3272,7 @@ components:
         action: {type: string}
         category:
           type: string
-          enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion]
+          enum: [light, temperature, fan, speed, pause, resume, filament, dry, motion, tray]
         args: {type: object, additionalProperties: true, description: 参数的 JSON Schema}
         destructive: {type: boolean}
         enabled: {type: boolean, description: 按 IF-ADP-05 算出的此刻能不能点}
@@ -3522,7 +3523,7 @@ components:
           - STORE
           - ATTENTION
           - PAUSED_TOO_LONG
-          - STOP_UNCONFIRMED
+          - START_UNCONFIRMED
           - BYPASSED
           - UNCLAIMED
           - CLEAR_BED

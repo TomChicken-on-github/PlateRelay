@@ -46,7 +46,8 @@ class ModelDescription:
 class ControlSpec:
     action: str                                          # "light.set" / "fan.set" / "temp.set" / "speed.set" /
                                                          # "filament.load" / "filament.unload" / "dry.start" /
-                                                         # "dry.stop" / "job.pause" / "job.resume" / "axis.move" / "axis.home"
+                                                         # "dry.stop" / "job.pause" / "job.resume" / "axis.move" / "axis.home" /
+                                                         # "tray.set"（非 RFID 料位的材料类型、子类型、颜色，R-DSP-14；可选，机型不支持就不声明，Q349）
     category: ControlCategory                            # 面板按类别套通用状态规则（IF-ADP-05）
     args: dict                                           # 参数的 JSON Schema（范围受 limits 约束）
     destructive: bool                                    # 界面上要二次确认
@@ -133,8 +134,10 @@ class Discovery(Protocol):
 | `stop` | 准备中、打印中、暂停中（要二次确认，F-PRT-05）；外部任务不带任务 ID（Q326） |
 | `pause` | 打印中；准备中（打印机报了准备中之后，传文件期间不行，Q310） |
 | `resume` | 暂停中且原因是 `USER`（准备阶段的暂停也算，Q240、Q310）；恢复后准备阶段回准备中，不提前算开打；报错和断料的继续走"处理报错"（R-PRT-14） |
-| `filament`、`dry` | 没在跑任务（空闲、停在打完 / 失败 / 已取消） |
+| `filament` | 没在跑任务（空闲、停在打完 / 失败 / 已取消） |
+| `dry` | 联系得上就行。在跑任务时的限制由适配器在参数里声明（拓竹 AMS 2 Pro：边打边烘要单独接电源，最高 45°C），面板按它限制输入；固件拒绝时原样显示原因（R-PRT-15，Q346） |
 | `motion`（移轴、回零） | 没在跑任务（R-ARB-07） |
+| `tray`（改料位耗材信息，设定值） | 联系得上就行；在跑任务时，当前任务正在用的料位不行；RFID 料位和空料位不行（R-DSP-14，Q348） |
 | `auto_refill`（自动续料开关，设定值命令，R-PRT-28） | 联系得上就行；字段等驱动实测（Q408） |
 
 联系不上时所有命令都发不出去，全部置灰。按钮只看打印机**上报的**状态，不看"预计会变成"的状态，也没有命令锁（INV-16，Q243）：这张表就是所有机型共用的那一张。点完按钮转圈，直到上报状态变了或最多 10 秒（前端常量，R-CMD-01）。

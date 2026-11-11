@@ -70,8 +70,8 @@ sequenceDiagram
 | 1 | 不是 `.gcode.3mf` / 太大 | 415 `unsupported_file` / 413 | R-SUB-01、API-FILE-01 |
 | 5 | 结构损坏、危险指令 | verdict=REJECT，不能提交 | R-SUB-03 |
 | 5 | 越界 / 元数据不一致 | 按 CFG-SUB-01、CFG-SUB-06 拒收或警告 | R-SUB-04 |
-| 9 | 机型或喷嘴和开放的打印机都对不上 | 422 `rule_violation`（R-SUB-05） | R-SUB-05 |
-| 9 | 超过排队上限 | 整次拒绝，422（R-SUB-08） | R-ARB-05 |
+| 9 | 机型或喷嘴和开放的打印机都对不上 | 422 `model_not_supported`（R-SUB-05） | R-SUB-05 |
+| 9 | 超过排队上限 | 整次拒绝，422 `queue_limit_reached`（R-SUB-08） | R-ARB-05 |
 | 9 | 表单已被管理员改过 | 409 `version_conflict`，前端重新拉表单 | E-FORM |
 | 1 | 手上已有 CFG-SUB-08 − 1 个没提交的文件（默认从第 3 个起） | 422 `captcha_required`，前端弹人机验证后重传 | R-SUB-13、Q236 |
 | 8 之前 | 过了 CFG-SUB-07（默认 2 小时）没提交 | 删文件 | R-SUB-10 |
@@ -105,8 +105,8 @@ sequenceDiagram
 
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
-| 3 | 次数用完 | 422 `rule_violation`（R-VER-09） | R-VER-09 |
-| 3 | 已派单、打印中或之后 | 422 `rule_violation`；已派单要请现场人员先停止，回到排队中后再改 | R-VER-04、R-VER-08、Q207 |
+| 3 | 次数用完 | 422 `revision_limit_reached`（R-VER-09） | R-VER-09 |
+| 3 | 已派单、打印中或之后 | 已派单 422 `order_dispatched`，要请现场人员先停止，回到排队中后再改；开始打印及之后 422 `order_started` | R-VER-04、R-VER-08、Q207 |
 
 换机型按 R-VER-10 单独算次数和位置。
 
@@ -203,8 +203,8 @@ sequenceDiagram
 
 | 失败 | 处理 | 依据 |
 | --- | --- | --- |
-| 已派单 | 422 `rule_violation`，请现场人员先停止（SEQ-04），回到排队中后再取消 | R-CAN-03、Q207 |
-| 打印中、失败、待入库、待取件 | 422 `rule_violation`；失败只能重打，打完的单长期没取走按 R-PCK-05 | R-CAN-04、Q210 |
+| 已派单 | 422 `order_dispatched`，请现场人员先停止（SEQ-04），回到排队中后再取消 | R-CAN-03、Q207 |
+| 打印中、失败、待入库、待取件 | 422 `order_started`；失败只能重打，打完的单长期没取走按 R-PCK-05 | R-CAN-04、Q210 |
 | 状态已经变了 | 409 `state_conflict` | API-CONC-02 |
 
 ## SEQ-06 报错和处理报错
@@ -352,8 +352,8 @@ sequenceDiagram
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
 | 1 | 文件已过保留期 | 按钮置灰，410 `file_expired`；请申请者重新提交 | R-PRT-10、R-ARB-03 |
-| 1 | 订单归档过 | 按钮置灰，422 `rule_violation` | R-PRT-09、R-ARC-02 |
-| 1 | 已被标为不重打 | 重打按钮隐藏，422 `rule_violation`；管理员 revokeReprintDecline 后恢复 | R-PRT-18、R-PRT-19 |
+| 1 | 订单归档过 | 按钮置灰，422 `reprint_not_allowed`（`ARCHIVED`） | R-PRT-09、R-ARC-02 |
+| 1 | 已被标为不重打 | 重打按钮隐藏，422 `reprint_not_allowed`（`DECLINED`）；管理员 revokeReprintDecline 后恢复 | R-PRT-18、R-PRT-19 |
 | 1 | 不是失败状态 | 409 `state_conflict` | API-CONC-02 |
 
 版本、文件、修改次数都不变（R-VER-11）。申请者没有重打按钮（F-PRT-07）。
@@ -457,7 +457,7 @@ sequenceDiagram
 
 | 步骤 | 失败 | 处理 | 依据 |
 | --- | --- | --- | --- |
-| 2 | 还有已派单或打印中的 | 422 `rule_violation`（R-ARC-01），列出是哪些单 | R-ARC-01 |
+| 2 | 还有已派单或打印中的 | 422 `archive_blocked`（R-ARC-01），`params.orderIds` 列出是哪些单 | R-ARC-01 |
 | 5 | 导出失败 | 归档照常完成，导出可以单独重试 | F-OPS-04 |
 
 订单编号不重置（E-ORD），审计日志不受影响（INV-06）。
