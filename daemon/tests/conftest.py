@@ -4,10 +4,9 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-import pytest
 import pytest_asyncio
-
 from fake_panel import ENROLL_TOKEN, FakePanel
+
 from platerelay_daemon.app import Daemon
 from platerelay_daemon.link import DaemonKeys, enroll
 from platerelay_sim import SimConfig, SimPrinter, SimPrinterServer

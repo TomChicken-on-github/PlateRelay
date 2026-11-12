@@ -37,6 +37,7 @@ class FakePanel:
         self.received: list[tuple[str, dict[str, Any]]] = []
         self.acking = True
         self.download_failures = 0
+        self.download_delay = 0.0
         self.connections = 0
         self._socket: web.WebSocketResponse | None = None
         self._arrived = asyncio.Condition()
@@ -159,6 +160,7 @@ class FakePanel:
     async def _file(self, request: web.Request) -> web.Response:
         if request.headers.get("Authorization") != "Bearer test-http-token":
             return web.Response(status=401)
+        await asyncio.sleep(self.download_delay)
         if self.download_failures > 0:
             self.download_failures -= 1
             return web.Response(status=503)

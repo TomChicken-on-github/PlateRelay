@@ -129,7 +129,7 @@ class SimPrinter:
 
     def status(self) -> dict[str, Any]:
         used = sum(item["size"] for item in self.files.values())
-        return {
+        status = {
             "state": self.state,
             "phase": self.phase,
             "pause_cause": self.pause_cause,
@@ -139,8 +139,10 @@ class SimPrinter:
             "alerts": copy.deepcopy(self.alerts),
             "lights": {"chamber": self.light},
             "storage": {"internal": {"total": self.config.storage_total, "free": max(0, self.config.storage_total - used)}},
-            "boot_time": int(self.booted_at),
+            "boot_time": round(self.booted_at, 3),
         }
+        # 没有值的字段不出现（增量推送里 null 的意思是"这个字段没了"）
+        return {key: value for key, value in status.items() if value is not None}
 
     def _print_view(self) -> dict[str, Any] | None:
         run = self._run

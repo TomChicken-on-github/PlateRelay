@@ -16,7 +16,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from platerelay_daemon.adapter_api import RUNNING_STATES, AdapterError, SlotMapping, StartJob
+from platerelay_daemon.adapter_api import (
+    RUNNING_STATES,
+    AdapterError,
+    SlotMapping,
+    StartJob,
+)
 
 if TYPE_CHECKING:
     from platerelay_daemon.printers.worker import PrinterWorker

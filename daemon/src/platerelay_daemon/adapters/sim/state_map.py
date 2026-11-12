@@ -15,11 +15,15 @@ from platerelay_daemon.adapter_api import (
     DeviceSnapshot,
     ErrorAction,
     Nozzle,
-    NormalizedState as S,
     StorageStatus,
-    Substage as Sub,
     Temperature,
     Tray,
+)
+from platerelay_daemon.adapter_api import (
+    NormalizedState as S,
+)
+from platerelay_daemon.adapter_api import (
+    Substage as Sub,
 )
 
 STATES: dict[str, S] = {
