@@ -6,7 +6,7 @@ stg_cur 的编号与名称来自 pybambu 的 CURRENT_STAGE_IDS。
 
 from __future__ import annotations
 
-from platerelay_daemon.driver_api import NormalizedState as S, Substage as Sub
+from platerelay_daemon.adapter_api import NormalizedState as S, Substage as Sub
 
 from ._vendor.pybambu.const import CURRENT_STAGE_IDS
 

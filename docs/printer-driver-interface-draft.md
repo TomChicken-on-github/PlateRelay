@@ -501,7 +501,7 @@ Fake driver 至少覆盖：正常完成、人工暂停与继续、报错暂停�
 
 ### 9.4 依赖
 
-- **拓竹**【已定】：优先复用 ha-bambulab 的 `pybambu`，不自己写 MQTT / FTPS。ha-bambulab 是 MIT 许可证，可以并入 GPLv3 项目，但要保留它的版权声明和许可证原文。PyPI 上的 `pybambu` 包停在 2024-01，所以按 commit 原样内置在 `daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/`，上游 commit 和升级方法见同目录的 `README.md`。不在内置代码里直接改，要改行为就在外面包一层：
+- **拓竹**【已定】：优先复用 ha-bambulab 的 `pybambu`，不自己写 MQTT / FTPS。ha-bambulab 是 MIT 许可证，可以并入 GPLv3 项目，但要保留它的版权声明和许可证原文。PyPI 上的 `pybambu` 包停在 2024-01，所以按 commit 原样内置在 `daemon/src/platerelay_daemon/adapters/bambu/_vendor/pybambu/`，上游 commit 和升级方法见同目录的 `README.md`。不在内置代码里直接改，要改行为就在外面包一层：
   - `read_only.py`：MQTT 只放行 `pushall`、`pushing start`、`get_version`，FTPS 拦下所有写操作（上传、删除、建目录、改名）。pybambu 自带的灯光、调速、温度、打印等控制方法因此全部失效，要等用户同意后才放开。
   - `state_map.py`：按 §4.1 把 `gcode_state` + `stg_cur` 归一成主状态和子阶段。
   - pybambu 本身是线程 + 回调（paho 的网络线程），driver 把回调转回 asyncio 线程再发事件。

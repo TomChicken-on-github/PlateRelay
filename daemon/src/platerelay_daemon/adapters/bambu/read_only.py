@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from platerelay_daemon.driver_api import ControlNotAllowedError
+from platerelay_daemon.adapter_api import ControlNotAllowedError
 
 from ._vendor.pybambu.bambu_client import BambuClient, ImplicitFTP_TLS
 

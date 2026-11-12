@@ -2,14 +2,9 @@
 
 import asyncio
 
-from platerelay_daemon.driver_api import (
-    ConnectionEvent,
-    ControlNotAllowedError,
-    NormalizedState,
-    ProgressEvent,
-    StatusEvent,
-)
-from platerelay_daemon.drivers.bambu import BambuDriver
+from platerelay_daemon.adapter_api import ControlNotAllowedError, NormalizedState
+from platerelay_daemon.adapters.bambu import BambuDriver
+from platerelay_daemon.adapters.bambu.readonly_types import ConnectionEvent, ProgressEvent, StatusEvent
 
 
 async def wait_for(predicate, timeout=5.0):

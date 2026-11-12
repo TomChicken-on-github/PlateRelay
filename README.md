@@ -52,6 +52,6 @@ PlateRelay 是自由软件，按 GNU 通用公共许可证第 3 版（[GPL-3.0-o
 
 | 组件 | 位置 | 版权 | 许可证 |
 | --- | --- | --- | --- |
-| [ha-bambulab](https://github.com/greghesp/ha-bambulab) 的 pybambu | [daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/](daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/) | Copyright (c) 2023 ha-bambulab contributors | MIT，原文见 [LICENSE](daemon/src/platerelay_daemon/drivers/bambu/_vendor/pybambu/LICENSE) |
+| [ha-bambulab](https://github.com/greghesp/ha-bambulab) 的 pybambu | [daemon/src/platerelay_daemon/adapters/bambu/_vendor/pybambu/](daemon/src/platerelay_daemon/adapters/bambu/_vendor/pybambu/) | Copyright (c) 2023 ha-bambulab contributors | MIT，原文见 [LICENSE](daemon/src/platerelay_daemon/adapters/bambu/_vendor/pybambu/LICENSE) |
 
 PlateRelay 与拓竹（Bambu Lab）、ha-bambulab 项目均无关联。

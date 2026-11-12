@@ -34,8 +34,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "daemon" / "src"))
 
-from platerelay_daemon.drivers.bambu._vendor.pybambu import commands as bambu_cmd  # noqa: E402
-from platerelay_daemon.drivers.bambu.read_only import (  # noqa: E402
+from platerelay_daemon.adapters.bambu._vendor.pybambu import commands as bambu_cmd  # noqa: E402
+from platerelay_daemon.adapters.bambu.read_only import (  # noqa: E402
     ReadOnlyFTP,
     is_read_only_request,
 )
