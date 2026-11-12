@@ -1,38 +1,28 @@
 import "reflect-metadata";
-import { createInterface } from "node:readline/promises";
-import { parseArgs } from "node:util";
 import { NestFactory } from "@nestjs/core";
-import { ROLE_IDS, type RoleId } from "@platerelay/shared";
+import { isRole } from "@platerelay/shared";
 import { AppModule } from "../app.module.js";
-import { SYSTEM } from "../auth/actor.js";
 import { AuthService } from "../auth/auth.service.js";
+import { SYSTEM } from "../common/ctx.js";
 import { loadConfig } from "../config/config.js";
 
 /*
- * Creates an account, e.g. the first Coreteam one:
- *   pnpm --filter @platerelay/server user:create -- --username admin --name 管理员 --role coreteam
- * The password is read from standard input, never from the command line.
+ * Creates an account from the command line: pnpm user:create <username> <display name> [role]
+ * The password is read from standard input, so it never appears in the process list or the shell history.
  */
 async function main() {
-  const { values } = parseArgs({ options: { username: { type: "string" }, name: { type: "string" }, role: { type: "string", default: "user" } } });
-  if (!values.username || !ROLE_IDS.includes(values.role as RoleId)) {
-    console.error(`usage: user:create -- --username <name> [--name <display name>] [--role ${ROLE_IDS.join("|")}]`);
-    process.exit(2);
-  }
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const password = (await rl.question("password: ")).trim();
-  rl.close();
-  if (password.length < 8) {
-    console.error("password must be at least 8 characters");
+  const [username, displayName, role = "APPLICANT"] = process.argv.slice(2);
+  let password = "";
+  if (!process.stdin.isTTY) for await (const chunk of process.stdin) password += String(chunk);
+  password = password.replace(/\r?\n$/, "");
+  if (!username || !displayName || !isRole(role) || !password || password.length < 8) {
+    console.error("usage: pnpm user:create <username> <display name> [APPLICANT|STAFF|ADMIN] < file-with-the-password (8 characters or more)");
     process.exit(2);
   }
   const app = await NestFactory.createApplicationContext(AppModule.forRoot(loadConfig()), { logger: ["error", "warn"] });
-  try {
-    const id = await app.get(AuthService).createUser({ ...SYSTEM, device: "cli" }, { username: values.username, displayName: values.name ?? values.username, password, role: values.role as RoleId });
-    console.log(`created ${values.username} (${values.role}) ${id}`);
-  } finally {
-    await app.close();
-  }
+  const user = await app.get(AuthService).createUser(SYSTEM, { username, displayName, password, role });
+  console.log(`created ${user.role} ${user.username} (${user.id})`);
+  await app.close();
 }
 
 void main();

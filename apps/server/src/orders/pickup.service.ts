@@ -1,152 +1,136 @@
-import { randomInt } from "node:crypto";
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
-import { AuditService } from "../audit/audit.service.js";
-import { type Ctx, userId } from "../auth/actor.js";
-import { ApiError, notFound } from "../common/errors.js";
+import { createHmac, randomInt } from "node:crypto";
+import { Inject, Injectable } from "@nestjs/common";
+import { and, desc, eq, gt, isNotNull, isNull, lt } from "drizzle-orm";
+import { type Ctx, userIdOf } from "../common/ctx.js";
+import { notFound, Problem, stateConflict } from "../common/problem.js";
+import { Work } from "../core/uow.js";
+import { APP_CONFIG, type AppConfig } from "../config/config.js";
 import { DB, type Db } from "../db/db.js";
-import { files, orders, orderVersions, pickupCodes } from "../db/schema.js";
-import { orderRow, shownVersion } from "./rows.js";
-import { STORAGE, type ObjectStorage } from "../storage/storage.js";
-import { transition } from "./transition.js";
-import { loadPeople, THUMB_TTL_S } from "./views.js";
+import { orders, pickupCodes } from "../db/schema.js";
+import { SettingsService } from "../settings/settings.service.js";
+import { type ObjectStorage, STORAGE } from "../storage/storage.js";
+import { OrdersService } from "./orders.service.js";
+import { record } from "./records.js";
+import { OrderViews } from "./views.js";
 
-/** A code is good for ten minutes, so a screenshot passed to someone else soon stops working. */
-export const PICKUP_TTL_MS = 10 * 60 * 1000;
+/* Crockford base32: no I, L, O or U, so a code read aloud or typed from a screen is hard to get wrong. */
+const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const PREFIX = "PR1";
 
-/* 31 characters: digits and letters without 0, O, 1, I and L, so nothing on the code can be misread. */
-export const PICKUP_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-
-/**
- * "pr1-7k3q 92ab", "7K3Q92AB" … → "7K3Q92AB"; null when it cannot be a code.
- * No look-alike mapping: a code never contains 0/O/1/I/L, so one that does is invalid.
- * The PR1 prefix cannot clash with a code because codes have no 1.
- */
-export function normalizeCode(input: string): string | null {
-  let s = input.toUpperCase().replace(/[^0-9A-Z]/g, "");
-  if (s.length > 8 && s.startsWith("PR1")) s = s.slice(3);
-  return s.length === 8 && [...s].every((c) => PICKUP_ALPHABET.includes(c)) ? s : null;
+export function newPickupCode(): string {
+  const pick = (n: number) => Array.from({ length: n }, () => ALPHABET[randomInt(32)]).join("");
+  return `${PREFIX}-${pick(4)}-${pick(4)}`;
 }
 
-export const formatCode = (c: string) => `PR1-${c.slice(0, 4)}-${c.slice(4)}`;
+/** What people type or scan, brought to the one form codes are stored in: upper case, look-alike letters mapped, dashes optional. */
+export function normalizePickupCode(input: string): string | null {
+  const s = input.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  const m = new RegExp(`^${PREFIX}([${ALPHABET}]{4})([${ALPHABET}]{4})$`).exec(s);
+  return m ? `${PREFIX}-${m[1]}-${m[2]}` : null;
+}
 
-const newCode = () => Array.from({ length: 8 }, () => PICKUP_ALPHABET[randomInt(PICKUP_ALPHABET.length)]).join("");
-
+/**
+ * Pickup codes. The code is the only proof needed to collect a print; whoever shows it gets the
+ * print. Only a keyed hash is stored, each order has one valid code at a time, and a code works once.
+ */
 @Injectable()
 export class PickupService {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Inject(STORAGE) private readonly storage: ObjectStorage,
-    private readonly audit: AuditService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly work: Work,
+    private readonly ordersService: OrdersService,
+    private readonly views: OrderViews,
+    private readonly settings: SettingsService,
   ) {}
 
-  /** Issued to the order's owner on demand; a new code revokes the previous one at once. */
-  async issue(ctx: Ctx, orderId: number): Promise<{ code: string; expiresAt: string }> {
-    let notOwner = false;
-    try {
-      return await this.db.transaction(async (tx) => {
-        const [o] = await tx.select({ ownerId: orders.ownerId, status: orders.status }).from(orders).where(eq(orders.id, orderId)).for("update");
-        if (!o) throw notFound("订单");
-        if (o.ownerId !== userId(ctx)) {
-          notOwner = true;
-          throw notFound("订单");
-        }
-        if (o.status !== "STORED_READY_PICKUP") throw new ApiError(HttpStatus.CONFLICT, "order-not-ready", "订单还不能取件", { orderId, status: o.status });
-        const now = new Date();
-        await tx.update(pickupCodes).set({ revokedAt: now }).where(and(eq(pickupCodes.orderId, orderId), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt)));
-        const expiresAt = new Date(now.getTime() + PICKUP_TTL_MS);
-        let code = newCode();
-        /* 31^8 codes; a clash is practically impossible but cheap to rule out */
-        while ((await tx.select({ id: pickupCodes.id }).from(pickupCodes).where(eq(pickupCodes.code, code))).length) code = newCode();
-        await tx.insert(pickupCodes).values({ code, orderId, issuedAt: now, expiresAt });
-        await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, after: { expiresAt: expiresAt.toISOString() } }, tx);
-        return { code: formatCode(code), expiresAt: expiresAt.toISOString() };
-      });
-    } catch (e) {
-      if (notOwner) await this.audit.record(ctx, { action: "pickup.issue", targetType: "order", targetId: orderId, result: "denied", reason: "not-owner" });
-      throw e;
-    }
+  private hash(code: string): string {
+    return createHmac("sha256", this.config.secret).update(`pickup\n${code}`).digest("hex");
   }
 
-  /**
-   * Resolves a code to its order or throws the refusal the scan page shows.
-   * Order of checks: this code already redeemed, revoked, expired, not ready.
-   */
-  private async check(db: Db, raw: string, lock: boolean) {
-    const code = normalizeCode(raw);
-    const [pc] = code ? await db.select().from(pickupCodes).where(eq(pickupCodes.code, code)) : [];
-    if (!pc) throw new ApiError(HttpStatus.NOT_FOUND, "pickup-code-invalid", "取件码无效");
-    const o = (await orderRow(db, pc.orderId, lock))!;
-    /* only the code that was redeemed says so; a revoked or expired one of a completed order is just invalid */
-    if (o.status === "COMPLETED" && pc.redeemedAt) {
-      const people = await loadPeople(db, [o.ownerId, o.redeemedBy]);
-      throw new ApiError(HttpStatus.CONFLICT, "pickup-already-redeemed", "这张单已经核销过了", {
-        orderId: o.id,
-        owner: { name: people.get(o.ownerId)!.name },
-        redeemedAt: o.redeemedAt?.toISOString() ?? null,
-        redeemedBy: o.redeemedBy ? { name: people.get(o.redeemedBy)!.name } : null,
-      });
-    }
-    if (pc.revokedAt) throw new ApiError(HttpStatus.NOT_FOUND, "pickup-code-invalid", "取件码已失效，请让选手重新出示");
-    if (pc.expiresAt.getTime() <= Date.now()) {
-      throw new ApiError(HttpStatus.GONE, "pickup-code-expired", "取件码已过期，请让选手重新出示", { orderId: o.id, expiresAt: pc.expiresAt.toISOString() });
-    }
-    if (o.status !== "STORED_READY_PICKUP") throw new ApiError(HttpStatus.CONFLICT, "order-not-ready", "订单还没入库", { orderId: o.id, status: o.status });
-    return { pc, o };
+  /** A new code for the applicant's own order; the previous one stops working. */
+  async issue(ctx: Ctx, orderId: string) {
+    const { codeMinutes } = await this.settings.get("pickup");
+    return this.work.run(async (u) => {
+      const [o] = await u.tx.select().from(orders).where(eq(orders.id, orderId)).for("update");
+      if (!o || o.ownerId !== userIdOf(ctx)) throw notFound("order");
+      if (o.status !== "READY") throw stateConflict(o.status, "READY");
+      await u.tx
+        .update(pickupCodes)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(pickupCodes.orderId, o.id), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt)));
+      const code = newPickupCode();
+      const expiresAt = new Date(Date.now() + codeMinutes * 60_000);
+      await u.tx.insert(pickupCodes).values({ orderId: o.id, codeHash: this.hash(code), expiresAt });
+      await record(u, ctx, { orderId: o.id, kind: "pickup.code_issued", noteVisible: true });
+      return { code, expiresAt: expiresAt.toISOString() };
+    });
   }
 
-  async lookup(ctx: Ctx, raw: string) {
-    const { o } = await this.check(this.db, raw, false);
-    const [f] = await this.db.select({ name: files.fileName }).from(files).where(eq(files.id, o.fileId));
-    const people = await loadPeople(this.db, [o.ownerId]);
-    const owner = people.get(o.ownerId)!;
-    const view = {
-      orderId: o.id,
-      fileName: f.name,
-      plateIndex: o.plateIndex,
-      plateCount: o.plateCount,
-      printerModel: o.printerModel,
-      weightG: o.weightGrams,
-      filaments: o.filaments.map((x) => ({ color: x.color, type: x.type })),
-      owner: { name: owner.name, role: owner.role },
-      slot: o.storageSlot,
-      storedAt: o.storedAt?.toISOString() ?? null,
-      thumbUrl: o.thumbnailKey ? await this.storage.signedUrl(o.thumbnailKey, THUMB_TTL_S) : null,
+  /** The valid code row for what was typed, or a refusal that does not say why (wrong, expired, replaced and used all look the same). */
+  private async find(input: string, tx: Db = this.db) {
+    const code = normalizePickupCode(input);
+    const [row] = code
+      ? await tx
+          .select()
+          .from(pickupCodes)
+          .where(and(eq(pickupCodes.codeHash, this.hash(code)), isNull(pickupCodes.revokedAt), isNull(pickupCodes.redeemedAt), gt(pickupCodes.expiresAt, new Date())))
+      : [];
+    if (!row) throw new Problem(404, "pickup_code_invalid", "no valid pickup code like that");
+    return row;
+  }
+
+  async lookup(ctx: Ctx, input: string) {
+    const row = await this.find(input);
+    const [o] = await this.db.select().from(orders).where(eq(orders.id, row.orderId));
+    if (o.status !== "READY") throw new Problem(404, "pickup_code_invalid", "no valid pickup code like that");
+    return {
+      order: await this.views.summary(ctx, o),
+      storageSlot: o.storageSlot ?? "",
+      photoUrl: o.storePhotoKey ? await this.storage.signedUrl(o.storePhotoKey, 300) : null,
+      codeExpiresAt: row.expiresAt.toISOString(),
     };
-    if (o.ownerId !== userId(ctx) && view.thumbUrl) await this.audit.record(ctx, { action: "order.preview.view", targetType: "order", targetId: o.id });
-    return view;
   }
 
-  async redeem(ctx: Ctx, raw: string) {
-    try {
-      return await this.db.transaction(async (tx) => {
-        const { pc, o } = await this.check(tx, raw, true);
-        const now = new Date();
-        await transition(tx, ctx, o.id, "redeem", { set: { redeemedBy: userId(ctx), redeemedAt: now } });
-        await tx.update(pickupCodes).set({ redeemedAt: now }).where(eq(pickupCodes.id, pc.id));
-        await this.audit.record(ctx, { action: "order.redeem", targetType: "order", targetId: o.id, before: { status: "STORED_READY_PICKUP" }, after: { status: "COMPLETED" } }, tx);
-        const by = ctx.actor.type === "user" ? ctx.actor.displayName : "系统";
-        return { orderId: o.id, redeemedAt: now.toISOString(), redeemedBy: { name: by } };
-      });
-    } catch (e) {
-      if (e instanceof ApiError) {
-        const body = e.getResponse() as { code: string; orderId?: number };
-        await this.audit.record(ctx, { action: "order.redeem", targetType: "order", targetId: body.orderId ?? null, reason: body.code, result: "failed" });
-      }
-      throw e;
-    }
+  async redeem(ctx: Ctx, input: string) {
+    const orderId = await this.work.run(async (u) => {
+      const seen = await this.find(input, u.tx);
+      const o = await this.ordersService.complete(u, ctx, seen.orderId);
+      /* Checked again under the order's lock: of two scans at once only one finds the code unused. */
+      const used = await u.tx
+        .update(pickupCodes)
+        .set({ redeemedAt: new Date(), redeemedBy: userIdOf(ctx) })
+        .where(and(eq(pickupCodes.id, seen.id), isNull(pickupCodes.redeemedAt), isNull(pickupCodes.revokedAt)))
+        .returning({ id: pickupCodes.id });
+      if (!used.length) throw new Problem(404, "pickup_code_invalid", "no valid pickup code like that");
+      return o.id;
+    });
+    const [o] = await this.db.select().from(orders).where(eq(orders.id, orderId));
+    return this.views.summary(ctx, o);
   }
 
-  /** Redemptions since a time, newest first: the scan page's "today" list. */
-  async redemptions(since: Date) {
+  async redemptions(ctx: Ctx, q: { limit?: string; cursor?: string }) {
+    const limit = Math.min(100, Math.max(1, Number(q.limit) || 50));
     const rows = await this.db
-      .select({ id: orders.id, ownerId: orders.ownerId, at: orders.redeemedAt, file: files.fileName })
-      .from(orders)
-      .innerJoin(orderVersions, shownVersion)
-      .innerJoin(files, eq(files.id, orderVersions.fileId))
-      .where(and(eq(orders.status, "COMPLETED"), gte(orders.redeemedAt, since)))
-      .orderBy(desc(orders.redeemedAt));
-    const people = await loadPeople(this.db, rows.map((r) => r.ownerId));
-    return rows.map((r) => ({ orderId: r.id, fileName: r.file, owner: { name: people.get(r.ownerId)!.name }, redeemedAt: r.at!.toISOString() }));
+      .select({ code: pickupCodes, order: orders })
+      .from(pickupCodes)
+      .innerJoin(orders, eq(orders.id, pickupCodes.orderId))
+      .where(and(isNotNull(pickupCodes.redeemedAt), q.cursor ? lt(pickupCodes.id, q.cursor) : undefined))
+      .orderBy(desc(pickupCodes.id))
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const summaries = await this.views.summaries(
+      ctx,
+      page.map((r) => r.order),
+    );
+    const people = await this.views.people(page.map((r) => r.code.redeemedBy));
+    return {
+      items: page.map((r, i) => {
+        const by = r.code.redeemedBy ? people.get(r.code.redeemedBy) : undefined;
+        return { order: summaries[i], redeemedAt: r.code.redeemedAt!.toISOString(), redeemedBy: { id: by?.id ?? null, name: by?.displayName ?? "", avatarUrl: null } };
+      }),
+      nextCursor: rows.length > limit ? page[page.length - 1].code.id : null,
+    };
   }
 }

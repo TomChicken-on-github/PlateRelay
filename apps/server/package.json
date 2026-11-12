@@ -12,11 +12,9 @@
     "start": "node --env-file-if-exists=.env dist/src/main.js",
     "dev": "pnpm build && node --env-file-if-exists=.env --watch-path=dist dist/src/main.js",
     "test": "pnpm build && node --test --test-concurrency=1 \"dist/test/**/*.test.js\"",
-    "test:stress": "pnpm build && node --test dist/test/queue-stress.pg.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "user:create": "pnpm build && node --env-file-if-exists=.env dist/src/cli/create-user.js",
-    "db:generate": "drizzle-kit generate",
-    "storage:check": "pnpm build && node --env-file-if-exists=.env dist/src/cli/storage-check.js"
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1149.0",
@@ -27,9 +25,11 @@
     "@platerelay/shared": "workspace:*",
     "cookie-parser": "1.4.7",
     "drizzle-orm": "0.45.4",
+    "express": "5.2.1",
     "pg": "8.23.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "ws": "8.22.2",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -41,6 +41,7 @@
     "@types/node": "24.10.1",
     "@types/pg": "8.23.1",
     "@types/supertest": "7.2.1",
+    "@types/ws": "8.18.2",
     "drizzle-kit": "0.31.11",
     "fflate": "0.8.3",
     "supertest": "7.3.1",

@@ -2057,6 +2057,14 @@ export const daemonProtocolSchema: Record<string, unknown> = {
             "$ref": "#/$defs/ActiveError"
           }
         },
+        "modelId": {
+          "type": "string",
+          "description": "打印机自己报的机型代号（如拓竹 X2D 是 N6），和切片文件里的机型代号是同一套；不知道时省略"
+        },
+        "modelName": {
+          "type": "string",
+          "description": "给人看的机型名"
+        },
         "controls": {
           "type": "object",
           "description": "设定值类控制的当前值，如灯、速度档"

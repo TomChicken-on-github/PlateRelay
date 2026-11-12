@@ -8,6 +8,9 @@ export type Schema = typeof schema;
 /** Either driver: node-postgres in production, PGlite for development and tests. */
 export type Db = PgDatabase<PgQueryResultHKT, Schema>;
 
+/** A transaction handle; services accept either so they can join a caller's transaction. */
+export type Tx = Db;
+
 export const DB = Symbol("DB");
 
 export interface DbHandle {

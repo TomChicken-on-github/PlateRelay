@@ -927,6 +927,14 @@ bedType?: string
 storage?: StorageMedium[]
 activeErrors?: ActiveError[]
 /**
+ * 打印机自己报的机型代号（如拓竹 X2D 是 N6），和切片文件里的机型代号是同一套；不知道时省略
+ */
+modelId?: string
+/**
+ * 给人看的机型名
+ */
+modelName?: string
+/**
  * 设定值类控制的当前值，如灯、速度档
  */
 controls?: {

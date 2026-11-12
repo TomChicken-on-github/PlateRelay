@@ -1,155 +1,260 @@
-import { createHash } from "node:crypto";
-import { DEFAULT_QUEUE_RULES, OWNER_CANCELLABLE, type OrderView, type PersonView, type QueueRules } from "@platerelay/shared";
-import { and, eq, inArray } from "drizzle-orm";
-import { type Ctx, can, userId } from "../auth/actor.js";
-import type { Db } from "../db/db.js";
-import { type AnswerSnapshot, files, printers, roles, userRoles, users } from "../db/schema.js";
-import type { ObjectStorage } from "../storage/storage.js";
-import type { OrderRow } from "./transition.js";
+import { Inject, Injectable } from "@nestjs/common";
+import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { can, type Ctx, userIdOf } from "../common/ctx.js";
+import { DB, type Db, type Tx } from "../db/db.js";
+import { fileChecks, files, orderRecords, orders, orderVersions, printerLive, printerReasons, printers, printJobs, users } from "../db/schema.js";
+import { type Finding, FilesService, type StoredPlate } from "../files/files.service.js";
+import { SettingsService } from "../settings/settings.service.js";
+import { type ObjectStorage, STORAGE } from "../storage/storage.js";
+import type { OrderRow, OrderStatus } from "./records.js";
 
-/** Signed preview links live this long. */
-export const THUMB_TTL_S = 600;
+export type VersionRow = typeof orderVersions.$inferSelect;
 
-/** Anonymous label for a submitter, stable per account: "选手 K07". */
-export function aliasOf(id: string): string {
-  const h = createHash("sha256").update(id).digest();
-  return `选手 ${String.fromCharCode(65 + (h[0] % 26))}${String(h[1] % 100).padStart(2, "0")}`;
+const SIGNED_URL_SECONDS = 300;
+const NODES = ["SUBMIT", "REVIEW", "QUEUE", "PRINT", "STORE", "PICKUP"] as const;
+type NodeName = (typeof NODES)[number];
+type NodeState = "NOT_REACHED" | "ACTIVE" | "DONE" | "PROBLEM";
+
+/** Where each status stands on the six steps of an order: the step it is at, and whether that step is going well. */
+const AT: Record<OrderStatus, [NodeName, NodeState]> = {
+  PENDING_REVIEW: ["REVIEW", "ACTIVE"],
+  REJECTED: ["REVIEW", "PROBLEM"],
+  QUEUED: ["QUEUE", "ACTIVE"],
+  DISPATCHED: ["PRINT", "ACTIVE"],
+  PRINTING: ["PRINT", "ACTIVE"],
+  FAILED: ["PRINT", "PROBLEM"],
+  PRINTED: ["STORE", "ACTIVE"],
+  READY: ["PICKUP", "ACTIVE"],
+  COMPLETED: ["PICKUP", "DONE"],
+  DISPOSED: ["PICKUP", "PROBLEM"],
+  CANCELLED: ["REVIEW", "PROBLEM"],
+};
+
+export interface Person {
+  id: string | null;
+  name: string;
+  avatarUrl: string | null;
 }
 
-export interface People {
-  get(id: string | null | undefined): PersonView | null;
-  /** The submitter as this viewer may see them: anonymous without order:submitter-name:view-others. */
-  owner(ctx: Ctx, id: string): PersonView;
+/** What the API returns for orders, cut to what the caller may see. */
+@Injectable()
+export class OrderViews {
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(STORAGE) private readonly storage: ObjectStorage,
+    private readonly files: FilesService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  /** Names of other people are shown only to those allowed to see them. */
+  person(ctx: Ctx, u: { id: string; displayName: string } | null | undefined): Person | null {
+    if (!u) return null;
+    if (u.id !== userIdOf(ctx) && !can(ctx, "order:submitter-name:view-others")) return { id: null, name: "", avatarUrl: null };
+    return { id: u.id, name: u.displayName, avatarUrl: null };
+  }
+
+  async people(ids: (string | null | undefined)[], tx: Tx = this.db) {
+    const want = [...new Set(ids.filter((x): x is string => !!x))];
+    const rows = want.length ? await tx.select({ id: users.id, displayName: users.displayName }).from(users).where(inArray(users.id, want)) : [];
+    return new Map(rows.map((r) => [r.id, r]));
+  }
+
+  private plateOf(v: VersionRow): StoredPlate {
+    return {
+      index: v.plateIndex,
+      name: v.plateName,
+      modelId: v.modelId,
+      modelName: v.modelName,
+      nozzles: v.nozzles as StoredPlate["nozzles"],
+      filaments: v.filaments as StoredPlate["filaments"],
+      printSeconds: v.printSeconds,
+      weightGrams: v.weightGrams,
+      slicedBedType: v.slicedBedType,
+      parts: v.parts as StoredPlate["parts"],
+      partsLabelled: true,
+      thumbnailKey: v.thumbnailKey,
+      partsTopKey: v.partsTopKey,
+      partsPickKey: v.partsPickKey,
+    };
+  }
+
+  async summaries(ctx: Ctx, rows: OrderRow[], tx: Tx = this.db) {
+    if (!rows.length) return [];
+    const me = userIdOf(ctx);
+    const versions = new Map((await tx.select().from(orderVersions).where(inArray(orderVersions.id, rows.map((o) => o.activeVersionId)))).map((v) => [v.id, v]));
+    const fileNames = new Map((await tx.select({ id: files.id, fileName: files.fileName }).from(files).where(inArray(files.id, [...versions.values()].map((v) => v.fileId)))).map((f) => [f.id, f.fileName]));
+    const owners = await this.people(rows.map((o) => o.ownerId), tx);
+    const queue = rows.some((o) => o.sortKey !== null && (o.status === "QUEUED" || o.status === "PENDING_REVIEW"))
+      ? await tx
+          .select({ id: orders.id })
+          .from(orders)
+          .where(and(isNotNull(orders.sortKey), inArray(orders.status, ["QUEUED", "PENDING_REVIEW"])))
+          .orderBy(asc(orders.sortKey), asc(orders.id))
+      : [];
+    const printerIds = [...new Set(rows.map((o) => o.printerId).filter((x): x is string => !!x))];
+    const printerRows = printerIds.length ? await tx.select({ id: printers.id, name: printers.name, state: printers.state }).from(printers).where(inArray(printers.id, printerIds)) : [];
+    const reasons = printerIds.length ? await tx.select({ printerId: printerReasons.printerId, reason: printerReasons.reason }).from(printerReasons).where(inArray(printerReasons.printerId, printerIds)) : [];
+    const lives = printerIds.length ? await tx.select({ printerId: printerLive.printerId, snapshot: printerLive.snapshot }).from(printerLive).where(inArray(printerLive.printerId, printerIds)) : [];
+
+    return Promise.all(
+      rows.map(async (o) => {
+        const v = versions.get(o.activeVersionId)!;
+        const mine = o.ownerId === me;
+        const at = queue.findIndex((q) => q.id === o.id);
+        const printer = printerRows.find((p) => p.id === o.printerId);
+        const job = (lives.find((l) => l.printerId === o.printerId)?.snapshot as { job?: { jobRef?: string; percent?: number; remainingSeconds?: number } | null } | undefined)?.job;
+        return {
+          id: o.id,
+          number: o.number,
+          status: o.status,
+          /* Frozen: holds its place while a revision awaits review, but cannot be dispatched. */
+          frozen: o.status === "PENDING_REVIEW" && o.sortKey !== null,
+          owner: this.person(ctx, owners.get(o.ownerId))!,
+          isMine: mine,
+          ...(mine || can(ctx, "order:view:any") ? { fileName: fileNames.get(v.fileId) ?? "" } : {}),
+          plate: await this.files.plateView(this.plateOf(v)),
+          colourPref: o.colourPref,
+          bedType: o.bedType,
+          submittedAt: o.submittedAt.toISOString(),
+          /* Applicants see their own place and how many are ahead, never who. */
+          queue: at >= 0 ? { position: at + 1, ahead: at, wait: null } : null,
+          printer: printer && (o.status === "DISPATCHED" || o.status === "PRINTING" || o.status === "PRINTED" || o.status === "FAILED") ? { id: printer.id, name: printer.name, state: printer.state, reasons: reasons.filter((r) => r.printerId === printer.id).map((r) => r.reason) } : null,
+          progress: (o.status === "PRINTING" || o.status === "DISPATCHED") && job && job.jobRef === o.currentJobId && typeof job.percent === "number" ? { percent: Math.round(job.percent), remainingSeconds: job.remainingSeconds ?? null } : null,
+        };
+      }),
+    );
+  }
+
+  async summary(ctx: Ctx, row: OrderRow, tx: Tx = this.db) {
+    return (await this.summaries(ctx, [row], tx))[0];
+  }
+
+  private async versionView(ctx: Ctx, o: OrderRow, v: VersionRow, all: VersionRow[], fileNames: Map<string, { fileName: string; purgedAt: Date | null }>) {
+    return {
+      id: v.id,
+      n: v.n,
+      kind: v.kind,
+      state: v.state,
+      restoredFromN: all.find((x) => x.id === v.restoredFromId)?.n ?? null,
+      plate: await this.files.plateView(this.plateOf(v)),
+      ...(o.ownerId === userIdOf(ctx) || can(ctx, "order:view:any") ? { fileName: fileNames.get(v.fileId)?.fileName ?? "" } : {}),
+      deltaSeconds: v.deltaSeconds,
+      placesBack: v.placesBack,
+      counted: v.counted,
+      modelSwitch: v.modelSwitch,
+      createdAt: v.createdAt.toISOString(),
+      decidedAt: v.decidedAt?.toISOString() ?? null,
+      reason: v.reason,
+      fileAvailable: !fileNames.get(v.fileId)?.purgedAt && !(o.filesExpireAt && o.filesExpireAt < new Date()),
+    };
+  }
+
+  async detail(ctx: Ctx, o: OrderRow, tx: Tx = this.db) {
+    const mine = o.ownerId === userIdOf(ctx);
+    const staff = can(ctx, "order:view:any");
+    const base = await this.summary(ctx, o, tx);
+    const versions = await tx.select().from(orderVersions).where(eq(orderVersions.orderId, o.id)).orderBy(asc(orderVersions.n));
+    const fileRows = await tx.select({ id: files.id, fileName: files.fileName, purgedAt: files.purgedAt }).from(files).where(inArray(files.id, versions.map((v) => v.fileId)));
+    const fileNames = new Map(fileRows.map((f) => [f.id, f]));
+    const view = (v: VersionRow) => this.versionView(ctx, o, v, versions, fileNames);
+    const active = versions.find((v) => v.id === o.activeVersionId)!;
+    const pending = versions.find((v) => v.id === o.pendingVersionId);
+    const rules = await this.settings.get("revision");
+    const jobs = await tx
+      .select({ job: printJobs, printerName: printers.name })
+      .from(printJobs)
+      .innerJoin(printers, eq(printers.id, printJobs.printerId))
+      .where(eq(printJobs.orderId, o.id))
+      .orderBy(desc(printJobs.attempt));
+    const current = jobs.find((j) => j.job.id === o.currentJobId && j.job.phase !== "ENDED")?.job;
+    const records = await tx
+      .select({ node: orderRecords.node, note: orderRecords.note, noteVisible: orderRecords.noteVisible })
+      .from(orderRecords)
+      .where(and(eq(orderRecords.orderId, o.id), isNotNull(orderRecords.note)))
+      .orderBy(desc(orderRecords.id));
+    const decliner = o.reprintDeclinedBy ? (await this.people([o.reprintDeclinedBy], tx)).get(o.reprintDeclinedBy) : null;
+    const findings = can(ctx, "order:review") ? (((await tx.select({ findings: fileChecks.findings }).from(fileChecks).where(eq(fileChecks.fileId, (pending ?? active).fileId)))[0]?.findings as Finding[]) ?? []) : undefined;
+    const parts = active.parts as { id: number }[];
+    const expired = !!o.filesExpireAt && o.filesExpireAt < new Date();
+
+    return {
+      ...base,
+      activeVersion: await view(active),
+      pendingVersion: pending ? await view(pending) : null,
+      versions: await Promise.all(versions.map(view)),
+      /* Form answers are for the applicant, the reviewer and admins. */
+      ...(mine || can(ctx, "order:review") ? { answers: o.answers } : {}),
+      revisions: { used: o.revisionCount, max: rules.maxCount, modelSwitches: o.modelSwitchCount, maxModelSwitches: rules.modelSwitchMax },
+      nodes: this.nodes(o, records, mine && !staff),
+      ...(findings ? { findings } : {}),
+      storage: o.storageSlot ? { slot: o.storageSlot, photoUrl: o.storePhotoKey && (mine || staff) ? await this.storage.signedUrl(o.storePhotoKey, SIGNED_URL_SECONDS) : null } : null,
+      parts: parts.length ? { total: parts.length, skipped: current?.skippedParts ?? [], canSkip: !!current && (current.phase === "PRINTING" || (current.phase === "PAUSED" && current.pausedFrom === "PRINTING")) } : null,
+      actions: this.actions(ctx, o, current?.phase),
+      printJobs: await Promise.all(
+        jobs.map(async ({ job, printerName }) => ({
+          jobId: job.id,
+          attempt: job.attempt,
+          printerName,
+          startedAt: job.startedAt?.toISOString() ?? null,
+          endedAt: job.endedAt?.toISOString() ?? null,
+          outcome: job.outcome,
+          endPhoto: job.endPhotoKey && job.endPhotoAt && (mine || staff) ? { capturedAt: job.endPhotoAt.toISOString(), url: await this.storage.signedUrl(job.endPhotoKey, SIGNED_URL_SECONDS) } : null,
+        })),
+      ),
+      reprintBlockedReason: o.status !== "FAILED" ? null : expired ? "file_expired" : o.archivedAt ? "archived" : o.reprintDeclinedAt ? "declined" : null,
+      reprintDeclined: o.reprintDeclinedAt ? { at: o.reprintDeclinedAt.toISOString(), by: this.person(ctx, decliner), reason: staff || o.reprintDeclinedReasonVisible ? o.reprintDeclinedReason : null } : null,
+    };
+  }
+
+  /** The six steps with their state and latest note. Steps before the current one are done; a cancellation marks the step it happened at. */
+  private nodes(o: OrderRow, records: { node: NodeName; note: string | null; noteVisible: boolean }[], applicantView: boolean) {
+    let [at, state] = AT[o.status];
+    if (o.status === "CANCELLED") at = o.sortKey === null ? "REVIEW" : "QUEUE";
+    if (o.status === "DISPOSED" && !o.storageSlot) at = "STORE";
+    const i = NODES.indexOf(at);
+    return NODES.map((node, n) => ({
+      node,
+      state: n < i ? ("DONE" as NodeState) : n === i ? state : ("NOT_REACHED" as NodeState),
+      label: null,
+      note: records.find((r) => r.node === node && (r.noteVisible || !applicantView))?.note ?? null,
+    }));
+  }
+
+  /** Operations the caller could perform on the order right now; the front end shows buttons from this. */
+  private actions(ctx: Ctx, o: OrderRow, phase?: string): string[] {
+    const mine = o.ownerId === userIdOf(ctx);
+    const out: string[] = [];
+    const add = (when: unknown, ...ops: string[]) => void (when && out.push(...ops));
+    const neverApproved = o.sortKey === null;
+    add(o.status === "PENDING_REVIEW" && can(ctx, "order:review"), "approveOrder", "rejectOrder");
+    add((o.status === "PENDING_REVIEW" || o.status === "QUEUED") && ((mine && can(ctx, "order:cancel:own")) || can(ctx, "order:cancel:any")), "cancelOrder");
+    add(mine && ((o.status === "PENDING_REVIEW" && neverApproved) || o.status === "QUEUED"), "reviseOrder");
+    add(mine && o.status === "PENDING_REVIEW" && o.pendingVersionId, "withdrawRevision");
+    add(mine && o.status === "QUEUED", "restoreVersion");
+    add(o.status === "FAILED" && can(ctx, "order:reprint") && !o.archivedAt && !o.reprintDeclinedAt && !(o.filesExpireAt && o.filesExpireAt < new Date()), "reprintOrder");
+    add(o.status === "FAILED" && can(ctx, "order:reprint") && !o.archivedAt && !o.reprintDeclinedAt, "declineReprint");
+    add(o.status === "FAILED" && can(ctx, "order:reprint:restore") && !o.archivedAt && o.reprintDeclinedAt, "revokeReprintDecline");
+    add(o.status === "PRINTED" && can(ctx, "order:store"), "storeOrder");
+    add(o.status === "READY" && mine, "issuePickupCode");
+    add((o.status === "READY" || o.status === "PRINTED") && can(ctx, "order:dispose"), "disposeOrder");
+    add(phase === "PRINTING" && ((mine && can(ctx, "order:skip-parts:own")) || can(ctx, "order:skip-parts:any")), "skipParts");
+    return out;
+  }
+
+  /** Orders with a place in the queue, first to last. */
+  async queueRows(tx: Tx = this.db) {
+    return tx
+      .select()
+      .from(orders)
+      .where(and(isNotNull(orders.sortKey), inArray(orders.status, ["QUEUED", "PENDING_REVIEW"])))
+      .orderBy(asc(orders.sortKey), asc(orders.id));
+  }
+
+  async activeJobOf(orderId: string, tx: Tx = this.db) {
+    const [job] = await tx
+      .select()
+      .from(printJobs)
+      .where(and(eq(printJobs.orderId, orderId), ne(printJobs.phase, "ENDED")));
+    return job;
+  }
 }
-
-export async function loadPeople(db: Db, ids: (string | null | undefined)[]): Promise<People> {
-  const want = [...new Set(ids.filter((x): x is string => !!x))];
-  const rows = want.length
-    ? await db
-        .select({ id: users.id, name: users.displayName, role: roles.name })
-        .from(users)
-        .leftJoin(userRoles, and(eq(userRoles.userId, users.id), eq(userRoles.scope, "global")))
-        .leftJoin(roles, eq(roles.id, userRoles.roleId))
-        .where(inArray(users.id, want))
-    : [];
-  const map = new Map(rows.map((r) => [r.id, { id: r.id, name: r.name, role: r.role }]));
-  const get = (id: string | null | undefined): PersonView | null => (id ? (map.get(id) ?? { id, name: "已删除的账户", role: null }) : null);
-  return {
-    get,
-    owner: (ctx, id) => (userId(ctx) === id || can(ctx, "order:submitter-name:view-others") ? get(id)! : { id: null, name: aliasOf(id), role: null }),
-  };
-}
-
-export interface ViewExtras {
-  queue?: Map<number, { position: number; aheadSeconds: number }>;
-  waitReasons?: Map<number, string | null>;
-  rules?: QueueRules;
-  missingColours?: Map<number, string[]>;
-}
-
-/** Whether the owner may upload a new version now. The revise endpoint decides the details (limits, kind). */
-export function revisable(r: OrderRow, rules: QueueRules, printerState: string | undefined): boolean {
-  const rv = rules.revisions;
-  if (!rv.enabled) return false;
-  const state = r.status === "PENDING_REVIEW" || r.status === "QUEUED" || (r.status === "PRINTING" && printerState === "PREPARING" && rv.whenDispatched === "recall");
-  return state && (rv.max === 0 || r.revisionCount < rv.max || r.modelSwitchCount < rules.modelSwitch.max);
-}
-
-const iso = (d: Date | null) => (d ? d.toISOString() : null);
-
-/** Builds the API shape for a batch of orders, applying the viewer's visibility rules. */
-export async function orderViews(db: Db, storage: ObjectStorage, ctx: Ctx, rows: OrderRow[], extras: ViewExtras = {}): Promise<OrderView[]> {
-  if (!rows.length) return [];
-  const fileRows = await db.select().from(files).where(inArray(files.id, [...new Set(rows.map((r) => r.fileId))]));
-  const fileMap = new Map(fileRows.map((f) => [f.id, f]));
-  const printerIds = [...new Set(rows.map((r) => r.printerId).filter((x): x is string => !!x))];
-  const printerRows = printerIds.length ? await db.select().from(printers).where(inArray(printers.id, printerIds)) : [];
-  const printerMap = new Map(printerRows.map((p) => [p.id, p]));
-  const people = await loadPeople(
-    db,
-    rows.flatMap((r) => [r.ownerId, r.reviewedBy, r.cancelledBy, r.failedBy, r.storedBy, r.redeemedBy]),
-  );
-  const operate = can(ctx, "printer:operate");
-  const rules = extras.rules ?? DEFAULT_QUEUE_RULES;
-  /* someone who acted on an order: the submitter acting on their own order stays as anonymous as the owner field */
-  const by = (r: OrderRow, id: string | null) => (id && id === r.ownerId ? people.owner(ctx, id) : people.get(id));
-
-  return Promise.all(
-    rows.map(async (r): Promise<OrderView> => {
-      const f = fileMap.get(r.fileId)!;
-      const p = r.printerId ? printerMap.get(r.printerId) : undefined;
-      const onThisPrinter = p?.currentOrderId === r.id;
-      const paused = r.status === "PRINTING" && onThisPrinter && p?.state === "ERROR_PAUSED";
-      const progress = onThisPrinter && typeof p?.telemetry?.progress === "number" ? (p.telemetry.progress as number) : r.printedAt ? 100 : null;
-      return {
-        id: r.id,
-        status: r.status,
-        waitingForHandler: paused,
-        fileName: f.fileName,
-        sizeBytes: f.sizeBytes,
-        sourceFileId: f.id,
-        plate: { index: r.plateIndex, count: r.plateCount, name: r.plateName },
-        printerModel: r.printerModel,
-        printerModelId: r.printerModelId,
-        nozzles: r.nozzles,
-        filaments: r.filaments,
-        printSeconds: r.printSeconds,
-        weightGrams: r.weightGrams,
-        thumbUrl: r.thumbnailKey ? await storage.signedUrl(r.thumbnailKey, THUMB_TTL_S) : null,
-        owner: people.owner(ctx, r.ownerId),
-        isMine: userId(ctx) === r.ownerId,
-        submittedAt: r.submittedAt.toISOString(),
-        queue: extras.queue?.get(r.id) ?? null,
-        waitReason: extras.waitReasons?.get(r.id) ?? null,
-        printer: p ? { id: p.id, name: p.name, state: p.state } : null,
-        progress,
-        startedAt: iso(r.startedAt),
-        printedAt: iso(r.printedAt),
-        errorPausedMs: r.errorPausedMs,
-        error: paused && operate ? (p?.error ?? null) : null,
-        review: r.reviewedAt ? { by: by(r, r.reviewedBy), at: r.reviewedAt.toISOString(), reason: r.rejectReason } : null,
-        cancel: r.cancelledAt ? { by: by(r, r.cancelledBy), at: r.cancelledAt.toISOString(), reason: r.cancelReason ?? "" } : null,
-        failure: r.failedAt
-          ? {
-              by: by(r, r.failedBy),
-              at: r.failedAt.toISOString(),
-              reason: r.failureReason ?? "",
-            }
-          : null,
-        stored: r.storedAt ? { by: by(r, r.storedBy), at: r.storedAt.toISOString(), slot: r.storageSlot ?? "" } : null,
-        redeemed: r.redeemedAt ? { by: by(r, r.redeemedBy), at: r.redeemedAt.toISOString() } : null,
-        parts:
-          r.partsTopKey && r.parts.length > 1
-            ? {
-                total: r.parts.length,
-                skipped: r.skippedParts.length,
-                allowed:
-                  r.status === "PRINTING" &&
-                  onThisPrinter &&
-                  (p?.state === "PRINTING" || p?.state === "ERROR_PAUSED") &&
-                  r.parts.length - r.skippedParts.length > 1 &&
-                  (can(ctx, "order:skip-parts:any") || (userId(ctx) === r.ownerId && can(ctx, "order:skip-parts:own"))),
-              }
-            : null,
-        colourPref: r.colourPref,
-        bedType: r.bedType,
-        revisions: {
-          count: r.revisionCount,
-          max: rules.revisions.max,
-          switches: r.modelSwitchCount,
-          maxSwitches: rules.modelSwitch.max,
-          /* "previous" is the active version: a revision under review is compared with it too */
-          baselineSeconds: rules.revisions.baseline === "original" ? r.originalPrintSeconds : (r.revision?.prev.printSeconds ?? r.printSeconds),
-        },
-        canRevise: userId(ctx) === r.ownerId && revisable(r, rules, onThisPrinter ? p?.state : undefined),
-        /* a pending version only exists next to an approved active one, which it goes back to */
-        canWithdraw: userId(ctx) === r.ownerId && r.status === "PENDING_REVIEW" && r.pendingVersionId != null,
-        canCancelOwn: userId(ctx) === r.ownerId && (OWNER_CANCELLABLE.includes(r.status) || (r.status === "PRINTING" && onThisPrinter && p?.state === "PREPARING")),
-        revision: r.revision,
-        ...(extras.missingColours?.has(r.id) ? { missingColours: extras.missingColours.get(r.id) } : {}),
-      };
-    }),
-  );
-}
-
-export type { AnswerSnapshot, OrderView, PersonView };
