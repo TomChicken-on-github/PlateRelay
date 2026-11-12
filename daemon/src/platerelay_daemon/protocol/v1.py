@@ -1066,6 +1066,13 @@ class PrinterSnapshot(BaseModel):
     bedType: str | None = None
     storage: list[StorageMedium] | None = None
     activeErrors: list[ActiveError] | None = None
+    modelId: Annotated[
+        str | None,
+        Field(
+            description="打印机自己报的机型代号（如拓竹 X2D 是 N6），和切片文件里的机型代号是同一套；不知道时省略"
+        ),
+    ] = None
+    modelName: Annotated[str | None, Field(description="给人看的机型名")] = None
     controls: Annotated[
         dict[str, Any] | None, Field(description="设定值类控制的当前值，如灯、速度档")
     ] = None

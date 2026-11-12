@@ -80,11 +80,16 @@ export class DaemonsService {
       await this.audit.record(ctx, { action: "daemon.enrollment.create", targetType: "daemon_enrollment", targetId: out[0].id, after: { name } }, tx);
       return out;
     });
-    const args = `--panel ${this.config.publicOrigin} --token ${token} --name ${JSON.stringify(name)}`;
+    /* The token goes in through the environment, so it stays out of the process list and the shell history. */
+    const run = `run --panel ${this.config.publicOrigin} --name ${JSON.stringify(name)}`;
     return {
       id: row.id,
       expiresAt: expiresAt.toISOString(),
-      commands: { linux: `platerelay-daemon enroll ${args}`, windows: `platerelay-daemon.exe enroll ${args}`, docker: `docker run --rm -v platerelay-daemon:/data platerelay/daemon enroll ${args}` },
+      commands: {
+        linux: `PLATERELAY_ENROLL_TOKEN=${token} platerelay-daemon ${run}`,
+        windows: `$env:PLATERELAY_ENROLL_TOKEN="${token}"; platerelay-daemon ${run}`,
+        docker: `docker run -d --network host -e PLATERELAY_ENROLL_TOKEN=${token} -v platerelay-daemon:/data platerelay/daemon ${run}`,
+      },
     };
   }
 
