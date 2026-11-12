@@ -2,26 +2,22 @@
 
 [简体中文](README.zh-CN.md)
 
-A print queue and custody-handoff system for shared 3D printers. Participants submit a `.gcode.3mf`, staff review it, the system queues and dispatches it to a printer, someone clears the plate and stores the part, and the owner picks it up by scanning a code.
+A self-hosted management system for shared 3D printers. It takes print requests from many people, queues them across a pool of printers, and keeps track of every finished part until its owner collects it.
 
-It is built for places where one pool of printers serves many people: hackathons, makerspaces, schools and studios.
+It is built for places where printers are a shared resource: hackathons, makerspaces, schools and studios.
 
 ## About The Project
 
-Shared printers usually run on chat messages and sticky notes. PlateRelay replaces that with one flow, and makes the physical handoff part of it:
+Shared printers usually run on chat messages and sticky notes: who is next, which printer is free, where the finished part went. PlateRelay puts that in one system and treats the physical handoff as part of it, not an afterthought.
 
-```
-submit  ->  review  ->  queue  ->  dispatch  ->  print  ->  clear plate and store  ->  pick up by code
-```
+### Features
 
-* **Submit** a sliced `.gcode.3mf`. The file is parsed on upload; multi-plate files are split into one order per plate.
-* **Review** by staff: approve or reject.
-* **Queue** in submission order, matched against printers that are compatible with the plate (nozzle, bed type, filament).
-* **Dispatch** is confirmed by an on-site person, with a filament mapping, before anything is sent to a printer.
-* **Printer state** is whatever the printer reports. The panel does not guess.
-* **Store** is one action: the person who clears the plate photographs the part, records the shelf slot and releases the printer.
-* **Pick up** with a one-time code, scanned by staff.
-* Four preset roles (User, Staff, Builder, Coreteam) built on fine-grained permission nodes, and an append-only audit log.
+* **Order intake**: accepts sliced `.gcode.3mf` files and reads the plates, filaments and print time from them. A multi-plate file becomes one independent order per plate.
+* **Review and queue**: staff approve or reject requests; approved orders wait in a first-come, first-served queue and are only matched with printers that can actually print them.
+* **Printer management**: shows each printer's real state, as reported by the printer itself, and dispatches jobs after a person on site confirms the filament mapping.
+* **Custody handoff**: when a print finishes, the person who clears the plate records the part with a photo and a shelf slot; the owner then collects it with a one-time code that staff scan.
+* **Roles and audit**: four preset roles (User, Staff, Builder, Coreteam) built on fine-grained permissions, and an append-only audit log.
+* **Self-hosted and pluggable**: runs on your own hardware; printer brands are adapters, and object storage is any S3-compatible service or local disk.
 
 The system has three parts:
 
