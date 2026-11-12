@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { can, type Ctx, userIdOf } from "../common/ctx.js";
 import { DaemonHub } from "../daemons/hub.js";
 import { DB, type Db, type Tx } from "../db/db.js";
-import { daemons, files, orders, orderVersions, printerErrors, printerLive, printerReasons, printers, printJobs, trayGrams, users } from "../db/schema.js";
+import { daemons, files, orders, orderVersions, printerErrors, printerLive, printerReasons, printJobs, trayGrams, users } from "../db/schema.js";
 import type { PrinterRow } from "../jobs/printer-state.js";
 import type { NozzleSpec, TrayState } from "./mapping.js";
 

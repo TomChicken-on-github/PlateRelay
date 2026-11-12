@@ -1,4 +1,4 @@
-import { applyDecorators, type CanActivate, type ExecutionContext, Injectable, RequestMapping, RequestMethod, SetMetadata } from "@nestjs/common";
+import { applyDecorators, type CanActivate, type ExecutionContext, HttpCode, Inject, Injectable, RequestMapping, RequestMethod, SetMetadata } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { isPermission } from "@platerelay/shared";
 import { type OperationId, operations, validateRequestBody } from "@platerelay/shared/contract/http";
@@ -7,18 +7,20 @@ import { AuthService, SESSION_COOKIE } from "../auth/auth.service.js";
 import { APP_CONFIG, type AppConfig } from "../config/config.js";
 import type { PanelRequest } from "./ctx.js";
 import { forbidden, Problem, unauthenticated, validationFailed } from "./problem.js";
-import { Inject } from "@nestjs/common";
 
 export const OP = "platerelay:operation";
+export const API_PREFIX = "/api/v1";
+/* Sign-in, sign-out and the presence heartbeat are safe to repeat as they are. */
+export const NO_IDEMPOTENCY_KEY: ReadonlySet<string> = new Set(["login", "logout", "putPrinterPresence", "deletePrinterPresence"]);
 
 /**
  * Binds a handler to one operation of the API contract. Method, path and required permissions all
  * come from the contract, so a route cannot drift from it; the guard below also checks the JSON
  * body against the contract before the handler runs.
  */
-export function Op(id: OperationId) {
+export function Op(id: OperationId, status = 200) {
   const op = operations[id];
-  return applyDecorators(RequestMapping({ path: op.path.replace(/\{(\w+)\}/g, ":$1"), method: RequestMethod[op.method as keyof typeof RequestMethod] }), SetMetadata(OP, id));
+  return applyDecorators(RequestMapping({ path: API_PREFIX + op.path.replace(/\{(\w+)\}/g, ":$1"), method: RequestMethod[op.method as keyof typeof RequestMethod] }), HttpCode(status), SetMetadata(OP, id));
 }
 
 export const opOf = (req: PanelRequest): OperationId | undefined => (req as PanelRequest & { operationId?: OperationId }).operationId;
@@ -58,6 +60,9 @@ export class ApiGuard implements CanActivate {
       if (op.method !== "GET") await this.audit.record(req.ctx, { action: id, result: "DENIED", reason: `needs ${need.join(" or ")}` });
       throw forbidden();
     }
+
+    /* Asked for before the body is looked at, so a client that forgot the key hears about that first. */
+    if (op.method !== "GET" && !NO_IDEMPOTENCY_KEY.has(id) && !req.get("idempotency-key")) throw new Problem(428, "idempotency_key_required", "write requests need an Idempotency-Key header");
 
     if (op.hasJsonBody) {
       const r = validateRequestBody(id, req.body ?? {});

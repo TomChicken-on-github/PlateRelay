@@ -215,7 +215,7 @@ export class OrdersService {
     const ownerId = userIdOf(ctx)!;
     const plateIndexes = [...new Set(b.plates)];
     if (!plateIndexes.length) throw ruleViolation("choose at least one plate");
-    const chosen = [];
+    const chosen: Awaited<ReturnType<OrdersService["usablePlate"]>>[] = [];
     for (const i of plateIndexes) chosen.push(await this.usablePlate(ctx, b.fileId, i));
     const answers = await this.checkAnswers(b.formVersionId, b.answers);
     const queue = await this.settings.get("queue");

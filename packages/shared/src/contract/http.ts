@@ -17,7 +17,7 @@ export type ContractResult = { ok: true } | { ok: false; issues: ContractIssue[]
 const DOCUMENT_ID = "https://platerelay.dev/schema/openapi";
 
 // ajv-formats 是 CommonJS 包，默认导出在不同的模块解析方式下位置不一样。
-const addFormats = (addFormatsModule as unknown as { default?: typeof addFormatsModule }).default ?? addFormatsModule;
+const addFormats = ((addFormatsModule as unknown as { default?: unknown }).default ?? addFormatsModule) as (ajv: Ajv2020) => unknown;
 
 let ajv: Ajv2020 | undefined;
 const bodyValidators = new Map<OperationId, ValidateFunction | null>();

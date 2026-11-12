@@ -77,7 +77,7 @@ export class FilesService {
   async upload(ctx: Ctx, fileName: string, data: Uint8Array) {
     const uploadedBy = userIdOf(ctx)!;
     if (!/\.gcode\.3mf$/i.test(fileName)) throw new Problem(415, "unsupported_file", "only .gcode.3mf files are accepted");
-    let parsed;
+    let parsed: Awaited<ReturnType<ParsePool["parse"]>> | undefined;
     const findings: Finding[] = [];
     try {
       parsed = await this.pool.parse(fileName, data);

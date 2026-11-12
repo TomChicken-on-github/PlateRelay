@@ -21,7 +21,7 @@ export type ParsedDaemonMessage =
   /** 消息体不合契约：回 ack 并记日志，不处理，免得一条坏消息卡住整个队列。 */
   | { ok: false; reason: "invalid_body"; id: string; type: string; issues: ContractIssue[] };
 
-const addFormats = (addFormatsModule as unknown as { default?: typeof addFormatsModule }).default ?? addFormatsModule;
+const addFormats = ((addFormatsModule as unknown as { default?: unknown }).default ?? addFormatsModule) as (ajv: Ajv2020) => unknown;
 const schemaId = daemonProtocolSchema.$id as string;
 const titles = new Map<string, string>(daemonMessages.map((message) => [message.type, message.title]));
 

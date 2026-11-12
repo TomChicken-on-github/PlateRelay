@@ -377,8 +377,8 @@ export class FactsService {
       if (seen.kind === "job.start" && (r.status === "rejected" || r.status === "expired" || r.status === "failed") && job.phase === "TRANSFERRING") {
         /* The daemon guarantees a refused, expired or failed start is never carried out: the file did not get to print, the order goes back to its place. */
         await this.engine.end(u, daemonCtx(daemonId), job, "SEND_FAILED", { failReason: r.code ?? r.status, sendFailure: { code: r.code ?? r.status, attempts: (r.data as { attempts?: unknown } | undefined)?.attempts }, data: { message: r.message ?? null } });
-      } else if (seen.kind === "job.stop" && r.code === "not_confirmed") {
-        /* The daemon could neither stop the job at the printer nor confirm it never started. */
+      } else if (seen.kind === "job.stop" && (r.code === "not_confirmed" || r.code === "not_running")) {
+        /* The printer is not running the job and the daemon cannot confirm it never started: nothing was sent to the printer, and a person has to say what became of it. */
         await addReason(u, p.id, "JUDGE", { jobId: job.id, data: { lastKnown: job.phase, reported: "STOP_NOT_CONFIRMED" } });
         await settlePrinter(u, p.id);
       }

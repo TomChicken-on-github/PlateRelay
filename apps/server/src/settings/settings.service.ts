@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, type OnModuleInit } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { AuditService } from "../audit/audit.service.js";
 import { type Ctx, userIdOf } from "../common/ctx.js";
@@ -16,10 +16,18 @@ export interface SectionRow {
   updatedBy: string | null;
 }
 
-/** System settings, one row per section of the settings page. Reads are cached; a save drops the cache. */
+/**
+ * System settings, one row per section of the settings page. Everything is read once at start and
+ * kept in memory, so reading a setting never needs the database (and so never waits on a
+ * transaction that is open elsewhere); a save replaces the section in memory.
+ */
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnModuleInit {
   private cache = new Map<Section, SectionRow>();
+
+  async onModuleInit() {
+    for (const s of SECTIONS) await this.row(s);
+  }
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -34,10 +42,11 @@ export class SettingsService {
   async row(section: Section, tx?: Tx): Promise<SectionRow> {
     const hit = !tx && this.cache.get(section);
     if (hit) return hit;
+    const fresh = !tx;
     const [r] = await (tx ?? this.db).select().from(settings).where(eq(settings.section, section));
     const defaults = defaultsOf(section) as Record<string, unknown>;
     const row: SectionRow = { section, values: { ...defaults, ...((r?.values as Record<string, unknown>) ?? {}) }, defaults, version: r?.version ?? 0, updatedAt: r?.updatedAt ?? null, updatedBy: r?.updatedBy ?? null };
-    if (!tx) this.cache.set(section, row);
+    if (fresh) this.cache.set(section, row);
     return row;
   }
 
@@ -66,7 +75,8 @@ export class SettingsService {
       await this.audit.record(ctx, { action: "settings.update", targetType: "settings", targetId: section, before, after }, tx);
     };
     await (outer ? run(outer) : this.db.transaction(run));
-    this.cache.delete(section);
-    return this.row(section, outer);
+    const next = await this.row(section, outer ?? (this.db as Tx));
+    this.cache.set(section, next);
+    return next;
   }
 }

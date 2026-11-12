@@ -7,11 +7,9 @@ import { from, lastValueFrom, type Observable } from "rxjs";
 import { DB, type Db } from "../db/db.js";
 import { idempotencyKeys } from "../db/schema.js";
 import type { PanelRequest } from "./ctx.js";
-import { opOf } from "./op.js";
+import { NO_IDEMPOTENCY_KEY, opOf } from "./op.js";
 import { Problem, problemBody } from "./problem.js";
 
-/* Sign-in, sign-out and the presence heartbeat are safe to repeat as they are. */
-const EXEMPT = new Set(["login", "logout", "putPrinterPresence", "deletePrinterPresence"]);
 const KEEP_MS = 24 * 3600 * 1000;
 
 /** Stable JSON: object keys sorted, so the same body always hashes the same. */
@@ -41,7 +39,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
   intercept(ec: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = ec.switchToHttp().getRequest<PanelRequest>();
     const id = opOf(req);
-    if (!id || operations[id].method === "GET" || EXEMPT.has(id)) return next.handle();
+    if (!id || operations[id].method === "GET" || NO_IDEMPOTENCY_KEY.has(id)) return next.handle();
     return from(this.run(req, ec.switchToHttp().getResponse<Response>(), id, next));
   }
 

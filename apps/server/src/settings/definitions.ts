@@ -12,11 +12,11 @@ export type ParamDef =
   | { type: "string"; default: string; maxLength: number }
   | { type: "string[]"; default: readonly string[] };
 
-const bool = (d: boolean): ParamDef => ({ type: "boolean", default: d });
-const int = (d: number, min: number, max: number): ParamDef => ({ type: "integer", default: d, min, max });
-const num = (d: number, min: number, max: number): ParamDef => ({ type: "number", default: d, min, max });
-const oneOf = (d: string, ...values: string[]): ParamDef => ({ type: "enum", default: d, values });
-const str = (d: string, maxLength = 200): ParamDef => ({ type: "string", default: d, maxLength });
+const bool = (d: boolean) => ({ type: "boolean" as const, default: d });
+const int = (d: number, min: number, max: number) => ({ type: "integer" as const, default: d, min, max });
+const num = (d: number, min: number, max: number) => ({ type: "number" as const, default: d, min, max });
+const oneOf = (d: string, ...values: string[]) => ({ type: "enum" as const, default: d, values });
+const str = (d: string, maxLength = 200) => ({ type: "string" as const, default: d, maxLength });
 
 export const SETTINGS = {
   general: {
@@ -73,7 +73,7 @@ export const SETTINGS = {
     /** Colour difference (ΔE2000) up to which two colours count as the same. */
     sameColourDeltaE: num(5, 0, 20),
     similarColourDeltaE: num(15, 0, 60),
-    mismatchReasons: { type: "string[]", default: ["该颜色已用完", "相近色可接受", "申请者同意"] } as ParamDef,
+    mismatchReasons: { type: "string[]" as const, default: ["该颜色已用完", "相近色可接受", "申请者同意"] },
     /** Grams a tray is reset to when a new spool is noticed. */
     spoolGrams: int(1000, 100, 5000),
     /** Remind to refill when a tray will be below this after the current job; 0 = never. */
