@@ -83,13 +83,12 @@ export class FactsService {
         .values({ printerId: p.id, ...row })
         .onConflictDoUpdate({ target: printerLive.printerId, set: row });
 
-      const model = s as PrinterSnapshot & { modelId?: string; modelName?: string };
       await u.tx
         .update(printers)
         .set({
           bedType: s.bedType ?? null,
-          modelId: model.modelId ?? p.modelId,
-          modelName: model.modelName ?? p.modelName,
+          modelId: s.modelId ?? p.modelId,
+          modelName: s.modelName ?? p.modelName,
           capabilities: { ...(p.capabilities as object), ...(s.nozzles ? { nozzles: s.nozzles } : {}), ...(s.camera ? { camera: s.camera } : {}) },
         })
         .where(eq(printers.id, p.id));
@@ -197,7 +196,6 @@ export class FactsService {
        * job starting. Endings are the exception.
        */
       if (live?.reconciledSeq != null && live.bootId === e.bootId && e.seq < live.reconciledSeq && !END_KINDS.has(e.kind)) return;
-      const ctx = printerCtx(p.id);
 
       switch (e.kind) {
         case "connection.down":
@@ -264,7 +262,6 @@ export class FactsService {
           await this.jobEvent(u, p, e);
       }
       await settlePrinter(u, p.id);
-      void ctx;
     });
   }
 

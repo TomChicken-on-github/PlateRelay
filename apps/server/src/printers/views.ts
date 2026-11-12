@@ -111,7 +111,7 @@ export class PrinterViews {
             ...progress,
           }
         : p.externalRunning
-          ? { jobId: null, orderId: null, orderNumber: null, owner: null, ...(seeFiles && reported?.name ? { fileName: reported.name } : {}), external: true, phase: null, pausedFrom: null, substage: (!offline && s?.substage) || null, ...progress }
+          ? { jobId: null, orderId: null, orderNumber: null, owner: null, ...(can(ctx, "order:view:any") && reported?.name ? { fileName: reported.name } : {}), external: true, phase: null, pausedFrom: null, substage: (!offline && s?.substage) || null, ...progress }
           : null;
       return {
         id: p.id,

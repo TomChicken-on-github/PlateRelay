@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Ctx } from "../common/ctx.js";
 import type { Uow } from "../core/uow.js";
-import { orders, orderVersions, printerReasons, printers, printJobs, trayGrams } from "../db/schema.js";
+import { daemonCommands, orders, orderVersions, printerReasons, printers, printJobs, trayGrams } from "../db/schema.js";
 import { record, type RecordKind } from "../orders/records.js";
 import { SettingsService } from "../settings/settings.service.js";
 import { addReason, removeReason, settlePrinter } from "./printer-state.js";
@@ -183,6 +183,12 @@ export class JobEngine {
     if (to.order === "QUEUED") u.queue = true;
 
     await this.deductTrays(u, next);
+
+    /* A start command still on its way is void now: it must not be handed to the daemon again after a reconnect. */
+    await u.tx
+      .update(daemonCommands)
+      .set({ status: "EXPIRED", finishedAt: at })
+      .where(and(eq(daemonCommands.jobId, job.id), eq(daemonCommands.kind, "job.start"), inArray(daemonCommands.status, ["QUEUED", "SENT"])));
 
     /* Reasons this job raised go with it; the printer keeps any others (unreachable, maintenance…). */
     await u.tx.delete(printerReasons).where(and(eq(printerReasons.printerId, job.printerId), eq(printerReasons.jobId, job.id), inArray(printerReasons.reason, ["ERROR", "JUDGE"])));

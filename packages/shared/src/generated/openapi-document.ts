@@ -7639,6 +7639,47 @@ export const openapiDocument: Record<string, unknown> = {
                   "integer",
                   "null"
                 ]
+              },
+              "jobId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "本系统派的任务的 ID，停止时作为 expectedJobId 带回；外部任务为 null"
+              },
+              "phase": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "TRANSFERRING",
+                  "PREPARING",
+                  "PRINTING",
+                  "PAUSED",
+                  null
+                ],
+                "description": "任务阶段，按打印机上报推进；外部任务为 null"
+              },
+              "pausedFrom": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "PREPARING",
+                  "PRINTING",
+                  null
+                ],
+                "description": "暂停前所在的阶段，只在 phase 为 PAUSED 时有值"
+              },
+              "substage": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "打印机上报的准备子阶段（如加热、调平），原样透传"
               }
             },
             "required": [

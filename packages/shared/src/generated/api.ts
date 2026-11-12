@@ -2145,6 +2145,23 @@ export interface components {
                 remainingSeconds: number | null;
                 layer?: number | null;
                 totalLayers?: number | null;
+                /**
+                 * Format: uuid
+                 * @description 本系统派的任务的 ID，停止时作为 expectedJobId 带回；外部任务为 null
+                 */
+                jobId?: string | null;
+                /**
+                 * @description 任务阶段，按打印机上报推进；外部任务为 null
+                 * @enum {string|null}
+                 */
+                phase?: "TRANSFERRING" | "PREPARING" | "PRINTING" | "PAUSED" | null;
+                /**
+                 * @description 暂停前所在的阶段，只在 phase 为 PAUSED 时有值
+                 * @enum {string|null}
+                 */
+                pausedFrom?: "PREPARING" | "PRINTING" | null;
+                /** @description 打印机上报的准备子阶段（如加热、调平），原样透传 */
+                substage?: string | null;
             } | null;
             temps?: {
                 [key: string]: {

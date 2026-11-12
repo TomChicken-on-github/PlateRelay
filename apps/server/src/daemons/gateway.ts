@@ -171,7 +171,7 @@ export class DaemonGateway implements OnApplicationBootstrap, OnModuleDestroy {
       config: { snapshot: { watchedSeconds: camera.watchedSnapshotSeconds, unwatchedSeconds: camera.unwatchedSnapshotMinutes * 60, staggerSeconds: 1, uploadKbps: Math.round(camera.snapshotUploadMbps * 1000) }, transferTimeoutSeconds: printing.transferTimeoutSeconds, downloadConcurrency: 2, discoveryEnabled: true },
     });
     this.log.log(`daemon ${d.name} (${d.id}) connected`);
-    await this.deliver(d.id);
+    await this.deliver(d.id, true);
     return conn;
   }
 
@@ -263,17 +263,17 @@ export class DaemonGateway implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * Sends a daemon every command it has not answered, oldest first. After a reconnect that includes
-   * ones already sent: the same command id again is a redelivery, which the daemon carries out at
-   * most once.
+   * Sends a daemon its waiting commands, oldest first. After a reconnect that includes the ones
+   * sent before and never answered: the same command id again is a redelivery, which the daemon
+   * carries out at most once.
    */
-  private async deliver(daemonId: string) {
+  private async deliver(daemonId: string, redeliver = false) {
     const link = this.hub.get(daemonId);
     if (!link) return;
     const rows = await this.db
       .select()
       .from(daemonCommands)
-      .where(and(eq(daemonCommands.daemonId, daemonId), inArray(daemonCommands.status, ["QUEUED", "SENT"])))
+      .where(and(eq(daemonCommands.daemonId, daemonId), inArray(daemonCommands.status, redeliver ? ["QUEUED", "SENT"] : ["QUEUED"])))
       .orderBy(daemonCommands.id);
     for (const c of rows) {
       if (!link.send("command", { commandId: c.id, printerId: c.printerId, kind: c.kind, expiresAt: c.expiresAt.toISOString(), params: c.payload }, c.id)) return;
