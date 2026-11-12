@@ -150,6 +150,7 @@ class DeviceSnapshot:
     camera_snapshot: bool = False
     device_boot: str | None = None
     model_id: str | None = None
+    model_name: str | None = None
 
 
 OFFLINE_SNAPSHOT = DeviceSnapshot(connected=False, state=NormalizedState.OFFLINE)

@@ -18,6 +18,7 @@ async def test_snapshot_reports_the_printer_in_standard_terms(panel, sim, harnes
     printer_id, snapshot = await connect(panel, sim, harness)
     assert snapshot["state"] == "IDLE"
     assert snapshot["runSeq"] == 0
+    assert (snapshot["modelId"], snapshot["modelName"]) == ("N6", "X2D (simulated)")
     assert [nozzle["extruder"] for nozzle in snapshot["nozzles"]] == [1, 2]
     loaded = [tray for tray in snapshot["trays"] if "material" in tray]
     assert loaded[0] == {

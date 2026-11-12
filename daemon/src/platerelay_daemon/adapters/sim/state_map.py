@@ -168,4 +168,5 @@ def map_snapshot(status: dict[str, Any], info: dict[str, Any]) -> DeviceSnapshot
         camera_snapshot=bool(features.get("camera")),
         device_boot=str(status["boot_time"]) if "boot_time" in status else None,
         model_id=info.get("model_id"),
+        model_name=info.get("model_name"),
     )

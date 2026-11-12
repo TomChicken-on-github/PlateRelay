@@ -476,6 +476,11 @@ class PrinterWorker:
         body["camera"] = {"stream": snap.camera_stream, "snapshot": snap.camera_snapshot}
         if snap.device_boot is not None:
             body["deviceBoot"] = snap.device_boot
+        # 面板按机型判断打印机能不能开放、提交的切片对不对得上
+        if snap.model_id is not None:
+            body["modelId"] = snap.model_id
+        if snap.model_name is not None:
+            body["modelName"] = snap.model_name
         return body
 
     # 开打流程的重启收尾
