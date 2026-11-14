@@ -12,7 +12,7 @@
 | [核心交互时序图](docs/design/03-sequences.md) | 设计层文档第 3 份：12 个关键流程的时序图和失败分支，只引用上层编号，不新增规则。 |
 | [项目简报](docs/project-brief.md) | 定位、已定决策、第一阶段范围、状态机、开放问题。**§0 与后文冲突时以 §0 为准。** |
 | [Driver 接口草稿](docs/printer-driver-interface-draft.md) | 设备能力、标准状态、原始状态映射、报错处理、摄像头、存储、实测清单。 |
-| [MD3 概况页规格](docs/ui/figma-md3-overview-spec.md) | 从 Figma 读出的概况页布局、颜色、字体、尺寸。[原型](docs/ui/platerelay-md3-prototype.html)是对照它做的静态页面，只作视觉参考。 |
+| [MD3 概况页规格](docs/ui/figma-md3-overview-spec.md) | 从 Figma 读出的概况页布局、颜色、字体、尺寸。[原型](docs/ui/platerelay-md3-prototype.html)是对照它做的静态页面，只作视觉参考（已不是约束，见 Q436）。 |
 | [打印机调试 MCP + TUI](tools/printer_mcp/README.md) | 本机 Claude Code 查打印机状态、录报文变化、列 FTPS 目录；访问码存 Windows 凭据管理器。调试真机优先用它，不要再临时写脚本。`control` 工具只能发白名单命令（暂停/继续/停止/腔室灯），**每次都要用户本人在确认框里二次确认**，不得代为确认或绕过。 |
 | [X2D 实测记录](docs/hardware/x2d-power-on-capture.md) | 上电后只有 SSDP 和 ARP、IP 会漂、MQTT 约 1 秒一条整包、开机标记 `ams.version`、刷新访问码立刻踢线、U 盘字段、摄像头流、一次完整打印的状态序列、打印机时钟不准。 |
 | [只读探测脚本](tools/bambu_probe.py) | 对拓竹打印机做只读探测：MQTT 收状态、发一次 `pushall`、FTPS 只列目录。 |
@@ -24,6 +24,6 @@
 - **不得向真实打印机发起打印**，也不得发送加热、移动、进退料、暂停、继续、停止、修改设置等控制命令，除非用户在当次任务里明确同意。只读请求（如 MQTT `pushall`）除外。
 - 不得通过 FTPS 上传、删除或覆盖打印机存储里的文件，除非用户明确同意。
 - 打印机访问码、密码、令牌等凭据不得写进代码、配置文件、日志或命令行参数。
-- 卡片布局严格按 Figma 设计稿来，不自行重排。
+- 设计不依赖 Figma：以原型和代码为准，实现后再同步到 Figma（Q436）。旧的 Figma 卡片布局只作参考，不再是约束。
 - 开发以设计文档为准，但代码、测试、注释、提交信息、PR 标题和描述、接口说明（openapi 等会生成代码的契约）里都不出现文档编号（如 F-PRT-12、R-xxx、CFG-xxx、Q 编号）。需要写依据时直接写规则内容，比如「按序列号识别打印机，IP 变化时自动更新」。设计文档不一定公开，代码要能脱离文档单独读懂。编号只在设计文档之间互相引用。
 - 技术栈以简报 §5.6 为准：面板 NestJS + React + PostgreSQL，daemon 用 Python，对象存储走 S3 兼容接口，协议 GPLv3。
