@@ -1,53 +1,51 @@
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import type { Res } from "./api";
-import { createStore } from "./store";
+import { API_PREFIX } from "@platerelay/shared/api";
 
 /*
- * Server data a page shows, kept in a shared store so pages that show the same rows stay in sync. It
- * loads when a page using it mounts, again when the tab comes back into view, and after the page's own
- * actions call refresh(). There is no push from the server yet (SSE is not built), so pages that
- * change without anyone touching them can ask for a poll.
+ * Server push (SSE). The server sends whole resources after each change, so pages just refetch what
+ * they show. `resync` (sent after a reconnect, missed events are not replayed) refetches everything.
  */
-export type Live<T> = { data: T | null; error: string | null; loading: boolean };
+const EVENTS: Record<string, (qc: QueryClient, data: unknown) => void> = {
+  resync: (qc) => void qc.invalidateQueries(),
+  "order.updated": (qc, d) => {
+    void qc.invalidateQueries({ queryKey: ["orders"] });
+    const id = (d as { id?: string })?.id;
+    if (id) void qc.invalidateQueries({ queryKey: ["order", id] });
+    void qc.invalidateQueries({ queryKey: ["overview"] });
+  },
+  "printer.updated": (qc) => {
+    void qc.invalidateQueries({ queryKey: ["printers"] });
+    void qc.invalidateQueries({ queryKey: ["overview"] });
+  },
+  "queue.changed": (qc) => {
+    void qc.invalidateQueries({ queryKey: ["overview"] });
+    void qc.invalidateQueries({ queryKey: ["orders"] });
+  },
+};
 
-export function resource<T>(load: () => Promise<Res<T>>) {
-  const store = createStore<Live<T>>({ data: null, error: null, loading: false });
-  let inflight: Promise<void> | null = null;
-
-  const refresh = () =>
-    (inflight ??= (async () => {
-      store.set((s) => ({ ...s, loading: true }));
-      const r = await load();
-      store.set((s) => (r.ok ? { data: r.data, error: null, loading: false } : { data: s.data, error: r.error.message, loading: false }));
-    })().finally(() => (inflight = null)));
-
-  /** Loads on mount and when the tab is shown again; `pollMs` also reloads on a timer while visible. */
-  const use = (pollMs?: number) => {
-    useEffect(() => {
-      void refresh();
-      const onShow = () => document.visibilityState === "visible" && void refresh();
-      document.addEventListener("visibilitychange", onShow);
-      const id = pollMs ? window.setInterval(() => document.visibilityState === "visible" && void refresh(), pollMs) : 0;
-      return () => {
-        document.removeEventListener("visibilitychange", onShow);
-        window.clearInterval(id);
+/** Keeps one event stream open while signed in. */
+export function useLiveUpdates(enabled: boolean) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!enabled) return;
+    const es = new EventSource(`${API_PREFIX}/stream`, { withCredentials: true });
+    const off = Object.entries(EVENTS).map(([name, f]) => {
+      const h = (e: MessageEvent) => {
+        let data: unknown = null;
+        try {
+          data = JSON.parse(e.data);
+        } catch {
+          /* not JSON */
+        }
+        f(qc, data);
       };
-    }, [pollMs]);
-    return store.use();
-  };
-
-  /** Local change ahead of the server's answer (dragging the queue). */
-  const patch = (f: (d: T) => T) => store.set((s) => (s.data === null ? s : { ...s, data: f(s.data) }));
-
-  return { use, refresh, patch, get: () => store.get().data };
-}
-
-/** Signed preview links change on every response; keep the first one while it is fresh so images do not reload. */
-const links = new Map<string, { url: string; at: number }>();
-export function stableLink(key: string, url: string | null | undefined, ttlMs = 8 * 60e3): string | null {
-  if (!url) return null;
-  const hit = links.get(key);
-  if (hit && Date.now() - hit.at < ttlMs) return hit.url;
-  links.set(key, { url, at: Date.now() });
-  return url;
+      es.addEventListener(name, h);
+      return () => es.removeEventListener(name, h);
+    });
+    return () => {
+      off.forEach((f) => f());
+      es.close();
+    };
+  }, [enabled, qc]);
 }

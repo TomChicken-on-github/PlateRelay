@@ -1,42 +1,49 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
-import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
-import { AppShell } from "./components/AppShell";
-import { RequireAuth } from "./components/RequireAuth";
-import { ToastProvider } from "./components/Toast";
-import { LoginPage } from "./pages/login/LoginPage";
-import { OrderAdminPage } from "./pages/admin/OrderAdminPage";
-import { MyOrdersPage } from "./pages/orders/MyOrdersPage";
-import { OverviewPage } from "./pages/overview/OverviewPage";
-import { PrinterDetailPage } from "./pages/detail/PrinterDetailPage";
-import { PrintersPage } from "./pages/printers/PrintersPage";
-import { ScanPage } from "./pages/scan/ScanPage";
-import { SettingsPage } from "./pages/settings/SettingsPage";
-import { SubmitPage } from "./pages/submit/SubmitPage";
-import { TodoPage } from "./pages/todo/TodoPage";
+import type { ReactNode } from "react";
+import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
+import { AppShell } from "./components/app-shell";
+import { setSignedOutHandler } from "./lib/api";
+import { useLiveUpdates } from "./lib/live";
+import { signOut, useSession } from "./lib/session";
+import { LoginPage } from "./pages/auth/login-page";
+import { RegisterPage } from "./pages/auth/register-page";
+import { PlaceholderPage } from "./pages/placeholder/placeholder-page";
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
+setSignedOutHandler(() => signOut(queryClient));
+
+/** Pages behind sign-in; while the session loads nothing is drawn. */
+function SignedIn({ children }: { children: ReactNode }) {
+  const s = useSession();
+  const { pathname } = useLocation();
+  useLiveUpdates(!!s.data);
+  if (s.isPending) return null;
+  if (!s.data) return <Navigate to="/login" replace state={{ from: pathname }} />;
+  return children;
+}
+
+/** Sign-in pages send a signed-in visitor home. */
+function SignedOut({ children }: { children: ReactNode }) {
+  const s = useSession();
+  if (s.isPending) return null;
+  return s.data ? <Navigate to="/" replace /> : children;
+}
 
 const router = createBrowserRouter([
-  { path: "/login", element: <LoginPage key="login" mode="login" /> },
-  { path: "/register", element: <LoginPage key="register" mode="register" /> },
+  { path: "/login", element: <SignedOut><LoginPage /></SignedOut> },
+  { path: "/register", element: <SignedOut><RegisterPage /></SignedOut> },
   {
     element: (
-      <RequireAuth>
+      <SignedIn>
         <AppShell />
-      </RequireAuth>
+      </SignedIn>
     ),
     children: [
-      { path: "/", element: <OverviewPage /> },
-      { path: "/printers/:id", element: <PrinterDetailPage /> },
-      { path: "/submit", element: <SubmitPage /> },
-      { path: "/orders", element: <MyOrdersPage /> },
-      { path: "/todo", element: <TodoPage /> },
-      { path: "/scan", element: <ScanPage /> },
-      { path: "/review", element: <OrderAdminPage mode="review" /> },
-      { path: "/review/:id", element: <OrderAdminPage mode="review" /> },
-      { path: "/manage/orders", element: <OrderAdminPage mode="manage" /> },
-      { path: "/manage/orders/:id", element: <OrderAdminPage mode="manage" /> },
-      { path: "/manage/printers", element: <PrintersPage /> },
-      { path: "/settings", element: <SettingsPage /> },
-      { path: "/settings/:tab", element: <SettingsPage /> },
+      { path: "/", element: <PlaceholderPage title="概况" /> },
+      { path: "/submit", element: <PlaceholderPage title="提交" /> },
+      { path: "/orders", element: <PlaceholderPage title="我的订单" /> },
+      { path: "/me", element: <PlaceholderPage title="我的" /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
@@ -44,11 +51,11 @@ const router = createBrowserRouter([
 
 export function App() {
   return (
-    /* reducedMotion="user" turns transform animations off when the OS asks for reduced motion */
-    <MotionConfig reducedMotion="user">
-      <ToastProvider>
+    <QueryClientProvider client={queryClient}>
+      {/* reducedMotion="user": no transform animations when the system asks for reduced motion */}
+      <MotionConfig reducedMotion="user">
         <RouterProvider router={router} />
-      </ToastProvider>
-    </MotionConfig>
+      </MotionConfig>
+    </QueryClientProvider>
   );
 }

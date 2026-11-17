@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>PlateRelay</title>
+    <script>
+      /* Follow the system light/dark setting before the first paint. */
+      (function () {
+        var m = window.matchMedia("(prefers-color-scheme: dark)");
+        var set = function () { document.documentElement.classList.toggle("dark", m.matches); };
+        set();
+        m.addEventListener("change", set);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
