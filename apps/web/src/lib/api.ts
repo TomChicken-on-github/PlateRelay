@@ -59,10 +59,43 @@ const MESSAGES: Record<string, string> = {
   username_taken: "用户名已被使用",
   forbidden: "没有权限",
   validation_failed: "填写的内容有误",
+  unsupported_file: "只支持 .gcode.3mf 文件",
+  payload_too_large: "文件太大",
+  parse_busy: "正在解析的文件太多，请稍后再试",
+  captcha_required: "未提交的文件太多，请先提交或稍后再试",
+  version_conflict: "申请表刚刚更新，请检查后再提交",
+  file_expired: "文件已过期，请重新上传",
 };
 
 /** Chinese text for an error, by its code. */
 export function errorText(e: unknown): string {
   if (e instanceof ApiError) return MESSAGES[e.code] ?? `出错了（${e.code}）`;
   return "出错了";
+}
+
+/**
+ * Uploads a file with progress (fetch cannot report upload progress, so this uses XHR). `onSent` fires once
+ * every byte is out and the server is reading the file. Rejects with an ApiError; aborting rejects with code "aborted".
+ */
+export function uploadFile(file: File, { onProgress, onSent, signal }: { onProgress?: (fraction: number) => void; onSent?: () => void; signal?: AbortSignal }): Promise<Schemas["FileCheck"]> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/files");
+    xhr.setRequestHeader("Idempotency-Key", crypto.randomUUID());
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    xhr.upload.onload = () => onSent?.();
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.response);
+      if (xhr.status === 401) onSignedOut();
+      const p = xhr.response as Problem | null;
+      reject(new ApiError(typeof p?.code === "string" ? p.code : "http_" + xhr.status, xhr.status, p ?? undefined));
+    };
+    xhr.onerror = () => reject(new ApiError("network", 0));
+    xhr.onabort = () => reject(new ApiError("aborted", 0));
+    signal?.addEventListener("abort", () => xhr.abort());
+    const body = new FormData();
+    body.append("file", file);
+    xhr.send(body);
+  });
 }

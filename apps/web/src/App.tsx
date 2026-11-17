@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
 import { OverviewPage } from "./pages/overview/overview-page";
 import { PlaceholderPage } from "./pages/placeholder/placeholder-page";
+import { SubmitPage } from "./pages/submit/submit-page";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
 setSignedOutHandler(() => signOut(queryClient));
@@ -42,7 +43,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: "/", element: <OverviewPage /> },
-      { path: "/submit", element: <PlaceholderPage title="提交" /> },
+      { path: "/submit", element: <SubmitPage /> },
       { path: "/orders", element: <PlaceholderPage title="我的订单" /> },
       { path: "/me", element: <PlaceholderPage title="我的" /> },
       { path: "*", element: <Navigate to="/" replace /> },

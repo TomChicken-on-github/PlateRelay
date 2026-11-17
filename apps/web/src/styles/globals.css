@@ -187,3 +187,20 @@
     animation: none;
   }
 }
+
+/* indeterminate progress bar: a third-width bar sliding across */
+@keyframes indeterminate {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 300% 0;
+  }
+}
+@utility animate-indeterminate {
+  animation: indeterminate 1.3s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    translate: 100% 0;
+  }
+}

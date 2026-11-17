@@ -31,3 +31,9 @@ export function waitRange(minSeconds: number, maxSeconds: number): string {
   const h = (s: number) => Math.round((s / 3600) * 2) / 2;
   return `${h(minSeconds)}–${Math.max(h(minSeconds), h(maxSeconds))} 小时`;
 }
+
+/** "18.4 MB", "820 KB". */
+export function bytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
