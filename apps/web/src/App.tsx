@@ -8,6 +8,7 @@ import { useLiveUpdates } from "./lib/live";
 import { signOut, useSession } from "./lib/session";
 import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
+import { OverviewPage } from "./pages/overview/overview-page";
 import { PlaceholderPage } from "./pages/placeholder/placeholder-page";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
@@ -40,7 +41,7 @@ const router = createBrowserRouter([
       </SignedIn>
     ),
     children: [
-      { path: "/", element: <PlaceholderPage title="概况" /> },
+      { path: "/", element: <OverviewPage /> },
       { path: "/submit", element: <PlaceholderPage title="提交" /> },
       { path: "/orders", element: <PlaceholderPage title="我的订单" /> },
       { path: "/me", element: <PlaceholderPage title="我的" /> },
