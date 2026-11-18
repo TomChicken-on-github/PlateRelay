@@ -16,6 +16,7 @@ import { takePendingFile } from "@/lib/pending-file";
 import { cn } from "@/lib/utils";
 import { FileCard, type Upload } from "./file-card";
 import { PlateCard } from "./plate-card";
+import { NoticeDialog } from "./notice";
 import { ResourcesRow } from "./resources-row";
 
 type FileCheck = Schemas["FileCheck"];
@@ -52,6 +53,7 @@ export function SubmitPage() {
   const [colourPref, setColourPref] = useState<ColourPref>("SIMILAR");
   const [bedType, setBedType] = useState("");
   const [agreed, setAgreed] = useState(false);
+  const [notice, setNotice] = useState(false);
 
   async function start(file: File) {
     abort.current?.abort();
@@ -166,9 +168,16 @@ export function SubmitPage() {
   const agreeAndSubmit = (
     <>
       <label className="flex items-center gap-2.5 text-sm leading-5">
-        <Checkbox checked={agreed} onCheckedChange={(v) => setAgreed(v === true)} />
+        {/* agreeing needs the notice read to the end, so ticking the box opens it */}
+        <Checkbox checked={agreed} onCheckedChange={(v) => (v === true ? setNotice(true) : setAgreed(false))} />
         <span>
-          我已阅读并同意提交须知<span className="text-alert">*</span>
+          我已阅读并同意
+          <button type="button" onClick={(e) => (e.preventDefault(), setNotice(true))} className="font-semibold text-foreground underline decoration-input underline-offset-[3px]">
+            提交须知
+          </button>
+          <span aria-hidden="true" className="ml-0.5 text-alert">
+            *
+          </span>
         </span>
       </label>
       {submit.error && <Alert>{errorText(submit.error)}</Alert>}
@@ -224,6 +233,7 @@ export function SubmitPage() {
 
       {/* phone: the agreement and the button stay above the tab bar */}
       <div className="fixed inset-x-0 bottom-[calc(72px+env(safe-area-inset-bottom))] z-30 flex flex-col gap-2.5 bg-card px-4 pt-3 pb-3 shadow-[0_-1px_0_var(--border)] lg:hidden">{agreeAndSubmit}</div>
+      <NoticeDialog open={notice} onOpenChange={setNotice} onAgree={() => setAgreed(true)} />
     </>
   );
 }
