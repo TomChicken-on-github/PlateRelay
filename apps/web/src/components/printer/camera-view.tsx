@@ -1,5 +1,6 @@
 import { CameraOff } from "lucide-react";
 import { useId, useState } from "react";
+import { clockSeconds } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /* Open-frame models; everything else is drawn as a closed case. */
@@ -13,12 +14,18 @@ export function CameraView({ printerId, name, modelName, snapshotAt, className }
   const [broken, setBroken] = useState<string | null>(null);
   if (snapshotAt && broken !== snapshotAt)
     return (
-      <img
-        src={`/api/v1/printers/${printerId}/camera/snapshot?at=${encodeURIComponent(snapshotAt)}`}
-        alt={`${name} 摄像头画面`}
-        onError={() => setBroken(snapshotAt)}
-        className={cn("aspect-[4/3] w-full rounded-xl bg-neutral-900 object-cover", className)}
-      />
+      <div className={cn("relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-neutral-900", className)}>
+        <img
+          src={`/api/v1/printers/${printerId}/camera/snapshot?at=${encodeURIComponent(snapshotAt)}`}
+          alt={`${name} 摄像头画面`}
+          onError={() => setBroken(snapshotAt)}
+          className="size-full object-cover"
+        />
+        {/* when the picture was taken (the snapshot's own time, not now): stills can be minutes old */}
+        <time dateTime={snapshotAt} className="absolute bottom-1.5 left-1.5 rounded-full bg-black/55 px-1.5 font-mono text-[11px] leading-[18px] text-white">
+          {clockSeconds(snapshotAt)}
+        </time>
+      </div>
     );
   const open = OPEN_FRAME.test(modelName ?? "");
   return (

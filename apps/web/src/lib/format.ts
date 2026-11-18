@@ -6,6 +6,11 @@ export function duration(seconds: number): string {
 }
 
 /** "15:42" in the browser's time zone. */
+/** 14:03:27 */
+export function clockSeconds(d: Date | string | number): string {
+  return new Date(d).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 export function clock(d: Date | string | number): string {
   return new Date(d).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
