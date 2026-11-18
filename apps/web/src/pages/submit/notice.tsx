@@ -88,7 +88,7 @@ export function NoticeDialog({ open, onOpenChange, onAgree }: { open: boolean; o
   const agree = () => (onAgree(), onOpenChange(false));
   const agreeButton = (lg: boolean) => (
     <Button size={lg ? "default" : "lg"} disabled={!box.read} onClick={agree} className="disabled:bg-border disabled:text-muted-foreground disabled:opacity-100">
-      {box.read ? "我已阅读并同意" : "请阅读全部内容后同意"}
+      {box.read ? "我已阅读并同意" : "请先完整阅读"}
     </Button>
   );
   return (
