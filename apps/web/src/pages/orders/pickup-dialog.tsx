@@ -110,14 +110,12 @@ function CopyCode({ code, expired }: { code?: string; expired: boolean }) {
       type="button"
       aria-label={`复制取件码 ${code}`}
       onClick={copy}
-      className="inline-flex h-[52px] items-center gap-3 rounded-[14px] bg-muted pr-2 pl-[18px] text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="inline-flex h-[52px] items-center gap-3 rounded-[14px] bg-muted pr-4 pl-[18px] text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       <span ref={text} className={cn(mono, "select-text")}>
         {code}
       </span>
-      <span aria-hidden="true" className="grid size-9 place-items-center rounded-[10px] border border-border bg-card">
-        <Icon className={cn("size-[18px]", copied ? "text-ok" : "text-muted-foreground")} />
-      </span>
+      <Icon aria-hidden="true" className={cn("size-5", copied ? "text-ok" : "text-muted-foreground")} />
       <span className="sr-only" aria-live="polite">
         {copied ? "已复制" : ""}
       </span>
