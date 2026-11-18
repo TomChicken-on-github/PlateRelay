@@ -10,22 +10,34 @@ import { duration, waitRange } from "@/lib/format";
 import { ORDER_STATUS, orderName, orderNo } from "@/lib/order-status";
 import { setPendingFile } from "@/lib/pending-file";
 import { type OrderSummary, useMyOrders, useOrder, useOverview } from "@/lib/queries";
-import { can, useMe } from "@/lib/session";
+import { can, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
 export function OverviewPage() {
-  const me = useMe();
+  /* null for a visitor who is not signed in (the overview is public) */
+  const me = useSession().data ?? null;
   const overview = useOverview();
   const printers = overview.data?.printers ?? [];
   const mayOrder = can(me, "order:submit");
 
   return (
     <>
-      <PageHeader title="概况" actions={<NotificationBell />} />
+      <PageHeader
+        title="概况"
+        actions={
+          me ? (
+            <NotificationBell />
+          ) : (
+            <Button asChild className="lg:hidden">
+              <Link to="/login">登录</Link>
+            </Button>
+          )
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3 lg:gap-4">
+      <div className={cn("grid gap-2.5 lg:gap-4", me ? "grid-cols-2 lg:grid-cols-3" : "grid-cols-1")}>
         {mayOrder && <MyOrdersCard />}
-        <SiteCard idle={printers.filter((p) => p.state === "AVAILABLE").length} waiting={overview.data?.queue.waiting} />
+        <SiteCard idle={printers.filter((p) => p.state === "AVAILABLE").length} waiting={overview.data?.queue.waiting} wide={!me} />
         {mayOrder && <DropZone />}
       </div>
 
@@ -101,12 +113,13 @@ function orderLine(o: OrderSummary, slot?: string): string {
   return "";
 }
 
-function SiteCard({ idle, waiting }: { idle: number; waiting?: number }) {
+/** `wide`: the card has the row to itself (public overview), so its lines sit side by side. */
+function SiteCard({ idle, waiting, wide }: { idle: number; waiting?: number; wide?: boolean }) {
   const row = "flex items-center gap-2 text-sm leading-5 font-medium whitespace-nowrap text-subtle-foreground [&>svg]:size-[18px] [&>svg]:text-muted-foreground";
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-2xl bg-card pt-3.5 pr-3.5 pb-4 pl-4">
       <span className="text-[15px] leading-[22px] font-semibold">现场</span>
-      <span className="flex flex-col gap-1.5">
+      <span className={cn("flex gap-1.5", wide ? "flex-wrap gap-x-8" : "flex-col")}>
         <span className={row}>
           <PrinterGlyph />
           {idle} 台空闲

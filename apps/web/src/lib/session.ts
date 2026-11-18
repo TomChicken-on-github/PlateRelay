@@ -54,3 +54,8 @@ export function signOut(qc: QueryClient) {
 export function useAuthMethods() {
   return useQuery({ queryKey: ["auth-methods"], queryFn: () => unwrap(client.GET("/auth/methods")), staleTime: 60e3 });
 }
+
+/** Organisation-wide settings anyone may read (whether the overview is public, and so on). */
+export function usePublicSettings() {
+  return useQuery({ queryKey: ["public-settings"], queryFn: () => unwrap(client.GET("/settings/public")), staleTime: 60e3 });
+}

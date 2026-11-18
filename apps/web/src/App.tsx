@@ -2,10 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
 import type { ReactNode } from "react";
 import { createBrowserRouter, Navigate, RouterProvider, useLocation } from "react-router";
-import { AppShell } from "./components/app-shell";
+import { AppShell, GuestShell } from "./components/app-shell";
 import { setSignedOutHandler } from "./lib/api";
 import { useLiveUpdates } from "./lib/live";
-import { signOut, useSession } from "./lib/session";
+import { signOut, usePublicSettings, useSession } from "./lib/session";
 import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
 import { OverviewPage } from "./pages/overview/overview-page";
@@ -19,13 +19,22 @@ import { SubmitPage } from "./pages/submit/submit-page";
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
 setSignedOutHandler(() => signOut(queryClient));
 
-/** Pages behind sign-in; while the session loads nothing is drawn. */
+/**
+ * Pages behind sign-in; while the session loads nothing is drawn. A visitor who is not signed in may still
+ * see the overview while the organisation keeps it public.
+ */
 function SignedIn({ children }: { children: ReactNode }) {
   const s = useSession();
+  const pub = usePublicSettings();
   const { pathname } = useLocation();
-  useLiveUpdates(!!s.data);
+  const guest = !s.data && pathname === "/" && !!pub.data?.overviewPublic;
+  useLiveUpdates(!!s.data || guest);
   if (s.isPending) return null;
-  if (!s.data) return <Navigate to="/login" replace state={{ from: pathname }} />;
+  if (!s.data) {
+    if (pathname === "/" && pub.isPending) return null;
+    if (guest) return <GuestShell />;
+    return <Navigate to="/login" replace state={{ from: pathname }} />;
+  }
   return children;
 }
 

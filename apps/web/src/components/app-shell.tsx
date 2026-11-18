@@ -1,5 +1,7 @@
 import { LayoutGrid, Package, Upload, User } from "lucide-react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
+import { OverviewPage } from "@/pages/overview/overview-page";
+import { Button } from "./ui/button";
 import { can, useMe } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { Logo } from "./logo";
@@ -82,6 +84,32 @@ export function AppShell() {
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+/** A visitor who is not signed in, on the public overview: only 概况 in the sidebar and a 登录 button; no tab bar on phones. */
+export function GuestShell() {
+  return (
+    <div className="min-h-dvh lg:flex">
+      <nav aria-label="主导航" className="sticky top-0 hidden h-dvh w-[232px] shrink-0 flex-col gap-1 bg-card px-3 py-6 shadow-[1px_0_0_var(--border)] lg:flex">
+        <div className="mb-5 flex h-10 items-center gap-2.5 px-2">
+          <Logo size={36} />
+          <span className="text-base font-bold tracking-[-0.2px]">PlateRelay</span>
+        </div>
+        <NavLink to="/" aria-current="page" className="flex h-10 items-center gap-3 rounded-[10px] bg-secondary px-3 text-sm font-semibold text-foreground">
+          <LayoutGrid className="size-5" aria-hidden="true" />
+          概况
+        </NavLink>
+        <Button asChild className="mt-auto">
+          <Link to="/login">登录</Link>
+        </Button>
+      </nav>
+      <main className="min-w-0 flex-1 px-4 pt-5 pb-[max(32px,env(safe-area-inset-bottom))] lg:px-10 lg:pt-7 lg:pb-10">
+        <div className="mx-auto flex max-w-[1040px] flex-col gap-6">
+          <OverviewPage />
+        </div>
+      </main>
     </div>
   );
 }
