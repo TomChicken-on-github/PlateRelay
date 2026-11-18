@@ -1,5 +1,5 @@
 import { createColumnHelper, flexRender, getCoreRowModel, getFilteredRowModel, useReactTable } from "@tanstack/react-table";
-import { QrCode, Search, X } from "lucide-react";
+import { Package, QrCode, Search, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router";
 import { OrderThumb } from "@/components/order-thumb";
@@ -53,16 +53,18 @@ export function OrdersPage() {
         title="我的订单"
         actions={
           <>
-            <div className="hidden lg:block">{searchField}</div>
-            <button
-              type="button"
-              aria-label="搜索订单"
-              aria-expanded={searching}
-              onClick={() => (setSearching(!searching), setQuery(""))}
-              className="grid size-10 place-items-center rounded-full bg-card outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 lg:hidden"
-            >
-              {searching ? <X className="size-5" /> : <Search className="size-5" />}
-            </button>
+            {items.length > 0 && <div className="hidden lg:block">{searchField}</div>}
+            {items.length > 0 && (
+              <button
+                type="button"
+                aria-label="搜索订单"
+                aria-expanded={searching}
+                onClick={() => (setSearching(!searching), setQuery(""))}
+                className="grid size-10 place-items-center rounded-full bg-card outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 lg:hidden"
+              >
+                {searching ? <X className="size-5" /> : <Search className="size-5" />}
+              </button>
+            )}
             <NotificationBell />
           </>
         }
@@ -71,6 +73,14 @@ export function OrdersPage() {
 
       {orders.isPending ? (
         <Skeleton className="h-[320px] rounded-2xl bg-card" />
+      ) : items.length === 0 ? (
+        <div className="flex h-[420px] flex-col items-center justify-center gap-3 text-muted-foreground lg:h-[480px] lg:rounded-2xl lg:bg-card">
+          <Package className="size-10 text-faint" strokeWidth={1.75} aria-hidden="true" />
+          <span className="text-[15px] leading-[22px]">暂无订单</span>
+          <Button asChild>
+            <Link to="/submit">提交文件</Link>
+          </Button>
+        </div>
       ) : (
         <>
           <Section title="进行中" count={active.length} rows={active} onPickup={setPickup} />

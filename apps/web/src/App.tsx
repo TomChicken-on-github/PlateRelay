@@ -10,6 +10,7 @@ import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
 import { OverviewPage } from "./pages/overview/overview-page";
 import { MePage } from "./pages/me/me-page";
+import { LoginMethodsPage, NicknamePage, PasswordPage } from "./pages/me/account-forms";
 import { ProfilePage } from "./pages/me/profile-page";
 import { OrderDetailPage } from "./pages/order/order-detail-page";
 import { OrdersPage } from "./pages/orders/orders-page";
@@ -51,6 +52,9 @@ const router = createBrowserRouter([
       { path: "/orders/:id", element: <OrderDetailPage /> },
       { path: "/me", element: <MePage /> },
       { path: "/me/profile", element: <ProfilePage /> },
+      { path: "/me/nickname", element: <NicknamePage /> },
+      { path: "/me/password", element: <PasswordPage /> },
+      { path: "/me/login-methods", element: <LoginMethodsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },

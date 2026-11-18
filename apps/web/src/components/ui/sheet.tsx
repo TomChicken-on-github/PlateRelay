@@ -34,6 +34,28 @@ export function Sheet({ open, onOpenChange, title, sub, children, footer }: { op
   );
 }
 
+/** A centred desktop dialog for a short form: title, fields, then 取消 and the action aligned right. */
+export function Modal({ open, onOpenChange, title, width = 400, children, footer }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; width?: 400 | 440; children: ReactNode; footer: ReactNode }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className={overlay} />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className={cn(
+            "fixed top-1/2 left-1/2 z-50 flex max-h-[92dvh] w-[calc(100%-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-5 overflow-y-auto rounded-[20px] bg-card px-8 py-7 text-card-foreground shadow-[0_20px_50px_rgb(0_0_0/0.25)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+            width === 440 ? "max-w-[440px]" : "max-w-[400px]",
+          )}
+        >
+          <Dialog.Title className="m-0 text-lg leading-[26px] font-bold">{title}</Dialog.Title>
+          {children}
+          <div className="mt-1 flex justify-end gap-2">{footer}</div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 /** A small centred confirmation over everything else, for steps that cannot be undone. */
 export function Confirm({ open, onOpenChange, title, children, footer }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; children: ReactNode; footer: ReactNode }) {
   return (

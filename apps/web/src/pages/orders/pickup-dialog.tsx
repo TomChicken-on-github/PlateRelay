@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { Clock, RotateCw, X } from "lucide-react";
+import { Check, Clock, Copy, RotateCw, X } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { QrCode } from "@/components/qr-code";
 import { Button } from "@/components/ui/button";
 import { client, errorText, idem, unwrap } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,8 +49,8 @@ export function PickupDialog({ orderId, name, slot, open, onOpenChange }: { orde
             {slot && <span className="text-[13px] text-muted-foreground">存放于 {slot}</span>}
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl bg-white p-4 shadow-[inset_0_0_0_1px_var(--border)]">
-            {issue.data ? <QrCode text={issue.data.code} className={cn(expired && "blur-[5px]")} /> : <div className="size-[208px]" />}
+          <div className="relative overflow-hidden rounded-2xl bg-white shadow-[inset_0_0_0_1px_var(--border)]">
+            {issue.data ? <QrCode text={issue.data.code} className={cn(expired && "blur-[5px]")} /> : <div className="size-[232px]" />}
             {(expired || issue.isError) && (
               <div className="absolute inset-0 grid place-items-center bg-white/35">
                 <button
@@ -65,9 +66,7 @@ export function PickupDialog({ orderId, name, slot, open, onOpenChange }: { orde
             )}
           </div>
 
-          <span className={cn("font-mono text-[28px] leading-[34px] font-semibold tracking-[3px]", expired ? "text-faint line-through" : "text-foreground", !issue.data && "invisible")}>
-            {issue.data?.code ?? "0000-0000"}
-          </span>
+          <CopyCode code={issue.data?.code} expired={expired} />
           <span className={cn("inline-flex items-center gap-1.5 text-[13px]", expired || issue.isError ? "text-alert" : "text-muted-foreground")}>
             <Clock className="size-3.5" aria-hidden="true" />
             {issue.isError ? errorText(issue.error) : expired ? "已失效" : left != null ? `${Math.floor(left / 60)} 分 ${left % 60} 秒后失效` : "获取中"}
@@ -81,6 +80,48 @@ export function PickupDialog({ orderId, name, slot, open, onOpenChange }: { orde
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+/**
+ * The code as one button that copies it, in the same form the pickup counter accepts.
+ * The copy icon turns into a check for a moment. Once expired it is plain struck-through text.
+ */
+function CopyCode({ code, expired }: { code?: string; expired: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const text = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
+  useEffect(() => setCopied(false), [code]);
+  const mono = "font-mono text-2xl leading-8 font-semibold tracking-[2px]";
+  if (!code || expired) return <span className={cn("flex h-[52px] items-center", mono, "text-faint line-through", !code && "invisible")}>{code ? code : "0000-0000"}</span>;
+  const Icon = copied ? Check : Copy;
+  const copy = async (e: MouseEvent<HTMLButtonElement>) => {
+    if (await copyText(code, e.currentTarget.parentElement ?? undefined)) return setCopied(true);
+    /* no clipboard at all: select the code so a long-press or Ctrl+C still works */
+    const sel = window.getSelection();
+    if (sel && text.current) sel.selectAllChildren(text.current);
+  };
+  return (
+    <button
+      type="button"
+      aria-label={`复制取件码 ${code}`}
+      onClick={copy}
+      className="inline-flex h-[52px] items-center gap-3 rounded-[14px] bg-muted pr-2 pl-[18px] text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <span ref={text} className={cn(mono, "select-text")}>
+        {code}
+      </span>
+      <span aria-hidden="true" className="grid size-9 place-items-center rounded-[10px] border border-border bg-card">
+        <Icon className={cn("size-[18px]", copied ? "text-ok" : "text-muted-foreground")} />
+      </span>
+      <span className="sr-only" aria-live="polite">
+        {copied ? "已复制" : ""}
+      </span>
+    </button>
   );
 }
 
