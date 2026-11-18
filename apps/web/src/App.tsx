@@ -9,6 +9,7 @@ import { signOut, useSession } from "./lib/session";
 import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
 import { OverviewPage } from "./pages/overview/overview-page";
+import { OrderDetailPage } from "./pages/order/order-detail-page";
 import { OrdersPage } from "./pages/orders/orders-page";
 import { PlaceholderPage } from "./pages/placeholder/placeholder-page";
 import { SubmitPage } from "./pages/submit/submit-page";
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
       { path: "/", element: <OverviewPage /> },
       { path: "/submit", element: <SubmitPage /> },
       { path: "/orders", element: <OrdersPage /> },
+      { path: "/orders/:id", element: <OrderDetailPage /> },
       { path: "/me", element: <PlaceholderPage title="我的" /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

@@ -11,7 +11,11 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive: "bg-alert-surface text-alert hover:bg-alert-surface/80",
+        /* solid red: the confirm button of a step that cannot be undone */
+        danger: "bg-red-600 text-white hover:bg-red-600/90",
         outline: "bg-transparent shadow-[inset_0_0_0_1px_var(--input)] hover:bg-accent",
+        /* card-coloured with a hairline: secondary actions on a page (修改文件, 取消订单) */
+        card: "bg-card shadow-[inset_0_0_0_1px_var(--border)] hover:bg-accent",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent",
         link: "text-foreground underline-offset-4 hover:underline",
