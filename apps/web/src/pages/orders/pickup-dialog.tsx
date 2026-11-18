@@ -161,8 +161,8 @@ function Redeemed({ at }: { at: Date }) {
         transition={{ duration: 0.75, times: [0, 0.72, 0.86, 1] }}
       >
         <svg viewBox="0 0 120 120" className="size-[88px]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <motion.circle cx="60" cy="60" r="56" strokeWidth="6" transform="rotate(-90 60 60)" {...draw(0, 0.4)} />
-          <motion.path d="M38 61 L53 76 L83 46" strokeWidth="8" {...draw(0.38, 0.22)} />
+          <motion.circle cx="60" cy="60" r="54" strokeWidth="9" transform="rotate(-90 60 60)" {...draw(0, 0.4)} />
+          <motion.path d="M38 61 L53 76 L83 46" strokeWidth="9" {...draw(0.38, 0.22)} />
         </svg>
       </motion.div>
       <span role="status" className="text-[15px] leading-[22px] font-semibold text-ok">
