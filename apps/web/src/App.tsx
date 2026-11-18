@@ -9,9 +9,10 @@ import { signOut, useSession } from "./lib/session";
 import { LoginPage } from "./pages/auth/login-page";
 import { RegisterPage } from "./pages/auth/register-page";
 import { OverviewPage } from "./pages/overview/overview-page";
+import { MePage } from "./pages/me/me-page";
+import { ProfilePage } from "./pages/me/profile-page";
 import { OrderDetailPage } from "./pages/order/order-detail-page";
 import { OrdersPage } from "./pages/orders/orders-page";
-import { PlaceholderPage } from "./pages/placeholder/placeholder-page";
 import { SubmitPage } from "./pages/submit/submit-page";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
@@ -48,7 +49,8 @@ const router = createBrowserRouter([
       { path: "/submit", element: <SubmitPage /> },
       { path: "/orders", element: <OrdersPage /> },
       { path: "/orders/:id", element: <OrderDetailPage /> },
-      { path: "/me", element: <PlaceholderPage title="我的" /> },
+      { path: "/me", element: <MePage /> },
+      { path: "/me/profile", element: <ProfilePage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
