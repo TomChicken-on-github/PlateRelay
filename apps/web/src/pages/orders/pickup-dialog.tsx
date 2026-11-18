@@ -1,11 +1,14 @@
 import { useMutation } from "@tanstack/react-query";
 import { Check, Clock, Copy, RotateCw, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Dialog } from "radix-ui";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { QrCode } from "@/components/qr-code";
 import { Button } from "@/components/ui/button";
 import { client, errorText, idem, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { clock } from "@/lib/format";
+import { useOrder } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,7 +25,19 @@ export function PickupDialog({ orderId, name, slot, open, onOpenChange }: { orde
     else reset();
   }, [open, mutate, reset]);
 
-  const now = useNow(open);
+  /* the counter scanning the code shows up here as a live update; only then is the success mark played */
+  const order = useOrder(open ? orderId : undefined).data;
+  const [redeemedAt, setRedeemedAt] = useState<Date | null>(null);
+  const redeemed = open && !!issue.data && order?.status === "COMPLETED";
+  useEffect(() => {
+    if (!open) return setRedeemedAt(null);
+    if (redeemed && !redeemedAt) {
+      setRedeemedAt(new Date());
+      navigator.vibrate?.(30);
+    }
+  }, [open, redeemed, redeemedAt]);
+
+  const now = useNow(open && !redeemedAt);
   const left = issue.data ? Math.max(0, Math.round((new Date(issue.data.expiresAt).getTime() - now) / 1000)) : null;
   const expired = left === 0;
 
@@ -46,31 +61,39 @@ export function PickupDialog({ orderId, name, slot, open, onOpenChange }: { orde
           </Dialog.Close>
           <div className="flex flex-col items-center gap-1 pt-1">
             <Dialog.Title className="m-0 text-lg leading-[26px] font-bold">{name}</Dialog.Title>
-            {slot && <span className="text-[13px] text-muted-foreground">存放于 {slot}</span>}
+            {slot && !redeemedAt && <span className="text-[13px] text-muted-foreground">存放于 {slot}</span>}
           </div>
 
-          <div className="relative overflow-hidden rounded-2xl bg-white shadow-[inset_0_0_0_1px_var(--border)]">
-            {issue.data ? <QrCode text={issue.data.code} className={cn(expired && "blur-[5px]")} /> : <div className="size-[232px]" />}
-            {(expired || issue.isError) && (
-              <div className="absolute inset-0 grid place-items-center bg-white/35">
-                <button
-                  type="button"
-                  aria-label="重新获取"
-                  disabled={issue.isPending}
-                  onClick={() => mutate()}
-                  className="grid size-14 place-items-center rounded-full bg-neutral-900 text-neutral-50 shadow-[0_4px_12px_rgb(0_0_0/0.2)] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                  <RotateCw className={cn("size-6", issue.isPending && "animate-spin")} aria-hidden="true" />
-                </button>
+          <AnimatePresence mode="wait" initial={false}>
+            {redeemedAt ? (
+              <Redeemed key="done" at={redeemedAt} />
+            ) : (
+              <motion.div key="code" exit={{ opacity: 0, scale: 0.94 }} transition={{ duration: 0.15 }} className="flex flex-col items-center gap-4">
+              <div className="relative overflow-hidden rounded-2xl bg-white shadow-[inset_0_0_0_1px_var(--border)]">
+                {issue.data ? <QrCode text={issue.data.code} className={cn(expired && "blur-[5px]")} /> : <div className="size-[232px]" />}
+                {(expired || issue.isError) && (
+                  <div className="absolute inset-0 grid place-items-center bg-white/35">
+                    <button
+                      type="button"
+                      aria-label="重新获取"
+                      disabled={issue.isPending}
+                      onClick={() => mutate()}
+                      className="grid size-14 place-items-center rounded-full bg-neutral-900 text-neutral-50 shadow-[0_4px_12px_rgb(0_0_0/0.2)] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      <RotateCw className={cn("size-6", issue.isPending && "animate-spin")} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <CopyCode code={issue.data?.code} expired={expired} />
-          <span className={cn("inline-flex items-center gap-1.5 text-[13px]", expired || issue.isError ? "text-alert" : "text-muted-foreground")}>
-            <Clock className="size-3.5" aria-hidden="true" />
-            {issue.isError ? errorText(issue.error) : expired ? "已失效" : left != null ? `${Math.floor(left / 60)} 分 ${left % 60} 秒后失效` : "获取中"}
-          </span>
+              <CopyCode code={issue.data?.code} expired={expired} />
+              <span className={cn("inline-flex items-center gap-1.5 text-[13px]", expired || issue.isError ? "text-alert" : "text-muted-foreground")}>
+                <Clock className="size-3.5" aria-hidden="true" />
+                {issue.isError ? errorText(issue.error) : expired ? "已失效" : left != null ? `${Math.floor(left / 60)} 分 ${left % 60} 秒后失效` : "获取中"}
+              </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <Dialog.Close asChild>
             <Button variant="secondary" size="lg" className="mt-1 w-full lg:hidden">
@@ -120,6 +143,32 @@ function CopyCode({ code, expired }: { code?: string; expired: boolean }) {
         {copied ? "已复制" : ""}
       </span>
     </button>
+  );
+}
+
+/** 已取件: a green ring drawn clockwise, then a check, then a small bounce. Reduced motion shows the end state. */
+function Redeemed({ at }: { at: Date }) {
+  const still = useReducedMotion();
+  const draw = (delay: number, duration: number) => still
+      ? { initial: false as const }
+      : /* hidden until it starts: a round cap at zero length would show as a dot */
+        { initial: { pathLength: 0, opacity: 0 }, animate: { pathLength: 1, opacity: 1 }, transition: { pathLength: { delay, duration, ease: "easeOut" as const }, opacity: { delay, duration: 0.01 } } };
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <motion.div
+        className="grid h-[136px] w-full place-items-center text-ok"
+        animate={still ? undefined : { scale: [1, 1, 1.06, 1] }}
+        transition={{ duration: 0.75, times: [0, 0.72, 0.86, 1] }}
+      >
+        <svg viewBox="0 0 120 120" className="size-[88px]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <motion.circle cx="60" cy="60" r="56" strokeWidth="6" transform="rotate(-90 60 60)" {...draw(0, 0.4)} />
+          <motion.path d="M38 61 L53 76 L83 46" strokeWidth="8" {...draw(0.38, 0.22)} />
+        </svg>
+      </motion.div>
+      <span role="status" className="text-[15px] leading-[22px] font-semibold text-ok">
+        已取件 · {clock(at)}
+      </span>
+    </div>
   );
 }
 
