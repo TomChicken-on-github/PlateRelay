@@ -10,7 +10,7 @@
 | IF-CAP | 人机验证 | 面板 | 默认内置图形验证码（F-ACC-02） |
 | IF-SMS | 短信 | 面板 | 只发验证码：注册、找回密码（F-NTF-01） |
 | IF-NTF | 通知渠道 | 面板 | 邮件、飞书；站内通知不走插件，必有 |
-| IF-OIDC | 外部登录 | 面板 | 通用 OIDC |
+| IF-OIDC | 外部登录 | 面板 | 通用 OIDC、通用 OAuth2（内置飞书预设） |
 | IF-POL | 排队与派单策略 | 面板 | 每个策略一个默认实现（NG-06） |
 
 ## 1. 打印机适配器（IF-ADP）
@@ -264,7 +264,14 @@ interface NotificationChannel {
 
 ## 7. 外部登录（IF-OIDC）
 
-只做通用 OIDC（授权码 + PKCE）。每个提供方的配置：`id`、`displayName`、`issuer`、`clientId`、`clientSecret`（环境变量）、`scopes`、是否允许用它注册新账户。按 `issuer + subject` 绑定账户（E-EXTID），不按邮箱自动合并。
+两种类型（Q464）：
+
+- **通用 OIDC**（授权码 + PKCE）：`issuer`、`scopes`，端点从 discovery 读。
+- **通用 OAuth2**：给不走 OIDC 的平台用。配置 `authorizeUrl`、`tokenUrl`、`userinfoUrl`、`scopes`，以及从 userinfo 取字段的映射：`id`（必填）、`name`、`email`、`avatar`。内置预设（v1 有飞书），选预设后只需填 `clientId`、`clientSecret`。
+
+每个提供方共有的配置：`id`、`displayName`、`clientId`、`clientSecret`（环境变量）、`logo`（Q463）、是否允许用它注册新账户、是否必须绑定（R-ACC-08）。`logo` 是一张图片，预设自带；没配时登录按钮显示 `displayName` 的首字，不用通用的登录图标。
+
+按 `issuer + subject` 绑定账户（E-EXTID），不按邮箱自动合并。登录、绑定（R-ACC-06）走同一个授权流程，回调时按 `state` 区分是登录还是给当前用户绑定。
 
 ## 8. 排队与派单策略（IF-POL）
 

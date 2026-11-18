@@ -70,7 +70,7 @@
 | 编号 | 表 | 一句话 |
 | --- | --- | --- |
 | E-USER | `users` | 本地账户，一个角色 |
-| E-EXTID | `external_identities` | 外部登录（OIDC）绑定 |
+| E-EXTID | `external_identities` | 外部登录（OIDC / OAuth2）绑定 |
 | E-SESS | `sessions` | 浏览器会话 |
 | E-INV | `invite_codes` | 邀请码 |
 | E-OTP | `verification_codes` | 短信 / 邮件验证码 |
@@ -101,6 +101,8 @@
 | E-TL | `timelapses` | 延时摄影 |
 | E-IDEM | `idempotency_keys` | 幂等记录 |
 | E-ARC | `archives` | 归档本期的记录 |
+| E-ANN | `announcements` | 公告（文档 1 §5.15） |
+| E-ANND | `announcement_dismissals` | 谁关掉了哪条公告 |
 
 不建表的东西：
 
@@ -126,6 +128,7 @@
 | `avatar_key` | text? | |
 | `locale` | text | `zh-CN` / `en`，默认跟系统设置 |
 | `disabled_at` | timestamptz? | 停用后会话全部作废 |
+| `terms_accepted_at` | timestamptz? | 注册时同意用户协议和隐私政策的时间（R-ACC-09，Q468）；当时两份都为空则为空 |
 | `version` | int | E-GEN-04 |
 | `created_at` | timestamptz | |
 
@@ -133,7 +136,7 @@
 
 ### E-EXTID `external_identities`
 
-`id`、`user_id`、`issuer`、`subject`、`created_at`。按 `issuer + subject` 唯一，不按邮箱匹配。
+`id`、`user_id`、`provider_id`、`issuer`、`subject`、`account_label?`、`created_at`。按 `issuer + subject` 唯一，不按邮箱匹配。OIDC 的 `issuer` 是提供方的 issuer；通用 OAuth2 没有 issuer，存 `oauth2:` 加预设或提供方的固定标识（如 `oauth2:feishu`），提供方改名不影响绑定（Q464）。`account_label` 是登录方式页显示的对方账户名，每次登录时按提供方返回的名字或邮箱更新。解绑删行并记审计；唯一的登录方式不能删（R-ACC-07），必须绑定的提供方不能删（R-ACC-08）。
 
 ### E-SESS `sessions`
 
@@ -359,6 +362,7 @@
 | `outcome?` | `job_outcome`，`phase = ENDED` 时有值。这个任务上有停止命令且打印机报告没开打就停下 → `STOPPED_BEFORE_START`，优先于开打失败的原因（Q214）。"开打可能没到"时现场人员发的停止、传文件时被停（daemon 回 `beforeStart: true`）也走这条（R-CMD-04、MSG-CMD-START）。daemon 报传输失败或 `printer_busy` → `SEND_FAILED`。结束后不再改，同一个 jobRef 再跑起来按外部任务处理（R-PRT-11，Q393） |
 | `pause_reason?` | `pause_reason`，`phase = PAUSED` 时有值（R-PRT-03） |
 | `paused_ms` | 暂停累计 |
+| `end_progress?` | 0–100，任务结束时打印机最后报的进度；`phase = ENDED` 时写，之后不改。槽位扣减本来就用它（R-DSP-17），存下来让以后能算失败和中途停止的用量（Q473） |
 | `skipped_parts` | int[]，已跳过的零件 ID，以打印机上报为准（R-SKP-04）；重打是新任务，从空开始（R-SKP-07） |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 | `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
@@ -417,6 +421,7 @@
 - 取件码只在签发时返回一次明文；要再看就重新签发，新码作废旧码（R-PCK-04）。
 - 同一订单同时最多一个没作废、没核销的码：签发时在同一个事务里作废旧码。
 - 码的格式（Q180）：前缀 `PR1-` + 8 位 Crockford Base32（去掉易混字符），按 `PR1-XXXX-XXXX` 显示，二维码里是同一个字符串。
+- 二维码由客户端按签发返回的明文生成，内容就是这个码，不是链接，不加签名或加密（防伪靠服务端只认存过哈希的码）。纠错等级 Q、字母数字模式，这个长度是最小的 21×21（Q476）。
 
 ### E-REC `order_records`
 
@@ -496,6 +501,14 @@
 ### E-NPREF `notification_prefs`
 
 `user_id`、`event`、`channel`、`enabled`，主键 `(user_id, event, channel)`。没有行时用系统默认（CFG-NTF-01）；"驳回"和"可取件"的站内通知不能关（R-NTF-02），写入时校验。
+
+### E-ANN `announcements`
+
+`id`、`body_md`、`expires_at?`、`created_by`、`created_at`、`updated_at`、`withdrawn_at?`。有效公告 = 没撤下、没过期的最新一条；同一时间最多一条有效（R-ANN-01），发布新的时在同一个事务里把旧的标为撤下。`body_md` 按 R-ANN-03 的子集渲染，服务端不存渲染结果。
+
+### E-ANND `announcement_dismissals`
+
+`user_id`、`announcement_id`、`at`，主键 `(user_id, announcement_id)`。修改公告正文不算新公告，关掉过的人不再看到；要让所有人重新看到就发布一条新的（R-ANN-04）。
 
 ### E-AUD `audit_log`
 
