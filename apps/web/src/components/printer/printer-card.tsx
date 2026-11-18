@@ -1,10 +1,11 @@
 import { TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { UserAvatar } from "@/components/user-avatar";
 import { StatusPill } from "@/components/status-pill";
 import { ago, clock, duration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CameraView } from "./camera-view";
+import { LiveDialog } from "./live-dialog";
 import { type PrinterCardData, printerStatus, type Status, TONE } from "./status";
 import { BedIcon, ChamberIcon, NozzleIcon } from "./temp-icons";
 
@@ -22,6 +23,7 @@ export function PrinterCard({ printer: p, filament, className }: { printer: Prin
   const hero = heroOf(st, p);
   const alert = alertOf(st, p);
   const offline = st.key === "offline";
+  const [live, setLive] = useState(false);
   const quietTemps = st.key === "available" || st.key === "external" || st.key === "maintenance";
 
   return (
@@ -39,6 +41,7 @@ export function PrinterCard({ printer: p, filament, className }: { printer: Prin
             name={p.name}
             modelName={p.modelName}
             snapshotAt={offline || p.camera.stream === "none" ? null : p.camera.snapshotAt}
+            onLive={offline || p.camera.stream === "none" ? undefined : () => setLive(true)}
             className="self-center @max-[327px]:aspect-video"
           />
           <Temps temps={p.temps} quiet={quietTemps} />
@@ -66,6 +69,7 @@ export function PrinterCard({ printer: p, filament, className }: { printer: Prin
           {hero.context && <span className="text-xs leading-4 text-muted-foreground">{hero.context}</span>}
         </div>
       </div>
+      {live && <LiveDialog printerId={p.id} name={p.name} modelName={p.modelName} snapshotAt={p.camera.snapshotAt} open onOpenChange={setLive} />}
       {alert && (
         <div className="flex items-center gap-2 bg-alert-surface px-4 py-2.5 text-[13px] font-semibold text-alert">
           <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
