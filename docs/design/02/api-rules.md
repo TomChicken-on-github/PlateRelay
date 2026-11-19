@@ -39,8 +39,10 @@
 | `declineReprint` | `POST /orders/{orderId}/decline-reprint` | R-PRT-18、F-PRT-07 |  |
 | `revokeReprintDecline` | `DELETE /orders/{orderId}/decline-reprint` | R-PRT-19 |  |
 | `reconcileOrder` | `POST /orders/{orderId}/reconcile` | R-PRT-08 | S-ORD-T13、S-ORD-T14、S-ORD-T09 |
+| `printOrderOffline` | `POST /orders/{orderId}/offline-print` | R-DSP-19、R-DSP-02 | S-ORD-T08 |
 | `skipParts` | `POST /orders/{orderId}/skip-parts` | F-SUB-07、R-SKP-01、R-SKP-02、R-SKP-03、R-SKP-06 |  |
 | `storeOrder` | `POST /orders/{orderId}/store` | R-PCK-01、INV-12 | S-ORD-T16、S-PRN-T25 |
+| `failOrderOnStore` | `POST /orders/{orderId}/store-failed` | R-PCK-07、INV-12 | S-ORD-T23、S-PRN-T25 |
 | `disposeOrder` | `POST /orders/{orderId}/dispose` | R-PCK-05 | S-ORD-T21 |
 | `issuePickupCode` | `POST /orders/{orderId}/pickup-code` | R-PCK-04、API-RATE-05 |  |
 | `listTimelapses` | `GET /orders/{orderId}/timelapses` | R-VIS-06 |  |
@@ -60,6 +62,8 @@
 | `setPrinterStar` | `PUT /printers/{printerId}/star` |  |  |
 | `enterMaintenance` | `POST /printers/{printerId}/maintenance/enter` |  | S-PRN-T22 |
 | `exitMaintenance` | `POST /printers/{printerId}/maintenance/exit` |  | S-PRN-T23、S-PRN-T24 |
+| `takeOverPrinter` | `POST /printers/{printerId}/takeover` | R-PRT-29 | S-PRN-T22 |
+| `endTakeover` | `DELETE /printers/{printerId}/takeover` | R-PRT-29、R-PRT-07 |  |
 | `stopPrint` | `POST /printers/{printerId}/stop` | R-PRT-04、R-PRT-05、R-CMD-04、R-CMD-05、P-01 | S-ORD-T09、S-ORD-T13 |
 | `resolveError` | `POST /printers/{printerId}/errors/{errorId}/resolve` | R-PRT-14 |  |
 | `controlPrinter` | `POST /printers/{printerId}/control` | R-PRT-15、IF-ADP-05、INV-14、R-ARB-07、R-ARB-08、R-DSP-14 |  |

@@ -61,6 +61,7 @@
 | `process_node` | `SUBMIT` `REVIEW` `QUEUE` `PRINT` `STORE` `PICKUP` | E-REC（Q146） |
 | `job_phase` | `TRANSFERRING` `PREPARING` `PRINTING` `PAUSED` `ENDED` | E-JOB（文档 1 §4A，S-JOB-*） |
 | `job_outcome` | `SEND_FAILED` `START_FAILED` `STOPPED_BEFORE_START` `FAILED` `FINISHED` | E-JOB |
+| `job_kind` | `SYSTEM` `OFFLINE` | E-JOB（`OFFLINE` = 线下打印，文档 1 R-DSP-19，Q480） |
 | `command_status` | `QUEUED` `SENT` `ACCEPTED` `REJECTED` `EXPIRED` `FAILED` `DONE` | E-CMD（投递进度） |
 | `command_class` | `CONTROL` `SETPOINT` `READ` | E-CMD（R-CMD 控制命令 / 设定值命令 / 只读命令） |
 | `actor_type` | `USER` `SYSTEM` `DAEMON` `PRINTER` | E-REC、E-AUD |
@@ -197,6 +198,7 @@
 | `access_code_set_at` | timestamptz? | |
 | `starred` | bool | 概况页置顶 |
 | `disabled_at` | timestamptz? | 停用时间（R-PRT-20，Q229）。有值时概况页、派单都不显示，不在 MSG-ASSIGN 列表里；记录都保留，清空即重新启用 |
+| `taken_over_at`、`taken_over_by`、`taken_over_reason` | timestamptz?、uuid?、text? | 手动接管（文档 1 R-PRT-29，Q483）。有值时挂 `OFFLINE` 原因，MSG-ASSIGN 里带 `takenOver: true`；概况页照常显示。恢复时清空 |
 | `version` | int | E-GEN-04；只管配置字段，状态字段走 E-GEN-05 |
 | `created_at` | timestamptz | |
 
@@ -342,6 +344,7 @@
 | --- | --- |
 | `id` | 也是发给 daemon 的任务标识 `jobRef`（MSG-CMD-START） |
 | `attempt` | 这个订单的第几次打印，从 1 开始；订单详情的"打印记录"显示"第 N 次" |
+| `kind` | `job_kind`。`OFFLINE` 的任务不是任何打印机的 `current_job_id`，不在 MSG-ASSIGN 里，没有 `start_command_id`、`mapping`、`bed_type`、`safety_limits`，打印机事件不落到它上面；`printer_id` 可空，有值也只作记录（文档 1 §4A 线下任务，Q480） |
 | `phase` | `job_phase`（文档 1 §4A.1） |
 | `phase_since` | |
 | `paused_from?` | `PREPARING` 或 `PRINTING`：只在 `phase = PAUSED` 时有值，恢复时回到它（文档 1 §4A，Q240） |
@@ -362,6 +365,7 @@
 | `skipped_parts` | int[]，已跳过的零件 ID，以打印机上报为准（R-SKP-04）；重打是新任务，从空开始（R-SKP-07） |
 | `end_photo_key?`、`end_photo_at?` | 结束照片（R-CAM-11）：打完、失败或停止时拍的一张，永久保留 |
 | `fail_reason?` | 失败原因：停止时选的原因，或打印机报的原因 |
+| `store_failed_at?`、`store_failed_by?`、`store_fail_reason?` | 入库时改判失败（文档 1 R-PCK-07，Q485）。`outcome` 不改，打印记录在打完旁边标"入库时改判失败" |
 
 约束：`phase = 'ENDED'` ⇔ `outcome` 不为空。
 

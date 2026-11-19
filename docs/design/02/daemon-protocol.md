@@ -86,7 +86,7 @@ daemon                                  面板
 | --- | --- |
 | MSG-HB-01 | 双方每 `heartbeatSeconds`（默认 15 秒，Q174）发 `ping`，对方回 `pong`。 |
 | MSG-HB-02 | 面板 3 个周期（45 秒）没收到任何消息，就认为 daemon 断了：它名下的每台打印机都挂异常原因 `OFFLINE`（S-RSN-OFFLINE），不论原来在什么状态（Q399）；当前任务和订单状态不动（R-ARB-12）。 |
-| MSG-HB-03 | daemon 连得上面板、但连不上某台打印机，用 `printer.event { kind: "connection.down" }` 报，面板按同样的规则处理那一台（S-RSN-OFFLINE）。 |
+| MSG-HB-03 | daemon 连得上面板、但连不上某台打印机，用 `printer.event { kind: "connection.down" }` 报，面板按同样的规则处理那一台（S-RSN-OFFLINE）。连接还在但太久没收到这台打印机的任何报文，也算连不上（Q484）：超时由适配器声明（IF-ADP），拓竹按约 1 秒一条整包，默认 30 秒，开发驱动时实测再定。报文恢复后 daemon 发 `connection.up` 和一份快照，面板按 MSG-RECON 对账。 |
 
 ## 7. daemon → 面板
 
@@ -200,6 +200,7 @@ daemon                                  面板
 - `currentJobRef` 是面板记的这台打印机的当前任务（没有为 null）；`cleanupJobRefs` 是已结束、但打印机上可能还留着文件（3mf、延时摄影）要收尾的任务。**是不是系统任务以面板为准**（Q228）。
 - `knownRunSeq` 是面板见过的这台打印机最大的 `runSeq`；daemon 丢了本地状态时从比它大的数重新开始（见 MSG-SNAPSHOT 的 `runSeq`）。面板还没见过时省略。
 - 停用的打印机（E-PRN `disabled_at`）不在列表里（R-PRT-20）。
+- 手动接管的打印机（E-PRN `taken_over_at`，R-PRT-29，Q483）照样在列表里，带 `takenOver: true`。daemon 断开它，不再收它的报文、不执行给它的命令；把这台打印机手里还没发开打的任务记为不再开打（和 `job.stop` 的不再开打记录一样）；**不删**本地清单、结束记录和发件箱。`takenOver` 变回 false 后照常重连，发快照对账。
 
 - 访问码是浏览器用 daemon 公钥加密的密文，面板解不开，只是转交（INV-07）。daemon 在内存里解密，不落盘、不进日志。
 - 列表里没有的打印机，daemon 断开它、删掉它的本地状态。
