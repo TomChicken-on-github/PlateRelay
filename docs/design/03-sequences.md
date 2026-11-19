@@ -280,7 +280,9 @@ sequenceDiagram
 | 4 | 协议版本不兼容 | 4426 断开，挂异常原因"daemon 需要升级" | MSG-VER-02 |
 | 4 | daemon 已被吊销 | 4403，不再重连 | MSG-AUTH-05 |
 | 7 | 事件缺号 | 等 10 秒，还没来就要快照对账 | MSG-ENV-06 |
-| 8 | 只有 daemon 连得上面板、连不上打印机 | connection.down 事件，按同样规则处理那一台 | MSG-HB-03 |
+| 8 | 只有 daemon 连得上面板、连不上打印机，或连着但太久没收到报文 | connection.down 事件，按同样规则处理那一台 | MSG-HB-03、Q484 |
+| — | 上报不可信（驱动出错） | 现场人员手动接管：挂 OFFLINE，daemon 断开这台；之后人判、线下打印、入库照常；恢复后按本图从重连开始对账 | R-PRT-29、Q483 |
+| — | 驱动或 daemon 修不好，要先打 | 现场人员下载文件，在机器上开打，订单上点线下打印；打印机把它当外部任务（在线）或等对账（离线）；结束由人三选一 | R-DSP-19、Q480 |
 | 7 | 断线时还没送达的命令 | 发件箱按同一 commandId 补投；daemon 按落盘的命令 ID 去重，过期的回 expired，同一条命令最多执行一次 | MSG-ENV-04、R-CMD-08 |
 | — | 打印机移到另一个 daemon（updatePrinter 改 daemonId），或 daemon 重装丢了本地清单 | 新 daemon 从 MSG-ASSIGN 拿到 currentJobRef / cleanupJobRefs；打印机上在打的任务或 `pr-<后 12 位>` 文件对得上就认作系统任务，收进自己的清单（之后按 INV-15 照常清理），不当外部任务 | MSG-JOBREF-02、Q228 |
 
@@ -325,6 +327,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | 11 | 哈希不对 | 面板不返回 201，daemon 不删原文件，下次重试 | F-PRT-10 |
 | 14 | 没勾"热床已清理" / 没照片 | 422 | R-PCK-01 |
+| 14 | 铲件时发现打坏了 | failOrderOnStore（失败原因、照片、热床已清理）：订单进失败（S-ORD-T23），打印机照样进可用，之后按 SEQ-09 重打 | R-PCK-07、Q485 |
 | 14 前 | 打印机进待清板超过 CFG-PRT-04（默认 10 分钟）还没入库或清板 | 提醒现场人员，之后每隔 CFG-PRT-04 再提醒，直到清板 | R-PRT-21、Q241 |
 | 18 | 码过期、作废、不存在 | 404，申请者重新签发 | R-PCK-03 |
 | 19 | 两个现场人员同时扫 | 后到的 409 `state_conflict` | INV-05 |
