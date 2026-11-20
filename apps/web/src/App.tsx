@@ -16,6 +16,7 @@ import { OrderDetailPage } from "./pages/order/order-detail-page";
 import { OrdersPage } from "./pages/orders/orders-page";
 import { ConsoleShell } from "./pages/console/console-shell";
 import { ConsoleOrders } from "./pages/console/orders";
+import { ConsolePickup } from "./pages/console/pickup";
 import { ConsoleOverview } from "./pages/console/overview";
 import { ConsoleReviewScreen } from "./pages/console/review";
 import { SubmitPage } from "./pages/submit/submit-page";
@@ -62,6 +63,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <ConsoleOverview /> },
       { path: "orders", element: <ConsoleOrders /> },
+      { path: "pickup", element: <ConsolePickup /> },
       { path: "review/:id?", element: <ConsoleReviewScreen /> },
       { path: "*", element: <Navigate to="/console" replace /> },
     ],
