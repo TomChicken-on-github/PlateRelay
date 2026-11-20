@@ -165,9 +165,9 @@ export function ConsolePage({ title, sub, actions, children, className }: { titl
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col gap-5", className)}>
       <header className="flex min-h-11 shrink-0 items-center gap-3">
-        <h1 className="m-0 text-[28px] leading-9 font-bold tracking-[-0.5px]">{title}</h1>
+        <h1 className="m-0 shrink-0 text-[28px] leading-9 font-bold tracking-[-0.5px]">{title}</h1>
         {sub && <span className="text-sm text-muted-foreground">{sub}</span>}
-        {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}
+        {actions && <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2">{actions}</div>}
       </header>
       {children}
     </div>
