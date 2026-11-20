@@ -13,6 +13,7 @@ import { orderName, orderNo } from "@/lib/order-status";
 import { type OrderSummary, type PrinterDetail, usePrinters, useQueue } from "@/lib/queries";
 import { useDesktop } from "@/lib/use-desktop";
 import { cn } from "@/lib/utils";
+import { trayName, unitName } from "./printer-dialogs";
 
 type Tray = Schemas["Tray"];
 type Check = Schemas["MappingCheck"];
@@ -126,9 +127,6 @@ function PrinterRow({ p, suggested }: { p: PrinterDetail; suggested: boolean }) 
   );
 }
 
-function trayName(t: Tray) {
-  return t.unit < 0 ? "外挂" : t.label;
-}
 
 /** The dispatch dialog: pick the order and printer, check the filament mapping, send. */
 export function PrintDialog({ open, onOpenChange, orderId }: { open: boolean; onOpenChange: (open: boolean) => void; orderId?: string }) {
@@ -494,7 +492,7 @@ function TrayPicker({ open, onOpenChange, f, trays, current, onPick }: { open: b
           </div>
           {[...groups].map(([unit, ts]) => (
             <div key={unit} className="flex flex-col gap-2">
-              <span className="text-xs font-semibold text-muted-foreground">{unit < 0 ? "外挂" : `AMS ${ts[0].label.replace(/\d+$/, "") || unit + 1}`}</span>
+              <span className="text-xs font-semibold text-muted-foreground">{unitName(unit)}</span>
               <div className="grid grid-cols-2 gap-2">
                 {ts.map((t) => {
                   const empty = !t.material;

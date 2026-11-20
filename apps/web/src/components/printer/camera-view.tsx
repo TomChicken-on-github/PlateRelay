@@ -10,7 +10,7 @@ const OPEN_FRAME = /\bA1\b/i;
  * The printer's latest snapshot, or a line drawing of the machine when there is no picture
  * (no camera, offline, or the snapshot failed to load).
  */
-export function CameraView({ printerId, name, modelName, snapshotAt, onLive, className }: { printerId: string; name: string; modelName?: string | null; snapshotAt: string | null; onLive?: () => void; className?: string }) {
+export function CameraView({ printerId, name, modelName, snapshotAt, onLive, always, className }: { printerId: string; name: string; modelName?: string | null; snapshotAt: string | null; onLive?: () => void; always?: boolean; className?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   if (snapshotAt && broken !== snapshotAt)
     return (
@@ -25,7 +25,7 @@ export function CameraView({ printerId, name, modelName, snapshotAt, onLive, cla
         <time dateTime={snapshotAt} className="absolute bottom-1.5 left-1.5 rounded-full bg-black/55 px-1.5 font-mono text-[11px] leading-[18px] text-white">
           {clockSeconds(snapshotAt)}
         </time>
-        {onLive && <LiveButton name={name} onClick={onLive} />}
+        {onLive && <LiveButton name={name} onClick={onLive} always={always} />}
       </div>
     );
   const open = OPEN_FRAME.test(modelName ?? "");
@@ -33,19 +33,19 @@ export function CameraView({ printerId, name, modelName, snapshotAt, onLive, cla
     <div role="img" aria-label={`${name} 暂无画面`} className={cn("group relative grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-xl bg-muted px-1 pt-1.5 text-faint", className)}>
       {open ? <OpenFrame /> : <ClosedCase />}
       <CameraOff className="absolute right-2 bottom-[7px] size-3.5" aria-hidden="true" />
-      {onLive && <LiveButton name={name} onClick={onLive} />}
+      {onLive && <LiveButton name={name} onClick={onLive} always={always} />}
     </div>
   );
 }
 
 /** Desktop only: hovering the picture dims it and offers a play button that opens the live view. */
-function LiveButton({ name, onClick }: { name: string; onClick: () => void }) {
+function LiveButton({ name, onClick, always }: { name: string; onClick: () => void; always?: boolean }) {
   return (
     <button
       type="button"
       aria-label={`看 ${name} 实况`}
       onClick={onClick}
-      className="absolute inset-0 z-10 hidden place-items-center bg-black/30 opacity-0 outline-none transition-opacity group-hover:opacity-100 focus-visible:opacity-100 lg:grid"
+      className={cn("absolute inset-0 z-10 place-items-center outline-none", always ? "grid bg-black/20" : "hidden bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 lg:grid")}
     >
       <span className="grid size-10 place-items-center rounded-full bg-white text-neutral-900 shadow-[0_2px_8px_rgb(0_0_0/0.25)]">
         <Play className="ml-0.5 size-[18px] fill-current" aria-hidden="true" />
