@@ -1,63 +1,101 @@
+import { type components, createApiClient } from "@platerelay/shared/api";
+
+export type Schemas = components["schemas"];
+export type Problem = Schemas["Problem"];
+
 /*
- * Panel API client. The pages run on mock stores until built with VITE_API=http; then sign-in and the
- * pages wired so far (including audit) talk to apps/server. Errors from the server are {code, message, ...}.
+ * Typed client for the panel API. Every write carries a fresh Idempotency-Key, so a retried request is
+ * not applied twice. A 401 on anything but sign-in means the session ended: the app goes back to sign-in.
  */
-export const LIVE = import.meta.env.VITE_API === "http";
+export const client = createApiClient();
 
-export type ApiErr = { code: string; message: string };
-export type Res<T, E = ApiErr> = { ok: true; data: T } | { ok: false; error: E | { code: "network"; message: string } };
+let onSignedOut = () => {};
+export const setSignedOutHandler = (f: () => void) => void (onSignedOut = f);
 
-let onUnauthenticated = () => {};
-/** Called when the server says the session is gone, so the app can send the user to sign in. */
-export const setUnauthenticatedHandler = (f: () => void) => (onUnauthenticated = f);
+client.use({
+  onRequest({ request }) {
+    if (request.method !== "GET" && !request.headers.has("Idempotency-Key")) request.headers.set("Idempotency-Key", crypto.randomUUID());
+    return request;
+  },
+  onResponse({ request, response }) {
+    if (response.status === 401 && !new URL(request.url).pathname.endsWith("/auth/login")) onSignedOut();
+    return response;
+  },
+});
 
-/** `json` sends a JSON body; a FormData `body` goes as multipart. */
-export async function api<T, E = ApiErr>(url: string, init?: RequestInit & { json?: unknown }): Promise<Res<T, E>> {
-  const { json, ...rest } = init ?? {};
-  try {
-    const r = await fetch(url, {
-      credentials: "include",
-      ...rest,
-      ...(json === undefined ? {} : { body: JSON.stringify(json), headers: { "content-type": "application/json", ...rest.headers } }),
-    });
-    const body = await r.json().catch(() => null);
-    if (r.ok) return { ok: true, data: body as T };
-    if (body && typeof body.code === "string") {
-      if (r.status === 401 && body.code === "unauthenticated") onUnauthenticated();
-      return { ok: false, error: body as E };
-    }
-    return { ok: false, error: { code: "network", message: `服务器返回 ${r.status}` } };
-  } catch {
-    return { ok: false, error: { code: "network", message: "连不上面板服务器" } };
+/** Header params for a write: a fresh Idempotency-Key. */
+export const idem = () => ({ header: { "Idempotency-Key": crypto.randomUUID() } });
+
+/** Error thrown by `unwrap`: the server's problem, or a network failure. */
+export class ApiError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    readonly problem?: Problem,
+  ) {
+    super(problem?.detail ?? code);
   }
 }
 
+/** Turns an openapi-fetch result into its data, or throws an ApiError. */
+export async function unwrap<T>(call: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
+  let r: Awaited<typeof call>;
+  try {
+    r = await call;
+  } catch {
+    throw new ApiError("network", 0);
+  }
+  if (r.error !== undefined || !r.response.ok) {
+    const p = r.error as Problem | undefined;
+    throw new ApiError(typeof p?.code === "string" ? p.code : "http_" + r.response.status, r.response.status, p);
+  }
+  return r.data as T;
+}
+
+const MESSAGES: Record<string, string> = {
+  network: "连不上服务器",
+  bad_credentials: "用户名或密码错误",
+  rate_limited: "尝试次数过多，请稍后再试",
+  username_taken: "用户名已被使用",
+  forbidden: "没有权限",
+  validation_failed: "填写的内容有误",
+  unsupported_file: "只支持 .gcode.3mf 文件",
+  payload_too_large: "文件太大",
+  parse_busy: "正在解析的文件太多，请稍后再试",
+  captcha_required: "未提交的文件太多，请先提交或稍后再试",
+  version_conflict: "申请表刚刚更新，请检查后再提交",
+  file_expired: "文件已过期，请重新上传",
+};
+
+/** Chinese text for an error, by its code. */
+export function errorText(e: unknown): string {
+  if (e instanceof ApiError) return MESSAGES[e.code] ?? `出错了（${e.code}）`;
+  return "出错了";
+}
+
 /**
- * Multipart upload with byte progress (R-SUB-14). fetch cannot report upload progress, so this one call
- * uses XHR; responses and errors are handled the same way as `api`.
+ * Uploads a file with progress (fetch cannot report upload progress, so this uses XHR). `onSent` fires once
+ * every byte is out and the server is reading the file. Rejects with an ApiError; aborting rejects with code "aborted".
  */
-export function upload<T, E = ApiErr>(url: string, body: FormData, onProgress: (sent: number, total: number) => void): Promise<Res<T, E>> {
-  return new Promise((resolve) => {
-    const x = new XMLHttpRequest();
-    x.open("POST", url);
-    x.withCredentials = true;
-    x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded, e.total);
-    x.onerror = () => resolve({ ok: false, error: { code: "network", message: "连不上面板服务器" } });
-    x.onload = () => {
-      let data: unknown = null;
-      try {
-        data = JSON.parse(x.responseText);
-      } catch {
-        /* not JSON */
-      }
-      if (x.status >= 200 && x.status < 300) return resolve({ ok: true, data: data as T });
-      const b = data as { code?: unknown } | null;
-      if (b && typeof b.code === "string") {
-        if (x.status === 401 && b.code === "unauthenticated") onUnauthenticated();
-        return resolve({ ok: false, error: b as E });
-      }
-      resolve({ ok: false, error: { code: "network", message: `服务器返回 ${x.status}` } });
+export function uploadFile(file: File, { onProgress, onSent, signal }: { onProgress?: (fraction: number) => void; onSent?: () => void; signal?: AbortSignal }): Promise<Schemas["FileCheck"]> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/files");
+    xhr.setRequestHeader("Idempotency-Key", crypto.randomUUID());
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    xhr.upload.onload = () => onSent?.();
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.response);
+      if (xhr.status === 401) onSignedOut();
+      const p = xhr.response as Problem | null;
+      reject(new ApiError(typeof p?.code === "string" ? p.code : "http_" + xhr.status, xhr.status, p ?? undefined));
     };
-    x.send(body);
+    xhr.onerror = () => reject(new ApiError("network", 0));
+    xhr.onabort = () => reject(new ApiError("aborted", 0));
+    signal?.addEventListener("abort", () => xhr.abort());
+    const body = new FormData();
+    body.append("file", file);
+    xhr.send(body);
   });
 }

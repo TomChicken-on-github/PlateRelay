@@ -1,0 +1,206 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Every colour is a Tailwind palette colour (neutral for the surfaces, green / blue / amber / red for
+ * the status layers); components only use the semantic names below.
+ *
+ * Status layers, each with text, surface and dot:
+ *   ok    green  — idle, ready
+ *   busy  blue   — printing, preparing
+ *   wait  amber  — bed to clear, paused
+ *   idle  gray   — external use, maintenance, offline (offline uses a hollow dot)
+ *   alert red    — only for things that need someone to act
+ */
+:root {
+  --radius: 0.75rem;
+
+  --background: var(--color-neutral-100);
+  --foreground: var(--color-neutral-900);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-900);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-900);
+  --primary: var(--color-neutral-900);
+  --primary-foreground: var(--color-neutral-50);
+  --secondary: var(--color-neutral-100);
+  --secondary-foreground: var(--color-neutral-900);
+  --muted: var(--color-neutral-100);
+  --muted-foreground: var(--color-neutral-500);
+  --accent: var(--color-neutral-100);
+  --accent-foreground: var(--color-neutral-900);
+  --destructive: var(--color-red-600);
+  --border: var(--color-neutral-200);
+  --input: var(--color-neutral-300);
+  --ring: var(--color-neutral-400);
+
+  /* second-level text, and the faint text / dashed outlines */
+  --subtle-foreground: var(--color-neutral-700);
+  --faint: var(--color-neutral-400);
+  --track: var(--color-neutral-200);
+
+  --ok: var(--color-green-700);
+  --ok-surface: var(--color-green-50);
+  --ok-dot: var(--color-green-500);
+  --busy: var(--color-blue-700);
+  --busy-surface: var(--color-blue-50);
+  --busy-dot: var(--color-blue-500);
+  --wait: var(--color-amber-700);
+  --wait-surface: var(--color-amber-50);
+  --wait-dot: var(--color-amber-500);
+  --alert: var(--color-red-700);
+  --alert-surface: var(--color-red-50);
+  --alert-dot: var(--color-red-500);
+  --idle: var(--color-neutral-600);
+  --idle-surface: var(--color-neutral-100);
+  --idle-dot: var(--color-neutral-400);
+
+  --heat: var(--color-orange-500);
+  --cool: var(--color-cyan-500);
+}
+
+.dark {
+  --background: var(--color-neutral-950);
+  --foreground: var(--color-neutral-50);
+  --card: var(--color-neutral-900);
+  --card-foreground: var(--color-neutral-50);
+  --popover: var(--color-neutral-900);
+  --popover-foreground: var(--color-neutral-50);
+  --primary: var(--color-neutral-50);
+  --primary-foreground: var(--color-neutral-900);
+  --secondary: var(--color-neutral-800);
+  --secondary-foreground: var(--color-neutral-50);
+  --muted: var(--color-neutral-800);
+  --muted-foreground: var(--color-neutral-400);
+  --accent: var(--color-neutral-800);
+  --accent-foreground: var(--color-neutral-50);
+  --destructive: var(--color-red-400);
+  --border: var(--color-neutral-800);
+  --input: var(--color-neutral-700);
+  --ring: var(--color-neutral-500);
+
+  --subtle-foreground: var(--color-neutral-300);
+  --faint: var(--color-neutral-500);
+  --track: var(--color-neutral-800);
+
+  --ok: var(--color-green-400);
+  --ok-surface: color-mix(in oklab, var(--color-green-500) 15%, transparent);
+  --ok-dot: var(--color-green-400);
+  --busy: var(--color-blue-400);
+  --busy-surface: color-mix(in oklab, var(--color-blue-500) 16%, transparent);
+  --busy-dot: var(--color-blue-400);
+  --wait: var(--color-amber-400);
+  --wait-surface: color-mix(in oklab, var(--color-amber-500) 15%, transparent);
+  --wait-dot: var(--color-amber-400);
+  --alert: var(--color-red-400);
+  --alert-surface: color-mix(in oklab, var(--color-red-500) 16%, transparent);
+  --alert-dot: var(--color-red-400);
+  --idle: var(--color-neutral-400);
+  --idle-surface: var(--color-neutral-800);
+  --idle-dot: var(--color-neutral-500);
+
+  --heat: var(--color-orange-400);
+  --cool: var(--color-cyan-400);
+}
+
+@theme inline {
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  /* printer names, serial numbers, pickup codes */
+  --font-mono: "Maple Mono", ui-monospace, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-faint: var(--faint);
+  --color-track: var(--track);
+
+  --color-ok: var(--ok);
+  --color-ok-surface: var(--ok-surface);
+  --color-ok-dot: var(--ok-dot);
+  --color-busy: var(--busy);
+  --color-busy-surface: var(--busy-surface);
+  --color-busy-dot: var(--busy-dot);
+  --color-wait: var(--wait);
+  --color-wait-surface: var(--wait-surface);
+  --color-wait-dot: var(--wait-dot);
+  --color-alert: var(--alert);
+  --color-alert-surface: var(--alert-surface);
+  --color-alert-dot: var(--alert-dot);
+  --color-idle: var(--idle);
+  --color-idle-surface: var(--idle-surface);
+  --color-idle-dot: var(--idle-dot);
+
+  --color-heat: var(--heat);
+  --color-cool: var(--cool);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* "preparing" status dot */
+@keyframes breathe {
+  50% {
+    opacity: 0.3;
+  }
+}
+@utility animate-breathe {
+  animation: breathe 1.6s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+/* indeterminate progress bar: a third-width bar sliding across */
+@keyframes indeterminate {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 300% 0;
+  }
+}
+@utility animate-indeterminate {
+  animation: indeterminate 1.3s ease-in-out infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    translate: 100% 0;
+  }
+}
