@@ -13,10 +13,12 @@ const EVENTS: Record<string, (qc: QueryClient, data: unknown) => void> = {
     const id = (d as { id?: string })?.id;
     if (id) void qc.invalidateQueries({ queryKey: ["order", id] });
     void qc.invalidateQueries({ queryKey: ["overview"] });
+    void qc.invalidateQueries({ queryKey: ["todo"] });
   },
   "printer.updated": (qc) => {
     void qc.invalidateQueries({ queryKey: ["printers"] });
     void qc.invalidateQueries({ queryKey: ["overview"] });
+    void qc.invalidateQueries({ queryKey: ["todo"] });
   },
   "queue.changed": (qc) => {
     void qc.invalidateQueries({ queryKey: ["overview"] });

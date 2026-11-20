@@ -1,4 +1,4 @@
-import { LayoutGrid, Package, Upload, User } from "lucide-react";
+import { LayoutGrid, Package, Upload, User, Wrench } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { OverviewPage } from "@/pages/overview/overview-page";
 import { Button } from "./ui/button";
@@ -13,15 +13,8 @@ const MAIN = [
   { to: "/orders", label: "我的订单", icon: Package },
 ] as const;
 
-/* Staff and admin pages are still the old ones under /legacy; links open them as separate pages. */
-const LEGACY: { to: string; label: string; perms: string[] }[] = [
-  { to: "/legacy/todo", label: "待办", perms: ["order:store", "printer:operate", "order:dispatch"] },
-  { to: "/legacy/scan", label: "扫码核销", perms: ["order:redeem"] },
-  { to: "/legacy/review", label: "审核队列", perms: ["order:review"] },
-  { to: "/legacy/manage/orders", label: "订单管理", perms: ["order:view:any"] },
-  { to: "/legacy/manage/printers", label: "打印机管理", perms: ["printer:manage"] },
-  { to: "/legacy/settings", label: "系统设置", perms: ["settings:manage", "form:configure", "user:manage", "daemon:manage", "audit:view"] },
-];
+/* Anyone who works the floor or runs the event gets a link to the console. */
+const CONSOLE_PERMS = ["order:review", "order:view:any", "printer:operate", "order:redeem", "order:store", "order:dispatch"] as const;
 
 const isActive = (to: string, path: string) => (to === "/" ? path === "/" || path.startsWith("/printers/") : path === to || path.startsWith(to + "/"));
 
@@ -29,7 +22,7 @@ const isActive = (to: string, path: string) => (to === "/" ? path === "/" || pat
 export function AppShell() {
   const me = useMe();
   const { pathname } = useLocation();
-  const legacy = LEGACY.filter((l) => can(me, ...l.perms));
+  const staff = can(me, ...CONSOLE_PERMS);
 
   return (
     <div className="min-h-dvh lg:flex">
@@ -49,13 +42,12 @@ export function AppShell() {
             {label}
           </NavLink>
         ))}
-        {legacy.length > 0 && (
+        {staff && (
           <div className="mt-4 flex flex-col gap-1 border-t pt-4">
-            {legacy.map((l) => (
-              <a key={l.to} href={l.to} className="flex h-10 items-center rounded-[10px] px-3 text-sm font-medium text-subtle-foreground hover:bg-secondary/60">
-                {l.label}
-              </a>
-            ))}
+            <NavLink to="/console" className="flex h-10 items-center gap-3 rounded-[10px] px-3 text-sm font-medium text-subtle-foreground hover:bg-secondary/60">
+              <Wrench className="size-5" aria-hidden="true" />
+              控制台
+            </NavLink>
           </div>
         )}
         <NavLink to="/me" aria-current={pathname.startsWith("/me") ? "page" : undefined} className="mt-auto flex items-center gap-2.5 rounded-xl p-2 hover:bg-secondary/60 aria-[current=page]:bg-secondary">
@@ -73,8 +65,8 @@ export function AppShell() {
         </div>
       </main>
 
-      <nav aria-label="主导航" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 bg-card px-2 pt-2 pb-[max(8px,env(safe-area-inset-bottom))] shadow-[0_-1px_0_var(--border)] lg:hidden">
-        {[...MAIN, { to: "/me", label: "我的", icon: User }].map(({ to, label, icon: I }) => {
+      <nav aria-label="主导航" className={cn("fixed inset-x-0 bottom-0 z-40 grid bg-card px-2 pt-2 pb-[max(8px,env(safe-area-inset-bottom))] shadow-[0_-1px_0_var(--border)] lg:hidden", staff ? "grid-cols-5" : "grid-cols-4")}>
+        {[...MAIN, ...(staff ? [{ to: "/console", label: "控制台", icon: Wrench }] : []), { to: "/me", label: "我的", icon: User }].map(({ to, label, icon: I }) => {
           const active = isActive(to, pathname);
           return (
             <NavLink key={to} to={to} aria-current={active ? "page" : undefined} className={cn("flex flex-col items-center gap-1 py-1.5 text-[11px] text-muted-foreground", active ? "font-semibold text-foreground" : "font-medium")}>

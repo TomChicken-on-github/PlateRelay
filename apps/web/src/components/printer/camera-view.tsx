@@ -45,7 +45,7 @@ function LiveButton({ name, onClick }: { name: string; onClick: () => void }) {
       type="button"
       aria-label={`看 ${name} 实况`}
       onClick={onClick}
-      className="absolute inset-0 hidden place-items-center bg-black/30 opacity-0 outline-none transition-opacity group-hover:opacity-100 focus-visible:opacity-100 lg:grid"
+      className="absolute inset-0 z-10 hidden place-items-center bg-black/30 opacity-0 outline-none transition-opacity group-hover:opacity-100 focus-visible:opacity-100 lg:grid"
     >
       <span className="grid size-10 place-items-center rounded-full bg-white text-neutral-900 shadow-[0_2px_8px_rgb(0_0_0/0.25)]">
         <Play className="ml-0.5 size-[18px] fill-current" aria-hidden="true" />

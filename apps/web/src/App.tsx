@@ -14,6 +14,9 @@ import { LoginMethodsPage, NicknamePage, PasswordPage } from "./pages/me/account
 import { ProfilePage } from "./pages/me/profile-page";
 import { OrderDetailPage } from "./pages/order/order-detail-page";
 import { OrdersPage } from "./pages/orders/orders-page";
+import { ConsoleShell } from "./pages/console/console-shell";
+import { ConsoleOverview } from "./pages/console/overview";
+import { ConsoleReviewScreen } from "./pages/console/review";
 import { SubmitPage } from "./pages/submit/submit-page";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } } });
@@ -48,6 +51,19 @@ function SignedOut({ children }: { children: ReactNode }) {
 const router = createBrowserRouter([
   { path: "/login", element: <SignedOut><LoginPage /></SignedOut> },
   { path: "/register", element: <SignedOut><RegisterPage /></SignedOut> },
+  {
+    path: "/console",
+    element: (
+      <SignedIn>
+        <ConsoleShell />
+      </SignedIn>
+    ),
+    children: [
+      { index: true, element: <ConsoleOverview /> },
+      { path: "review/:id?", element: <ConsoleReviewScreen /> },
+      { path: "*", element: <Navigate to="/console" replace /> },
+    ],
+  },
   {
     element: (
       <SignedIn>

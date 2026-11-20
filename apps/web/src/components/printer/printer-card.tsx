@@ -1,5 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { Link } from "react-router";
 import { UserAvatar } from "@/components/user-avatar";
 import { StatusPill } from "@/components/status-pill";
 import { ago, clock, duration } from "@/lib/format";
@@ -17,7 +18,7 @@ import { BedIcon, ChamberIcon, NozzleIcon } from "./temp-icons";
  * data carries no trays yet, so nothing is passed today and the card shows camera + temperatures,
  * the camera at most 200 wide with the temperatures right beside it.
  */
-export function PrinterCard({ printer: p, filament, className }: { printer: PrinterCardData; filament?: ReactNode; className?: string }) {
+export function PrinterCard({ printer: p, filament, className, to }: { printer: PrinterCardData; filament?: ReactNode; className?: string; to?: string }) {
   const st = printerStatus(p);
   const job = p.job;
   const hero = heroOf(st, p);
@@ -27,10 +28,16 @@ export function PrinterCard({ printer: p, filament, className }: { printer: Prin
   const quietTemps = st.key === "available" || st.key === "external" || st.key === "maintenance";
 
   return (
-    <article className={cn("@container flex flex-col overflow-hidden rounded-2xl bg-card", offline && "opacity-55", className)}>
+    <article className={cn("@container relative flex flex-col overflow-hidden rounded-2xl bg-card", offline && "opacity-55", className)}>
       <div className="flex flex-col gap-3.5 p-4">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[15px] font-semibold">{p.name}</span>
+          {to ? (
+            <Link to={to} className="font-mono text-[15px] font-semibold text-inherit no-underline after:absolute after:inset-0 after:content-['']">
+              {p.name}
+            </Link>
+          ) : (
+            <span className="font-mono text-[15px] font-semibold">{p.name}</span>
+          )}
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{p.modelName}</span>
           <StatusPill tone={st.tone} label={st.label} dot={st.dot} />
         </div>

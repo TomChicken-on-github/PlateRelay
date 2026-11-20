@@ -2,6 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useDesktop } from "@/lib/use-desktop";
 import { cn } from "@/lib/utils";
 
 /*
@@ -132,17 +133,4 @@ export function NoticeDialog({ open, onOpenChange, onAgree }: { open: boolean; o
       </Dialog.Portal>
     </Dialog.Root>
   );
-}
-
-/** Whether the desktop layout (lg, 1024px and up) is showing. */
-function useDesktop() {
-  const q = "(min-width: 1024px)";
-  const [on, setOn] = useState(() => window.matchMedia(q).matches);
-  useEffect(() => {
-    const m = window.matchMedia(q);
-    const f = () => setOn(m.matches);
-    m.addEventListener("change", f);
-    return () => m.removeEventListener("change", f);
-  }, []);
-  return on;
 }
